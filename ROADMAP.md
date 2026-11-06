@@ -19,8 +19,8 @@ not met yet.
 
 Milestone 2 has started: `hangar run ios` builds or takes the app, leases a simulator, and
 loads JavaScript from the developer's own Metro through a tunnel in the broker. Fast Refresh
-shows an edit on the leased device within 503 ms (measured by hand; `bench/metro` is not
-written yet). The example app is `examples/hello`.
+shows an edit on the leased device 87 ms p50 and 163 ms p95 after the file is saved
+(`pnpm bench:metro`). The example app is `examples/hello`.
 
 Also done in milestone 2: device presets (push, permissions, location, appearance, an app's
 language) and the dev menu and reload, over the API, CLI and MCP; `hangar run maestro`, which
@@ -29,6 +29,11 @@ The run is coordinated by the client for now; the broker's runs API, the runs pa
 video and the GitHub Action are still to do. The leased app shows up as a React Native DevTools
 target on the developer's Metro, but a full DevTools session through the tunnel is not checked
 yet.
+
+`hangar up --install` writes a LaunchAgent (start at login, restart on exit) and points to
+automatic login for unattended reboots; `--url` sets the address Hangar gives out, such as a
+Tailscale HTTPS name. Not yet run end to end on the office Mac mini. A LaunchDaemon with nobody
+logged in is still untested.
 
 Spike results: idb's tree and taps work on Xcode 26.6 and iOS 26.5 when Hangar runs its own idb
 companion per device. A clone of a booted-once golden device boots in about 4 s, against 21 s

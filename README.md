@@ -29,6 +29,10 @@ not running, leases a simulator, installs and launches the app connected to your
 opens the live screen. Edit your code and Fast Refresh updates the leased device. Ctrl-C
 releases it. [examples/hello](examples/hello) is a tiny app to try it with.
 
+Guides: [your app on a leased simulator](docs/guides/expo.md),
+[Maestro from GitHub Actions](docs/guides/github-actions.md),
+[connecting an AI agent](docs/guides/agents.md).
+
 ## What works today
 
 - `hangar up` on a Mac with Xcode and idb: checks the machine, keeps a warm pool of simulators
@@ -51,8 +55,11 @@ releases it. [examples/hello](examples/hello) is a tiny app to try it with.
   and dark mode, an app's language. The React Native dev menu and reload (command-D and
   command-R) from the console, CLI and MCP.
 
-Not yet: running as a
-service that survives a reboot, recordings, metrics, a checked React Native DevTools session
+`hangar up --install` sets Hangar up as a LaunchAgent that starts at login and restarts if it
+stops; with automatic login it comes back after a reboot. Its plist is tested, but the install
+has not yet run end to end on a Mac mini.
+
+Not yet: recordings, metrics, a checked React Native DevTools session
 through a lease, the runs page and per-test video for Maestro, Android, more than one Mac, CI test runs. Only one Hangar can run on a Mac at a time.
 
 ## Numbers
@@ -67,7 +74,7 @@ are in [the design](docs/design.md#targets).
 | Capture to client | 8.9 ms p50, 19.9 ms p95 | not measured | |
 | Input to first changed frame | 86 ms p50, 339 ms p95 | 228 ms p50, 669 ms p95 | p95 under 80 ms |
 | Bandwidth during motion | 691 KB/s | 195 KB/s | |
-| Fast Refresh, save to visible on the leased device | under 503 ms (measured by hand) | | under 1 s |
+| Fast Refresh, save to first frame on the leased device (`bench:metro`) | 87 ms p50, 163 ms p95 | | under 1 s |
 
 Decoding in the browser adds about 2 ms (3 ms p95). The input p95 is not met yet. Comparisons
 with other tools on the same hardware will be added here when they are measured.

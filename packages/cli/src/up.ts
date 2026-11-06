@@ -76,7 +76,7 @@ async function lanName(): Promise<string> {
   }
 }
 
-export async function up(opts: { port?: number; warm?: number; max?: number; quiet?: boolean }): Promise<void> {
+export async function up(opts: { port?: number; warm?: number; max?: number; url?: string }): Promise<void> {
   console.log('Checking this Mac...');
   const checks = await doctor();
   printChecks(checks);
@@ -87,8 +87,8 @@ export async function up(opts: { port?: number; warm?: number; max?: number; qui
   }
 
   const port = opts.port ?? DEFAULT_PORT;
-  const host = await lanName();
-  const publicUrl = `http://${host}:${port}`;
+  // --url when people reach this Mac by another name, such as a Tailscale HTTPS address.
+  const publicUrl = opts.url?.replace(/\/$/, '') ?? `http://${await lanName()}:${port}`;
   const broker = await startBroker({ dataDir: dataDir(), port, publicUrl }).catch((err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
       console.log(`\nPort ${port} is in use. Is Hangar already running? Try \`hangar status\`, or pass --port.`);
@@ -120,7 +120,7 @@ Hangar is running at ${publicUrl}
   Connect an agent:   make a token in the console, which shows the exact command
   Lease from code:    HANGAR_URL=${publicUrl} npx hangar lease
 
-  Traffic is plain HTTP on your network. Set up TLS before using Hangar beyond a trusted LAN.
+${publicUrl.startsWith('https:') ? '' : '  Traffic is plain HTTP on your network. Set up TLS before using Hangar beyond a trusted LAN.\n'}
   Press Ctrl-C to stop. Leased devices are deleted when Hangar stops.
 `);
 

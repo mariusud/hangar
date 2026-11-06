@@ -3,12 +3,16 @@ import { parseArgs } from 'node:util';
 import { HangarError } from '@hangar/client';
 import { CLIENT_HELP, clientCommand } from './client.ts';
 import { RUN_HELP, runIos, runMaestroCommand } from './run.ts';
+import { installService, uninstallService } from './service.ts';
 import { doctor, printChecks, up } from './up.ts';
 
 const HELP = `hangar: a device fleet on your own Macs
 
 Server
-  hangar up [--port 7420] [--warm 1] [--max N]   run Hangar on this Mac
+  hangar up [--port 7420] [--warm 1] [--max N] [--url https://...]
+                                                 run Hangar on this Mac
+  hangar up --install [same options]             run it as a service that starts at login
+  hangar up --uninstall                          remove the service
   hangar doctor                                  check this Mac
 
 React Native
@@ -22,9 +26,18 @@ async function main(): Promise<void> {
     case 'up': {
       const { values } = parseArgs({
         args: rest,
-        options: { port: { type: 'string' }, warm: { type: 'string' }, max: { type: 'string' } },
+        options: { port: { type: 'string' }, warm: { type: 'string' }, max: { type: 'string' }, url: { type: 'string' }, install: { type: 'boolean' }, uninstall: { type: 'boolean' } },
       });
+      if (values.uninstall) {
+        await uninstallService();
+        return;
+      }
+      if (values.install) {
+        await installService(rest.filter((a) => a !== '--install'));
+        return;
+      }
       await up({
+        ...(values.url ? { url: values.url } : {}),
         ...(values.port ? { port: Number(values.port) } : {}),
         ...(values.warm ? { warm: Number(values.warm) } : {}),
         ...(values.max ? { max: Number(values.max) } : {}),
