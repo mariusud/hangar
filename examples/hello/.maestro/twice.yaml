@@ -1,0 +1,7 @@
+appId: dev.hangar.hello
+---
+- launchApp:
+    clearState: true
+- tapOn: Tapped 0 times
+- tapOn: Tapped 1 times
+- assertVisible: Tapped 2 times

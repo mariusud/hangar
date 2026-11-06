@@ -123,7 +123,7 @@ export class Leases {
     if (!deviceId) {
       throw new ApiError(409, 'LEASE_NOT_ACTIVE', 'This lease has no device yet.');
     }
-    const timeout = body.op === 'install' ? 300_000 : 60_000;
+    const timeout = body.op === 'maestro' ? 31 * 60_000 : body.op === 'install' ? 300_000 : 60_000;
     const res = await this.hosts
       .request(deviceId, (rid) => ({ type: 'op', id: rid, leaseId: lease.id, body }), timeout)
       .catch((err: Error & { code?: string }) => {

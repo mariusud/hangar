@@ -1,7 +1,7 @@
 // Live screen over WebSocket: the agent sends frames once per device, the broker fans them out
 // to every viewer of that lease. The lease holder's input comes back over the same socket.
 
-import type { IncomingMessage, Server } from 'node:http';
+import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Action, StreamCodec, ViewerInput } from '@hangar/protocol';
@@ -18,8 +18,14 @@ const BACKLOG = 1024 * 1024;
 
 type Viewer = { ws: WebSocket; codec: StreamCodec; needsKey: boolean };
 
-// Returns a function that closes every viewer socket, which server.close() does not track.
-export function attachStreams(server: Server, db: Db, hosts: Hosts, leases: Leases): () => void {
+export type Upgrades = {
+  // Handles the upgrade and returns true if the path is this module's.
+  upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+  // Closes every socket, which server.close() does not track once upgraded.
+  close: () => void;
+};
+
+export function attachStreams(db: Db, hosts: Hosts, leases: Leases): Upgrades {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const viewers = new Map<string, Set<Viewer>>();
   const devices = new Map<string, string>();
@@ -94,12 +100,11 @@ export function attachStreams(server: Server, db: Db, hosts: Hosts, leases: Leas
     }
   });
 
-  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): boolean => {
     const url = new URL(req.url ?? '/', 'http://x');
     const match = /^\/v1\/leases\/([^/]+)\/stream$/.exec(url.pathname);
     if (!match?.[1]) {
-      socket.destroy();
-      return;
+      return false;
     }
     const leaseId = decodeURIComponent(match[1]);
     const token = url.searchParams.get('token');
@@ -114,7 +119,7 @@ export function attachStreams(server: Server, db: Db, hosts: Hosts, leases: Leas
     if (!p || !deviceId) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
-      return;
+      return true;
     }
     const principal = p;
     const device = deviceId;
@@ -165,12 +170,16 @@ export function attachStreams(server: Server, db: Db, hosts: Hosts, leases: Leas
         }
       });
     });
-  });
+    return true;
+  };
 
-  return () => {
-    for (const ws of wss.clients) {
-      ws.terminate();
-    }
+  return {
+    upgrade,
+    close: () => {
+      for (const ws of wss.clients) {
+        ws.terminate();
+      }
+    },
   };
 }
 
@@ -183,7 +192,7 @@ function toAction(i: ViewerInput): Action | null {
     case 'type':
       return { type: 'type', text: i.text };
     case 'key':
-      return { type: 'key', key: i.key };
+      return { type: 'key', key: i.key, ...(i.modifiers ? { modifiers: i.modifiers } : {}) };
     case 'button':
       return { type: 'button', button: i.button };
     default:

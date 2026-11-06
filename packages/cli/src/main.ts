@@ -2,6 +2,7 @@
 import { parseArgs } from 'node:util';
 import { HangarError } from '@hangar/client';
 import { CLIENT_HELP, clientCommand } from './client.ts';
+import { RUN_HELP, runIos, runMaestroCommand } from './run.ts';
 import { doctor, printChecks, up } from './up.ts';
 
 const HELP = `hangar: a device fleet on your own Macs
@@ -9,6 +10,9 @@ const HELP = `hangar: a device fleet on your own Macs
 Server
   hangar up [--port 7420] [--warm 1] [--max N]   run Hangar on this Mac
   hangar doctor                                  check this Mac
+
+React Native
+${RUN_HELP}
 
 ${CLIENT_HELP}`;
 
@@ -25,6 +29,17 @@ async function main(): Promise<void> {
         ...(values.warm ? { warm: Number(values.warm) } : {}),
         ...(values.max ? { max: Number(values.max) } : {}),
       });
+      return;
+    }
+    case 'run': {
+      if (rest[0] === 'maestro') {
+        await runMaestroCommand(rest.slice(1));
+        return;
+      }
+      if (rest[0] !== 'ios') {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar run ios, or hangar run maestro <flows-dir> --app <app>. Android comes later.');
+      }
+      await runIos(rest.slice(1));
       return;
     }
     case 'doctor': {

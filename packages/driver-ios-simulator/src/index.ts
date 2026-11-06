@@ -3,12 +3,12 @@
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { DeviceInfo, Frame, UiNode } from '@hangar/protocol';
+import { PRIVACY_SERVICES, type DeviceInfo, type Frame, type KeyModifier, type PrivacyService, type UiNode } from '@hangar/protocol';
 import * as hid from './hid.ts';
 
 const run = promisify(execFile);
@@ -267,14 +267,29 @@ const KEYS: Record<string, number> = {
   left: 80,
   down: 81,
   up: 82,
+  // Letters, for shortcuts such as command-D (the React Native dev menu).
+  ...Object.fromEntries([...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [c, 4 + i])),
 };
 
-export async function key(udid: string, name: string): Promise<void> {
+const MODIFIERS: Record<KeyModifier, number> = { control: 224, shift: 225, option: 226, command: 227 };
+
+export async function key(udid: string, name: string, modifiers: KeyModifier[] = []): Promise<void> {
   const code = KEYS[name.toLowerCase()];
   if (code === undefined) {
     throw new DriverError('UNKNOWN_KEY', `Unknown key "${name}". Known keys: ${Object.keys(KEYS).join(', ')}.`);
   }
-  await sendHid(udid, press({ key: code }));
+  const held = modifiers.map((m) => {
+    const c = MODIFIERS[m];
+    if (c === undefined) {
+      throw new DriverError('UNKNOWN_KEY', `Unknown modifier "${m}". Use command, shift, option or control.`);
+    }
+    return c;
+  });
+  await sendHid(udid, [
+    ...held.map((k): hid.HidEvent => ({ press: { key: k }, up: false })),
+    ...press({ key: code }),
+    ...held.reverse().map((k): hid.HidEvent => ({ press: { key: k }, up: true })),
+  ]);
 }
 
 export async function button(udid: string, name: 'home' | 'lock' | 'siri'): Promise<void> {
@@ -299,6 +314,71 @@ export async function uninstall(udid: string, bundleId: string): Promise<void> {
 
 export async function openUrl(udid: string, url: string): Promise<void> {
   await simctl('openurl', udid, url);
+}
+
+const BUNDLE_ID = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
+
+function checkBundleId(bundleId: string): void {
+  if (!BUNDLE_ID.test(bundleId)) {
+    throw new DriverError('BAD_BUNDLE_ID', `"${bundleId}" is not a bundle id.`);
+  }
+}
+
+// A simulated remote notification. The payload is APNs JSON with an "aps" key.
+export async function push(udid: string, bundleId: string, payload: Record<string, unknown>): Promise<void> {
+  checkBundleId(bundleId);
+  if (typeof payload !== 'object' || payload === null || !('aps' in payload)) {
+    throw new DriverError('BAD_PAYLOAD', 'The push payload needs an "aps" key, for example {"aps":{"alert":"Hi"}}.');
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'hangar-push-'));
+  try {
+    const file = join(dir, 'payload.json');
+    await writeFile(file, JSON.stringify(payload));
+    await simctl('push', udid, bundleId, file);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+export async function privacy(udid: string, action: 'grant' | 'revoke' | 'reset', service: PrivacyService, bundleId: string): Promise<void> {
+  checkBundleId(bundleId);
+  if (!['grant', 'revoke', 'reset'].includes(action) || !PRIVACY_SERVICES.includes(service)) {
+    throw new DriverError('BAD_PERMISSION', `Use grant, revoke or reset, with one of: ${PRIVACY_SERVICES.join(', ')}.`);
+  }
+  await simctl('privacy', udid, action, service, bundleId);
+}
+
+export async function location(udid: string, lat: number | null, lon?: number): Promise<void> {
+  if (lat === null) {
+    await simctl('location', udid, 'clear');
+    return;
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon!) > 180) {
+    throw new DriverError('BAD_LOCATION', 'Latitude goes from -90 to 90 and longitude from -180 to 180.');
+  }
+  await simctl('location', udid, 'set', `${lat},${lon}`);
+}
+
+export async function appearance(udid: string, mode: 'light' | 'dark'): Promise<void> {
+  if (mode !== 'light' && mode !== 'dark') {
+    throw new DriverError('BAD_APPEARANCE', 'Appearance is light or dark.');
+  }
+  await simctl('ui', udid, 'appearance', mode);
+}
+
+// Language and region for one app, from its next launch: "nb-NO", "en-US", "de".
+export async function appLocale(udid: string, bundleId: string, language: string): Promise<void> {
+  checkBundleId(bundleId);
+  if (!/^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$/.test(language)) {
+    throw new DriverError('BAD_LANGUAGE', `"${language}" is not a language tag such as nb-NO or en-US.`);
+  }
+  await simctl('spawn', udid, 'defaults', 'write', bundleId, 'AppleLanguages', '-array', language);
+  await simctl('spawn', udid, 'defaults', 'write', bundleId, 'AppleLocale', '-string', language.replace('-', '_'));
+}
+
+// Writes a string to an app's user defaults inside the simulator.
+export async function setDefault(udid: string, domain: string, key: string, value: string): Promise<void> {
+  await simctl('spawn', udid, 'defaults', 'write', domain, key, '-string', value);
 }
 
 export async function info(udid: string, model: string, os: string): Promise<DeviceInfo> {

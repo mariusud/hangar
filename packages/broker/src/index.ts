@@ -8,6 +8,7 @@ import { Hosts, type HostLink } from './hosts.ts';
 import { handle, type Ctx } from './http.ts';
 import { Leases } from './leases/service.ts';
 import { attachStreams } from './stream.ts';
+import { attachTunnels } from './tunnel.ts';
 
 export type { HostLink } from './hosts.ts';
 export { ApiError } from './leases/service.ts';
@@ -48,7 +49,12 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     publicUrl: () => opts.publicUrl ?? url,
   };
   const server = createServer((req, res) => void handle(req, res, ctx));
-  const closeStreams = attachStreams(server, db, hosts, leases);
+  const upgrades = [attachStreams(db, hosts, leases), attachTunnels(db, hosts, leases)];
+  server.on('upgrade', (req, socket, head) => {
+    if (!upgrades.some((u) => u.upgrade(req, socket, head))) {
+      socket.destroy();
+    }
+  });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(opts.port, opts.host ?? '0.0.0.0', resolve);
@@ -76,7 +82,9 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
       clearInterval(timer);
       hosts.onChange = () => {};
       leases.stopped = true;
-      closeStreams();
+      for (const u of upgrades) {
+        u.close();
+      }
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       db.sql.close();

@@ -45,7 +45,7 @@ export type Action =
   | { type: 'longPress'; point: Point; durationMs?: number }
   | { type: 'swipe'; from: Point; to: Point; durationMs?: number }
   | { type: 'type'; text: string }
-  | { type: 'key'; key: string }
+  | { type: 'key'; key: string; modifiers?: KeyModifier[] }
   | { type: 'button'; button: 'home' | 'lock' | 'siri' }
   | { type: 'waitFor'; element: ElementSelector; gone?: boolean; timeoutMs?: number };
 
@@ -71,7 +71,26 @@ export type Op =
   | { op: 'launch'; bundleId: string; args?: string[] }
   | { op: 'terminate'; bundleId: string }
   | { op: 'uninstall'; bundleId: string }
-  | { op: 'openUrl'; url: string };
+  | { op: 'openUrl'; url: string }
+  // Points a React Native debug build at the lease's Metro tunnel (sets RCT_jsLocation).
+  | { op: 'useMetro'; bundleId: string }
+  // Device presets. The agent checks every value before it reaches simctl.
+  | { op: 'push'; bundleId: string; payload: Record<string, unknown> }
+  | { op: 'permission'; bundleId: string; service: PrivacyService; action: 'grant' | 'revoke' | 'reset' }
+  | { op: 'location'; lat: number; lon: number }
+  | { op: 'clearLocation' }
+  | { op: 'appearance'; mode: 'light' | 'dark' }
+  | { op: 'locale'; bundleId: string; language: string }
+  // Runs Maestro flows on the leased device. archive is a base64 tar of the flows folder; flows
+  // are paths inside it.
+  | { op: 'maestro'; archive: string; flows: string[]; env?: Record<string, string> };
+
+export type MaestroResult = { passed: boolean; junit: string; log: string; durationMs: number };
+
+export const PRIVACY_SERVICES = ['all', 'calendar', 'contacts', 'contacts-limited', 'location', 'location-always', 'photos', 'photos-add', 'media-library', 'microphone', 'motion', 'reminders', 'siri'] as const;
+export type PrivacyService = (typeof PRIVACY_SERVICES)[number];
+
+export type KeyModifier = 'command' | 'shift' | 'option' | 'control';
 
 export type OpName = Op['op'];
 
@@ -87,7 +106,16 @@ export type BrokerMessage =
   | { type: 'op'; id: number; leaseId: string; body: Op }
   | { type: 'stream.start'; leaseId: string; codec: StreamCodec }
   | { type: 'stream.stop'; leaseId: string; codec: StreamCodec }
-  | { type: 'stream.keyframe'; leaseId: string };
+  | { type: 'stream.keyframe'; leaseId: string }
+  // The Metro tunnel: the agent listens on the Mac's loopback for the lease's simulator, and each
+  // connection is carried to the lease holder's machine through the broker.
+  | { type: 'tunnel.start'; id: number; leaseId: string }
+  | { type: 'tunnel.stop'; leaseId: string }
+  | TunnelData;
+
+export type TunnelData =
+  | { type: 'tunnel.data'; leaseId: string; conn: number; data: Uint8Array }
+  | { type: 'tunnel.close'; leaseId: string; conn: number };
 
 // h264 is the native helper's frame record; jpeg is the fallback for browsers without WebCodecs.
 export type StreamCodec = 'h264' | 'jpeg';
@@ -116,6 +144,8 @@ export type AgentMessage =
   // Sent as a binary WebSocket frame between processes; passed as bytes in one process.
   | { type: 'stream.frame'; leaseId: string; codec: StreamCodec; data: Uint8Array }
   | { type: 'stream.failed'; leaseId: string; codec: StreamCodec; message: string }
+  | { type: 'tunnel.open'; leaseId: string; conn: number }
+  | TunnelData
   | { type: 'response'; id: number; ok: true; result?: unknown; binary?: string }
   | { type: 'response'; id: number; ok: false; error: { code: string; message: string } };
 
@@ -126,6 +156,6 @@ export type ViewerInput =
   | { type: 'tap'; point: Point }
   | { type: 'swipe'; from: Point; to: Point; durationMs?: number }
   | { type: 'type'; text: string }
-  | { type: 'key'; key: string }
+  | { type: 'key'; key: string; modifiers?: KeyModifier[] }
   | { type: 'button'; button: 'home' | 'lock' | 'siri' }
   | { type: 'keyframe' };

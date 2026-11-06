@@ -75,6 +75,15 @@ The features an RN developer notices on the first day come before broad platform
 - `npx hangar run ios` works like `expo run:ios`. It builds locally or takes an EAS or Bazel
   artifact, installs it on a leased simulator, and connects the app to the Metro server on the
   developer's laptop through the broker, so Fast Refresh works on the remote device.
+
+  The connection is a tunnel. The agent listens on a free port on its Mac's loopback, where the
+  leased simulator reaches it as `localhost:<port>`. Each connection the app opens there goes
+  over the agent's WebSocket to the broker, then over the CLI's WebSocket
+  (`/v1/leases/:id/tunnel`, lease holder only) to the CLI, which connects it to Metro on
+  `127.0.0.1:8081`. The app finds the port through `RCT_jsLocation` in its user defaults
+  (`POST /v1/leases/:id/metro`), or, for an Expo dev client, through its
+  `exp+<slug>://expo-development-client/?url=` deep link. Metro's HTTP, WebSocket (Fast
+  Refresh) and debugger traffic all use the same tunnel.
 - The dev menu, deep links, simulated push notifications, permissions, locale and location
   presets are one API call and one MCP tool each.
 - React DevTools, the Hermes debugger and the network inspector work through the lease.
@@ -352,6 +361,12 @@ recorded duration once there is history, retries failed tests on a fresh device 
 times, and marks a test flaky when a retry passes. A run holds its leases like any client, so
 quotas and the queue apply to it.
 
+Today `hangar run maestro` (in `@hangar/client`) does the coordinating itself: it leases the
+shards, installs the app, sends the flows folder to each lease (`POST /v1/leases/:id/maestro`,
+a tar of up to 10 MB), retries failed flows once on the same device, and merges JUnit. The agent
+runs `maestro --device <udid>` on the Mac, so each Maestro process sees only its lease's device.
+The runs API above replaces the client-side loop when runs need a page in the console.
+
 Appium suites do not use runs. They run where they always do, against the Appium endpoint, and
 CI parallelises them the usual way.
 
@@ -564,6 +579,21 @@ after minting if unused.
 A stolen member token can drive that person's leases and start leases within the team's quota. A
 compromised broker can drive any device but still cannot run a command on a host, with the
 exception below.
+
+### The Metro tunnel
+
+The tunnel's port is on the Mac's loopback, which every simulator on that Mac shares. Another
+lease's app on the same Mac could connect to it and reach the developer's Metro, which serves
+their app's source. Teams that do not trust each other's apps use separate Macs, as for app
+uploads below. The tunnel only ever reaches the lease holder's own machine, and only the port
+their CLI chose.
+
+### Maestro flows
+
+A flow can run JavaScript (`runScript`, `evalScript`) in Maestro's own script engine on the Mac,
+with HTTP access. Hangar treats a flows folder like a test bundle: it runs on the host next to
+the device. Today any member can send flows to their own lease; whether that needs the
+`install:upload` scope is open question 8.
 
 ### Where it stops: apps and test bundles run code on the Mac
 
@@ -821,3 +851,6 @@ exists, not what is planned.
 7. Sandboxing: the agent as its own macOS user on bare metal, with an optional Tart VM image
    that users build themselves. A macOS VM loses the hardware video encoder and is capped at two
    per Mac, so it cannot be the default.
+8. Should sending Maestro flows need the `install:upload` scope, like apps and test bundles?
+   And should members be allowed to upload their own debug builds (which `hangar run ios`
+   needs), perhaps on hosts marked for it?

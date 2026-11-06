@@ -4,11 +4,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@hangar/protocol';
+import { createServer } from 'node:net';
+import { Hangar } from '@hangar/client';
 import * as auth from './auth.ts';
 import { startBroker, type Broker } from './index.ts';
 
 // A fake agent with one device. It answers ops and replaces a device after its lease ends.
-function fakeAgent(broker: Broker): { messages: BrokerMessage[]; ended: string[] } {
+function fakeAgent(broker: Broker): { messages: BrokerMessage[]; ended: string[]; handlers: ReturnType<Broker['attach']> } {
   const messages: BrokerMessage[] = [];
   const ended: string[] = [];
   let devices: AgentDevice[] = [{ deviceId: 'dev-1', model: 'iPhone 17', os: '26.5', state: 'ready' }];
@@ -22,6 +24,8 @@ function fakeAgent(broker: Broker): { messages: BrokerMessage[]; ended: string[]
           leaseOf.set(m.leaseId, m.deviceId);
           devices = devices.map((d) => (d.deviceId === m.deviceId ? { ...d, state: 'busy' } : d));
           handlers.message({ type: 'response', id: m.id, ok: true });
+        } else if (m.type === 'tunnel.start') {
+          handlers.message({ type: 'response', id: m.id, ok: true, result: { port: 41000 } });
         } else if (m.type === 'op') {
           if (!leaseOf.has(m.leaseId)) {
             handlers.message({ type: 'response', id: m.id, ok: false, error: { code: 'LEASE_NOT_HELD', message: 'no' } });
@@ -43,7 +47,7 @@ function fakeAgent(broker: Broker): { messages: BrokerMessage[]; ended: string[]
     close: () => {},
   });
   handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5' }], devices, leases: [] });
-  return { messages, ended };
+  return { messages, ended, handlers };
 }
 
 async function setup(): Promise<{ broker: Broker; dir: string; token: (name: string) => string }> {
@@ -168,6 +172,42 @@ test('welcome link signs in once; invites create accounts', async () => {
     const reuse = await fetch(`${broker.url}/v1/invites/${code}/accept`, { method: 'POST', body: JSON.stringify({ name: 'eve', password: 'correct horse' }) });
     assert.equal(reuse.status, 404);
   } finally {
+    await broker.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Metro tunnel carries a device connection to the lease holder, and only to them', async () => {
+  const { broker, dir, token } = await setup();
+  // Stands in for Metro on the developer's machine: answers what it receives.
+  const metro = createServer((socket) => socket.on('data', (d) => socket.write(`metro got ${d}`)));
+  await new Promise<void>((r) => metro.listen(0, '127.0.0.1', r));
+  try {
+    const agent = fakeAgent(broker);
+    const alice = token('alice');
+    const lease = await new Hangar({ url: broker.url, token: alice }).lease({}, { autoRenew: false });
+    const address = metro.address();
+    const tunnel = await lease.metroTunnel(typeof address === 'object' && address ? address.port : 0);
+    assert.equal(tunnel.port, 41000);
+
+    // The simulator opens a connection on the Mac and sends a request.
+    agent.handlers.message({ type: 'tunnel.open', leaseId: lease.id, conn: 7 });
+    agent.handlers.message({ type: 'tunnel.data', leaseId: lease.id, conn: 7, data: Buffer.from('GET /status') });
+    let reply: string | null = null;
+    for (let i = 0; i < 100 && !reply; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      const m = agent.messages.find((x) => x.type === 'tunnel.data' && x.conn === 7);
+      reply = m?.type === 'tunnel.data' ? Buffer.from(m.data).toString() : null;
+    }
+    assert.equal(reply, 'metro got GET /status');
+
+    // Someone else cannot attach a tunnel to Alice's lease.
+    const bob = new Hangar({ url: broker.url, token: token('bob') }).attach(lease.id);
+    await assert.rejects(bob.metroTunnel(1));
+    tunnel.close();
+    await lease.release();
+  } finally {
+    metro.close();
     await broker.close();
     await rm(dir, { recursive: true, force: true });
   }

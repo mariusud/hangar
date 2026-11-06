@@ -17,6 +17,19 @@ native H.264 at 58 fps with 9 ms from capture to client, and input goes over gRP
 0007, `pnpm bench:stream`). Input to first frame is 86 ms p50 and 339 ms p95, so that target is
 not met yet.
 
+Milestone 2 has started: `hangar run ios` builds or takes the app, leases a simulator, and
+loads JavaScript from the developer's own Metro through a tunnel in the broker. Fast Refresh
+shows an edit on the leased device within 503 ms (measured by hand; `bench/metro` is not
+written yet). The example app is `examples/hello`.
+
+Also done in milestone 2: device presets (push, permissions, location, appearance, an app's
+language) and the dev menu and reload, over the API, CLI and MCP; `hangar run maestro`, which
+leases one fresh device per shard, retries failed flows once, marks flaky ones and merges JUnit.
+The run is coordinated by the client for now; the broker's runs API, the runs page, per-test
+video and the GitHub Action are still to do. The leased app shows up as a React Native DevTools
+target on the developer's Metro, but a full DevTools session through the tunnel is not checked
+yet.
+
 Spike results: idb's tree and taps work on Xcode 26.6 and iOS 26.5 when Hangar runs its own idb
 companion per device. A clone of a booted-once golden device boots in about 4 s, against 21 s
 after `simctl erase`, so the wipe is delete and re-clone. Running without a logged-in user is

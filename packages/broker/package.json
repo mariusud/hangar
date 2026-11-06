@@ -12,6 +12,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.2"
+    "@types/ws": "^8.18.2",
+    "@hangar/client": "workspace:*"
   }
 }

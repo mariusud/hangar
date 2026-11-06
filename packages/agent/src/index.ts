@@ -3,9 +3,10 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createServer, type Server, type Socket } from 'node:net';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { hostname, totalmem, cpus, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
@@ -19,6 +20,7 @@ import {
   type BrokerMessage,
   type ElementSelector,
   type Frame,
+  type MaestroResult,
   type Op,
   type UiNode,
 } from '@hangar/protocol';
@@ -58,6 +60,7 @@ export class Agent {
   private filling = false;
   private streams = new Map<string, { jpeg: { stop: boolean } | null; h264: sim.ScreenStream | null; wantH264: boolean }>();
   private stopped = false;
+  private tunnels = new Map<string, { server: Server; port: number; sockets: Map<number, Socket> }>();
   readonly maxDevices: number;
   readonly warm: number;
 
@@ -100,6 +103,9 @@ export class Agent {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    for (const leaseId of this.tunnels.keys()) {
+      this.stopTunnel(leaseId);
+    }
     for (const leaseId of this.streams.keys()) {
       this.stopStream(leaseId, 'h264');
       this.stopStream(leaseId, 'jpeg');
@@ -198,9 +204,18 @@ export class Agent {
       void (m.codec === 'h264' ? this.streamH264(m.leaseId) : this.streamJpeg(m.leaseId));
     } else if (m.type === 'stream.stop') {
       this.stopStream(m.leaseId, m.codec);
+    } else if (m.type === 'tunnel.start') {
+      this.startTunnel(m.id, m.leaseId);
+    } else if (m.type === 'tunnel.stop') {
+      this.stopTunnel(m.leaseId);
+    } else if (m.type === 'tunnel.data') {
+      this.tunnels.get(m.leaseId)?.sockets.get(m.conn)?.write(m.data);
+    } else if (m.type === 'tunnel.close') {
+      this.tunnels.get(m.leaseId)?.sockets.get(m.conn)?.destroy();
     } else if (m.type === 'stream.keyframe') {
       this.streams.get(m.leaseId)?.h264?.keyframe();
     } else if (m.type === 'lease.end') {
+      this.stopTunnel(m.leaseId);
       this.stopStream(m.leaseId, 'h264');
       this.stopStream(m.leaseId, 'jpeg');
       this.streams.delete(m.leaseId);
@@ -300,6 +315,54 @@ export class Agent {
     }
   }
 
+  // Listens on the Mac's loopback, where the lease's simulator reaches it as localhost:<port>.
+  // Each connection is carried to the lease holder's machine (their Metro) through the broker.
+  private startTunnel(id: number, leaseId: string): void {
+    const existing = this.tunnels.get(leaseId);
+    if (existing) {
+      this.opts.send({ type: 'response', id, ok: true, result: { port: existing.port } });
+      return;
+    }
+    if (![...this.devices.values()].some((x) => x.leaseId === leaseId)) {
+      this.respondError(id, 'LEASE_NOT_HELD', 'This Mac holds no device for that lease.');
+      return;
+    }
+    const sockets = new Map<number, Socket>();
+    let next = 1;
+    const server = createServer((socket) => {
+      const conn = next++;
+      sockets.set(conn, socket);
+      this.opts.send({ type: 'tunnel.open', leaseId, conn });
+      socket.on('data', (data) => this.opts.send({ type: 'tunnel.data', leaseId, conn, data }));
+      socket.on('error', () => {});
+      socket.on('close', () => {
+        if (sockets.delete(conn)) {
+          this.opts.send({ type: 'tunnel.close', leaseId, conn });
+        }
+      });
+    });
+    server.on('error', (err) => this.respondError(id, 'TUNNEL_FAILED', err.message));
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      this.tunnels.set(leaseId, { server, port, sockets });
+      this.opts.send({ type: 'response', id, ok: true, result: { port } });
+    });
+  }
+
+  private stopTunnel(leaseId: string): void {
+    const t = this.tunnels.get(leaseId);
+    if (!t) {
+      return;
+    }
+    this.tunnels.delete(leaseId);
+    t.server.close();
+    for (const socket of t.sockets.values()) {
+      socket.destroy();
+    }
+    t.sockets.clear();
+  }
+
   // A device that was leased is deleted, and a fresh clone of the golden device replaces it.
   private async wipe(d: Device): Promise<void> {
     d.leaseId = null;
@@ -369,6 +432,72 @@ export class Agent {
       case 'openUrl':
         await sim.openUrl(udid, body.url);
         return {};
+      case 'useMetro': {
+        const tunnel = d.leaseId ? this.tunnels.get(d.leaseId) : undefined;
+        if (!tunnel) {
+          throw new OpError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease. Run `hangar run ios`, which opens one.');
+        }
+        await sim.setDefault(udid, body.bundleId, 'RCT_jsLocation', `localhost:${tunnel.port}`);
+        return { result: { url: `http://localhost:${tunnel.port}` } };
+      }
+      case 'push':
+        await sim.push(udid, body.bundleId, body.payload);
+        return {};
+      case 'permission':
+        await sim.privacy(udid, body.action, body.service, body.bundleId);
+        return {};
+      case 'location':
+        await sim.location(udid, body.lat, body.lon);
+        return {};
+      case 'clearLocation':
+        await sim.location(udid, null);
+        return {};
+      case 'appearance':
+        await sim.appearance(udid, body.mode);
+        return {};
+      case 'locale':
+        await sim.appLocale(udid, body.bundleId, body.language);
+        return {};
+      case 'maestro':
+        return { result: await this.maestro(udid, body.archive, body.flows, body.env ?? {}) };
+    }
+  }
+
+  // Maestro runs here, next to the simulator, on this lease's device only.
+  private async maestro(udid: string, archive: string, flows: string[], env: Record<string, string>): Promise<MaestroResult> {
+    if (!flows.length || flows.some((f) => isAbsolute(f) || f.split(/[\\/]/).includes('..'))) {
+      throw new OpError('BAD_FLOWS', 'Name one or more flows by their path inside the flows folder.');
+    }
+    const vars = Object.entries(env);
+    if (vars.some(([k]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))) {
+      throw new OpError('BAD_ENV', 'Environment variable names are letters, digits and underscores.');
+    }
+    const dir = await mkdtemp(join(tmpdir(), 'hangar-maestro-'));
+    try {
+      const root = join(dir, 'flows');
+      await mkdir(root);
+      await writeFile(join(dir, 'flows.tar'), Buffer.from(archive, 'base64'));
+      // bsdtar refuses absolute paths and .. by default.
+      await run('tar', ['-xf', join(dir, 'flows.tar'), '-C', root]);
+      const report = join(dir, 'report.xml');
+      const args = ['--no-ansi', '--device', udid, 'test', ...flows.map((f) => join(root, f)), '--format', 'junit', '--output', report, '--test-output-dir', join(dir, 'debug'), '--flatten-debug-output'];
+      for (const [k, v] of vars) {
+        args.push('-e', `${k}=${v}`);
+      }
+      const started = Date.now();
+      const out = await run('maestro', args, { maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60_000 }).then(
+        (r) => ({ ok: true, text: r.stdout + r.stderr }),
+        (err: { stdout?: string; stderr?: string; code?: unknown }) => {
+          if (err.code === 'ENOENT') {
+            throw new OpError('MAESTRO_MISSING', 'Maestro is not installed on this Mac. Install it with: curl -fsSL "https://get.maestro.mobile.dev" | bash');
+          }
+          return { ok: false, text: (err.stdout ?? '') + (err.stderr ?? '') };
+        },
+      );
+      const junit = await readFile(report, 'utf8').catch(() => '');
+      return { passed: out.ok, junit, log: out.text.slice(-20_000), durationMs: Date.now() - started };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   }
 
@@ -409,7 +538,7 @@ export class Agent {
         await sim.typeText(udid, a.text);
         return;
       case 'key':
-        await sim.key(udid, a.key);
+        await sim.key(udid, a.key, a.modifiers);
         return;
       case 'button':
         await sim.button(udid, a.button);

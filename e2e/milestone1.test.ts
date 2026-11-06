@@ -37,19 +37,38 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
 
     // With one device, a second client queues instead of getting the same device.
     const bobLease = bob.lease({ model: 'iPhone 17' }, { autoRenew: false });
+    // Awaited below; this keeps a teardown after an earlier failure from hiding that failure.
+    bobLease.catch(() => {});
     await new Promise((r) => setTimeout(r, 1500));
     const bobs = await bob.leases();
     assert.equal(bobs[0]?.state, 'queued');
 
+    step('screenshot');
     const png = await lease.screenshot();
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
 
+    // Settings in Norwegian checks the language preset; it applies from the next launch.
+    await lease.language('com.apple.Preferences', 'nb-NO');
     await lease.launch('com.apple.Preferences');
-    await lease.waitFor({ label: 'General', role: 'button' }, 10_000);
+    await lease.waitFor({ label: 'Generelt', role: 'button' }, 10_000);
     const ui = await lease.ui();
     assert.ok(ui.nodes.length > 5);
-    await lease.tap({ label: 'General', role: 'button' });
-    await lease.waitFor({ label: 'About' }, 5000);
+    step('tap');
+    await lease.tap({ label: 'Generelt', role: 'button' });
+    await lease.waitFor({ label: 'Om' }, 5000);
+
+    // Device presets. Language takes effect on the app's next launch.
+    step('appearance');
+    await lease.appearance('dark');
+    await lease.appearance('light');
+    step('location');
+    await lease.location({ lat: 59.91, lon: 10.75 });
+    await lease.location(null);
+    step('permission');
+    await lease.permission('com.apple.Maps', 'location', 'grant');
+    step('push');
+    await lease.push('com.apple.Preferences', { aps: { alert: 'Hangar e2e' } });
+    step('presets work');
 
     let bundleId: string | null = null;
     if (app) {

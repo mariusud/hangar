@@ -2,11 +2,12 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
+import { connect as connectSocket, type Socket } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
-import type { Action, DeviceClass, ElementSelector, Frame, LeaseEndReason, LeaseState, Point, UiNode } from '@hangar/protocol';
+import type { Action, DeviceClass, ElementSelector, Frame, LeaseEndReason, LeaseState, Point, PrivacyService, UiNode } from '@hangar/protocol';
 
 const run = promisify(execFile);
 
@@ -176,6 +177,15 @@ export class Lease {
     await this.act([{ type: 'type', text }]);
   }
 
+  // A React Native debug build: command-D opens the dev menu, command-R reloads the bundle.
+  async devMenu(): Promise<void> {
+    await this.act([{ type: 'key', key: 'd', modifiers: ['command'] }]);
+  }
+
+  async reload(): Promise<void> {
+    await this.act([{ type: 'key', key: 'r', modifiers: ['command'] }]);
+  }
+
   async waitFor(element: ElementSelector, timeoutMs = 5000): Promise<void> {
     await this.act([{ type: 'waitFor', element, timeoutMs }]);
   }
@@ -208,6 +218,91 @@ export class Lease {
   async openUrl(url: string): Promise<void> {
     await this.client.json('POST', this.path('/open-url'), { url });
   }
+
+  async push(bundleId: string, payload: Record<string, unknown>): Promise<void> {
+    await this.client.json('POST', this.path('/push'), { bundleId, payload });
+  }
+
+  async permission(bundleId: string, service: PrivacyService, action: 'grant' | 'revoke' | 'reset' = 'grant'): Promise<void> {
+    await this.client.json('POST', this.path('/permissions'), { bundleId, service, action });
+  }
+
+  // Pass null to stop simulating a location.
+  async location(point: { lat: number; lon: number } | null): Promise<void> {
+    await this.client.json(point ? 'POST' : 'DELETE', this.path('/location'), point ?? undefined);
+  }
+
+  async appearance(mode: 'light' | 'dark'): Promise<void> {
+    await this.client.json('POST', this.path('/appearance'), { mode });
+  }
+
+  // Takes effect from the app's next launch.
+  async language(bundleId: string, language: string): Promise<void> {
+    await this.client.json('POST', this.path('/locale'), { bundleId, language });
+  }
+
+  // Points a React Native debug build at the Metro tunnel. Call after metroTunnel().
+  async useMetro(bundleId: string): Promise<{ url: string }> {
+    return this.client.json('POST', this.path('/metro'), { bundleId });
+  }
+
+  // Carries the leased simulator's connections to localhost:<localPort> on this machine (your
+  // Metro). Resolves with the port the simulator uses for it, on the Mac's loopback.
+  metroTunnel(localPort: number): Promise<{ port: number; close: () => void }> {
+    const ws = new WebSocket(`${this.client.url.replace(/^http/, 'ws')}${this.path('/tunnel')}?token=${encodeURIComponent(this.client.token)}`);
+    ws.binaryType = 'arraybuffer';
+    const sockets = new Map<number, Socket>();
+    const frame = (kind: number, conn: number, data?: Buffer): void => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      const b = Buffer.allocUnsafe(5 + (data?.length ?? 0));
+      b[0] = kind;
+      b.writeUInt32BE(conn, 1);
+      data?.copy(b, 5);
+      ws.send(b);
+    };
+    return new Promise((resolve, reject) => {
+      ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          const m = JSON.parse(e.data) as { type: string; port: number };
+          if (m.type === 'ready') {
+            resolve({ port: m.port, close: () => ws.close() });
+          }
+          return;
+        }
+        const b = Buffer.from(e.data as ArrayBuffer);
+        const conn = b.readUInt32BE(1);
+        if (b[0] === 1) {
+          // localhost, so a Metro bound to ::1 or 127.0.0.1 both work.
+          const socket = connectSocket({ port: localPort, host: 'localhost', autoSelectFamily: true });
+          sockets.set(conn, socket);
+          socket.on('data', (d) => frame(2, conn, d));
+          socket.on('error', () => {});
+          socket.on('close', () => {
+            if (sockets.delete(conn)) {
+              frame(3, conn);
+            }
+          });
+        } else if (b[0] === 2) {
+          sockets.get(conn)?.write(b.subarray(5));
+        } else if (b[0] === 3) {
+          const socket = sockets.get(conn);
+          sockets.delete(conn);
+          socket?.destroy();
+        }
+      };
+      // A refused handshake (not the lease holder, lease ended) fires error without close.
+      ws.onerror = () => reject(new HangarError(0, 'TUNNEL_REFUSED', 'Hangar refused the Metro tunnel. Is this your active lease?'));
+      ws.onclose = (e) => {
+        for (const socket of sockets.values()) {
+          socket.destroy();
+        }
+        sockets.clear();
+        reject(new HangarError(0, 'TUNNEL_CLOSED', `The Metro tunnel closed${e.reason ? `: ${e.reason}` : ''}.`));
+      };
+    });
+  }
 }
 
 // Opens a URL in the default browser, on macOS and Linux.
@@ -217,3 +312,5 @@ export async function openInBrowser(url: string): Promise<void> {
   }
   await run(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]).catch(() => {});
 }
+
+export { runMaestro, type FlowResult, type MaestroOptions, type MaestroRun } from './maestro.ts';

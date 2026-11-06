@@ -38,6 +38,7 @@ export class Hosts {
   onChange: () => void = () => {};
   onFrame: (leaseId: string, codec: StreamCodec, data: Uint8Array) => void = () => {};
   onStreamFailed: (leaseId: string, codec: StreamCodec, message: string) => void = () => {};
+  onTunnel: (m: AgentMessage & { type: 'tunnel.open' | 'tunnel.data' | 'tunnel.close' }) => void = () => {};
 
   // Returns the handlers the transport calls for this link.
   attach(link: HostLink): { message(m: AgentMessage): void; closed(): void } {
@@ -70,6 +71,8 @@ export class Hosts {
           this.onChange();
         } else if (m.type === 'stream.frame') {
           this.onFrame(m.leaseId, m.codec, m.data);
+        } else if (m.type === 'tunnel.open' || m.type === 'tunnel.data' || m.type === 'tunnel.close') {
+          this.onTunnel(m);
         } else if (m.type === 'stream.failed') {
           this.onStreamFailed(m.leaseId, m.codec, m.message);
         } else if (m.type === 'response') {

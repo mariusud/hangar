@@ -1,12 +1,12 @@
 // Client commands: login, lease, screenshot, ui, tap, type, install, launch, open-url, release, watch.
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CONFIG_FILE, Hangar, HangarError, openInBrowser, type Lease } from '@hangar/client';
-import type { ElementSelector, Point } from '@hangar/protocol';
+import type { ElementSelector, Point, PrivacyService } from '@hangar/protocol';
 
 export const CLIENT_HELP = `Client
   hangar login <url>                       sign in from this computer (opens the browser)
@@ -20,6 +20,12 @@ export const CLIENT_HELP = `Client
   hangar install <App.app | archive | build-name>
   hangar launch <bundle-id>
   hangar open-url <url>
+  hangar push <bundle-id> <payload.json | '{"aps":...}'>
+  hangar permission <grant|revoke|reset> <service> <bundle-id>
+  hangar location <lat,lon | clear>
+  hangar appearance <light|dark>
+  hangar language <bundle-id> <nb-NO>
+  hangar dev-menu | hangar reload          React Native debug builds
   hangar watch                             open the live screen in the browser
   hangar release
 
@@ -176,6 +182,59 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
     case 'open-url': {
       const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
       await (await currentLease(await Hangar.fromEnv(), values.lease)).openUrl(positionals[0] ?? '');
+      return true;
+    }
+    case 'push': {
+      const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
+      const [bundleId, payload] = positionals;
+      if (!bundleId || !payload) {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar push <bundle-id> <payload.json | json>');
+      }
+      const raw = payload.trim().startsWith('{') ? payload : await readFile(payload, 'utf8');
+      await (await currentLease(await Hangar.fromEnv(), values.lease)).push(bundleId, JSON.parse(raw) as Record<string, unknown>);
+      return true;
+    }
+    case 'permission': {
+      const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
+      const [action, service, bundleId] = positionals;
+      if (!action || !service || !bundleId || !['grant', 'revoke', 'reset'].includes(action)) {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar permission <grant|revoke|reset> <service> <bundle-id>, for example hangar permission grant location com.example.app');
+      }
+      await (await currentLease(await Hangar.fromEnv(), values.lease)).permission(bundleId, service as PrivacyService, action as 'grant' | 'revoke' | 'reset');
+      return true;
+    }
+    case 'location': {
+      const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
+      const arg = positionals[0] ?? '';
+      const [lat, lon] = arg.split(',').map(Number);
+      if (arg !== 'clear' && (lat === undefined || lon === undefined || Number.isNaN(lat) || Number.isNaN(lon))) {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar location <lat,lon | clear>, for example hangar location 59.91,10.75');
+      }
+      await (await currentLease(await Hangar.fromEnv(), values.lease)).location(arg === 'clear' ? null : { lat: lat!, lon: lon! });
+      return true;
+    }
+    case 'appearance': {
+      const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
+      if (positionals[0] !== 'light' && positionals[0] !== 'dark') {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar appearance <light|dark>');
+      }
+      await (await currentLease(await Hangar.fromEnv(), values.lease)).appearance(positionals[0]);
+      return true;
+    }
+    case 'language': {
+      const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
+      const [bundleId, language] = positionals;
+      if (!bundleId || !language) {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar language <bundle-id> <language>, for example hangar language com.example.app nb-NO');
+      }
+      await (await currentLease(await Hangar.fromEnv(), values.lease)).language(bundleId, language);
+      return true;
+    }
+    case 'dev-menu':
+    case 'reload': {
+      const { values } = parseArgs({ args, options: common });
+      const lease = await currentLease(await Hangar.fromEnv(), values.lease);
+      await (command === 'reload' ? lease.reload() : lease.devMenu());
       return true;
     }
     case 'watch': {

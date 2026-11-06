@@ -17,6 +17,18 @@ pnpm hangar up
 Open the sign-in link it prints, invite your team from the People page, and they are using
 simulators in the browser.
 
+From a React Native app folder on any machine that can reach that Mac:
+
+```bash
+hangar login http://your-mac.local:7420
+hangar run ios
+```
+
+That builds the Debug simulator app here (or takes `--app App.app`), starts Metro here if it is
+not running, leases a simulator, installs and launches the app connected to your Metro, and
+opens the live screen. Edit your code and Fast Refresh updates the leased device. Ctrl-C
+releases it. [examples/hello](examples/hello) is a tiny app to try it with.
+
 ## What works today
 
 - `hangar up` on a Mac with Xcode and idb: checks the machine, keeps a warm pool of simulators
@@ -30,10 +42,18 @@ simulators in the browser.
 - MCP at `/mcp` with the same tools, for AI agents.
 - A TypeScript client (`@hangar/client`) and a CLI: `login`, `lease`, `screenshot`, `ui`, `tap`,
   `type`, `install`, `launch`, `open-url`, `watch`, `release`.
+- `hangar run ios`: your app on a leased simulator, loading JavaScript from the Metro on your own
+  machine through Hangar, with Fast Refresh. Expo dev client builds open straight into the
+  bundle.
+- `hangar run maestro ./flows --app App.app --shards 3`: Maestro flows split over fresh devices,
+  failed flows retried once, flaky flows marked, one merged JUnit report (`--junit`).
+- Device presets from the API, CLI and MCP: simulated push, permissions, GPS location, light
+  and dark mode, an app's language. The React Native dev menu and reload (command-D and
+  command-R) from the console, CLI and MCP.
 
 Not yet: running as a
-service that survives a reboot, recordings, metrics, `hangar run ios` with your own Metro,
-Android, more than one Mac, CI test runs. Only one Hangar can run on a Mac at a time.
+service that survives a reboot, recordings, metrics, a checked React Native DevTools session
+through a lease, the runs page and per-test video for Maestro, Android, more than one Mac, CI test runs. Only one Hangar can run on a Mac at a time.
 
 ## Numbers
 
@@ -47,6 +67,7 @@ are in [the design](docs/design.md#targets).
 | Capture to client | 8.9 ms p50, 19.9 ms p95 | not measured | |
 | Input to first changed frame | 86 ms p50, 339 ms p95 | 228 ms p50, 669 ms p95 | p95 under 80 ms |
 | Bandwidth during motion | 691 KB/s | 195 KB/s | |
+| Fast Refresh, save to visible on the leased device | under 503 ms (measured by hand) | | under 1 s |
 
 Decoding in the browser adds about 2 ms (3 ms p95). The input p95 is not met yet. Comparisons
 with other tools on the same hardware will be added here when they are measured.
@@ -55,8 +76,8 @@ with other tools on the same hardware will be added here when they are measured.
 
 - **Manual QA.** Pick a device in the browser, install a build, test it by touch, and file a bug
   with the recording attached.
-- **Test suites.** Shard Maestro and XCUITest suites across the fleet from CI and get JUnit back,
-  or point an existing Appium suite at Hangar's endpoint.
+- **Test suites.** Shard Maestro suites across the fleet from CI and get JUnit back. XCUITest
+  and an Appium endpoint come later.
 - **AI agents.** Lease a device over MCP or the REST API, read the screenshot and accessibility
   tree, tap by element, and release it.
 

@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import type { Action, UiNode } from '@hangar/protocol';
+import { PRIVACY_SERVICES, type Action, type UiNode } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import { ApiError, type Leases } from './leases/service.ts';
@@ -194,6 +194,56 @@ function buildServer(p: auth.Principal, db: Db, leases: Leases, internalUrl: str
     'open_url',
     { description: 'Open a URL or deep link on the device.', inputSchema: { url: z.string(), leaseId: z.string().optional() } },
     ({ url, leaseId }) => safe(async () => (await leases.op(p, pick(leaseId), { op: 'openUrl', url }), text(`Opened ${url}.`))),
+  );
+
+  server.registerTool(
+    'react_native',
+    { description: 'In a React Native debug build: open the dev menu, or reload the JavaScript bundle.', inputSchema: { action: z.enum(['devMenu', 'reload']), leaseId: z.string().optional() } },
+    ({ action, leaseId }) =>
+      safe(async () => {
+        await leases.op(p, pick(leaseId), { op: 'actions', actions: [{ type: 'key', key: action === 'reload' ? 'r' : 'd', modifiers: ['command'] }] });
+        return text(action === 'reload' ? 'Reloaded the bundle.' : 'Opened the dev menu.');
+      }),
+  );
+
+  server.registerTool(
+    'send_push',
+    {
+      description: 'Deliver a simulated remote notification to an app. payload is APNs JSON, for example {"aps":{"alert":{"title":"Hi","body":"There"}}}.',
+      inputSchema: { bundleId: z.string(), payload: z.record(z.string(), z.unknown()), leaseId: z.string().optional() },
+    },
+    ({ bundleId, payload, leaseId }) => safe(async () => (await leases.op(p, pick(leaseId), { op: 'push', bundleId, payload }), text(`Sent a push to ${bundleId}.`))),
+  );
+
+  server.registerTool(
+    'set_permission',
+    {
+      description: 'Grant, revoke or reset a privacy permission for an app without the system prompt, so a flow can test both answers.',
+      inputSchema: { bundleId: z.string(), service: z.enum(PRIVACY_SERVICES), action: z.enum(['grant', 'revoke', 'reset']), leaseId: z.string().optional() },
+    },
+    ({ bundleId, service, action, leaseId }) => safe(async () => (await leases.op(p, pick(leaseId), { op: 'permission', bundleId, service, action }), text(`${action} ${service} for ${bundleId}: done.`))),
+  );
+
+  server.registerTool(
+    'set_location',
+    { description: 'Set the GPS position the device reports, or clear it by leaving out lat and lon.', inputSchema: { lat: z.number().optional(), lon: z.number().optional(), leaseId: z.string().optional() } },
+    ({ lat, lon, leaseId }) =>
+      safe(async () => {
+        await leases.op(p, pick(leaseId), lat === undefined || lon === undefined ? { op: 'clearLocation' } : { op: 'location', lat, lon });
+        return text(lat === undefined ? 'Cleared the location.' : `Location set to ${lat}, ${lon}.`);
+      }),
+  );
+
+  server.registerTool(
+    'set_appearance',
+    { description: 'Switch the device between light and dark mode.', inputSchema: { mode: z.enum(['light', 'dark']), leaseId: z.string().optional() } },
+    ({ mode, leaseId }) => safe(async () => (await leases.op(p, pick(leaseId), { op: 'appearance', mode }), text(`Appearance is ${mode}.`))),
+  );
+
+  server.registerTool(
+    'set_app_language',
+    { description: 'Set the language and region one app uses from its next launch, for example nb-NO or en-US. Relaunch the app afterwards.', inputSchema: { bundleId: z.string(), language: z.string(), leaseId: z.string().optional() } },
+    ({ bundleId, language, leaseId }) => safe(async () => (await leases.op(p, pick(leaseId), { op: 'locale', bundleId, language }), text(`${bundleId} uses ${language} from its next launch.`))),
   );
 
   return server;

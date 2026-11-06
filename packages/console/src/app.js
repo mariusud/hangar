@@ -369,6 +369,8 @@ async function leaseView(id) {
         h('div', { class: 'row', style: 'margin-top:10px;justify-content:center' },
           h('button', { onclick: () => send({ type: 'button', button: 'home' }) }, 'Home'),
           h('button', { onclick: () => send({ type: 'button', button: 'lock' }) }, 'Lock'),
+          h('button', { title: 'React Native dev menu (command-D)', onclick: () => send({ type: 'key', key: 'd', modifiers: ['command'] }) }, 'Dev menu'),
+          h('button', { title: 'Reload the React Native bundle (command-R)', onclick: () => send({ type: 'key', key: 'r', modifiers: ['command'] }) }, 'Reload'),
           h('a', { class: 'button', href: `/v1/leases/${id}/screenshot`, download: 'screenshot.png' }, 'Screenshot'),
         ),
       ),

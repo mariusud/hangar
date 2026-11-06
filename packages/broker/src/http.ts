@@ -6,7 +6,7 @@ import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import type { Action, DeviceClass, Op } from '@hangar/protocol';
+import type { Action, DeviceClass, Op, PrivacyService } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
@@ -415,6 +415,54 @@ route('POST', '/v1/leases/:id/open-url', async (req, res, ctx) => {
     throw new ApiError(400, 'BAD_URL', 'Send `url` with a scheme, such as https://example.com or myapp://home.');
   }
   json(res, 200, (await op(req, ctx, { op: 'openUrl', url })).result ?? {});
+});
+
+// Points a React Native debug build at the lease's Metro tunnel. `hangar run ios` opens the tunnel.
+route('POST', '/v1/leases/:id/metro', async (req, res, ctx) => {
+  const { bundleId } = await body<{ bundleId?: string }>(req);
+  if (!bundleId) {
+    throw new ApiError(400, 'BAD_BUNDLE_ID', 'Send the app\'s `bundleId`.');
+  }
+  json(res, 200, (await op(req, ctx, { op: 'useMetro', bundleId })).result ?? {});
+});
+
+// Device presets. The agent checks the values; the broker only picks the fields it forwards.
+route('POST', '/v1/leases/:id/push', async (req, res, ctx) => {
+  const b = await body<{ bundleId?: string; payload?: Record<string, unknown> }>(req);
+  json(res, 200, (await op(req, ctx, { op: 'push', bundleId: String(b.bundleId ?? ''), payload: b.payload ?? {} })).result ?? {});
+});
+
+route('POST', '/v1/leases/:id/permissions', async (req, res, ctx) => {
+  const b = await body<{ bundleId?: string; service?: PrivacyService; action?: 'grant' | 'revoke' | 'reset' }>(req);
+  json(res, 200, (await op(req, ctx, { op: 'permission', bundleId: String(b.bundleId ?? ''), service: b.service ?? 'all', action: b.action ?? 'grant' })).result ?? {});
+});
+
+route('POST', '/v1/leases/:id/location', async (req, res, ctx) => {
+  const b = await body<{ lat?: number; lon?: number }>(req);
+  json(res, 200, (await op(req, ctx, { op: 'location', lat: Number(b.lat), lon: Number(b.lon) })).result ?? {});
+});
+
+route('DELETE', '/v1/leases/:id/location', async (req, res, ctx) => {
+  json(res, 200, (await op(req, ctx, { op: 'clearLocation' })).result ?? {});
+});
+
+route('POST', '/v1/leases/:id/appearance', async (req, res, ctx) => {
+  const b = await body<{ mode?: 'light' | 'dark' }>(req);
+  json(res, 200, (await op(req, ctx, { op: 'appearance', mode: b.mode === 'dark' ? 'dark' : 'light' })).result ?? {});
+});
+
+route('POST', '/v1/leases/:id/locale', async (req, res, ctx) => {
+  const b = await body<{ bundleId?: string; language?: string }>(req);
+  json(res, 200, (await op(req, ctx, { op: 'locale', bundleId: String(b.bundleId ?? ''), language: String(b.language ?? '') })).result ?? {});
+});
+
+// Maestro flows on the leased device. The flows folder comes as a base64 tar, up to 10 MB.
+route('POST', '/v1/leases/:id/maestro', async (req, res, ctx) => {
+  const b = await body<{ archive?: string; flows?: string[]; env?: Record<string, string> }>(req, 15_000_000);
+  if (!b.archive || !Array.isArray(b.flows)) {
+    throw new ApiError(400, 'BAD_FLOWS', 'Send `archive` (a base64 tar of the flows folder) and `flows` (paths inside it).');
+  }
+  json(res, 200, (await op(req, ctx, { op: 'maestro', archive: b.archive, flows: b.flows.map(String), env: b.env ?? {} })).result ?? {});
 });
 
 // Builds and artifacts
