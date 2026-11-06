@@ -1,0 +1,14 @@
+{
+  "name": "@hangar/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@hangar/protocol": "workspace:*",
+    "@hangar/broker": "workspace:*",
+    "@hangar/agent": "workspace:*",
+    "@hangar/client": "workspace:*"
+  }
+}

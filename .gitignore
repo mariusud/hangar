@@ -1,0 +1,4 @@
+node_modules/
+.hangar/
+*.log
+.DS_Store

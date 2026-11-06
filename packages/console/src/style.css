@@ -1,0 +1,132 @@
+:root {
+  --bg: #f6f6f4;
+  --panel: #ffffff;
+  --text: #1c1c1a;
+  --muted: #6b6b66;
+  --line: #e2e2dd;
+  --accent: #2f5fd0;
+  --accent-text: #ffffff;
+  --ok: #2b8a4b;
+  --warn: #a8650b;
+  --bad: #b3261e;
+  --radius: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151514;
+    --panel: #1e1e1c;
+    --text: #ececea;
+    --muted: #9a9a94;
+    --line: #30302d;
+    --accent: #6f95ff;
+    --accent-text: #0b0b0a;
+    --ok: #5cc27f;
+    --warn: #e0a44a;
+    --bad: #ff7b72;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+a { color: var(--accent); }
+.top {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.brand { font-weight: 650; color: var(--text); text-decoration: none; }
+#nav { display: flex; gap: 14px; flex: 1; }
+#nav a { color: var(--muted); text-decoration: none; }
+#nav a.on { color: var(--text); }
+#who { color: var(--muted); font-size: 14px; }
+#banner {
+  padding: 8px 20px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg));
+  color: var(--text);
+  font-size: 14px;
+}
+main { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+h1 { font-size: 22px; margin: 0 0 16px; }
+h2 { font-size: 16px; margin: 24px 0 10px; }
+.muted { color: var(--muted); }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.narrow { max-width: 380px; margin: 40px auto; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+input[type='text'], input[type='password'], input[type='url'], select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+button, .button {
+  display: inline-block;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.danger { color: var(--bad); }
+button:disabled { opacity: 0.5; cursor: default; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.error { color: var(--bad); margin-top: 10px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+th { font-size: 13px; color: var(--muted); font-weight: 500; }
+.state { font-size: 13px; }
+.state.ready, .state.active { color: var(--ok); }
+.state.leased, .state.queued, .state.preparing, .state.wiping { color: var(--warn); }
+.state.offline, .state.ended { color: var(--muted); }
+code, .code {
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  word-break: break-all;
+}
+.code { display: block; padding: 10px; margin: 8px 0; }
+.lease { display: grid; grid-template-columns: minmax(260px, 420px) 1fr; gap: 24px; align-items: start; }
+@media (max-width: 760px) { .lease { grid-template-columns: 1fr; } }
+.screen {
+  position: relative;
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #000;
+  aspect-ratio: 402 / 874;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.screen:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
+.screen img, .screen canvas { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.screen [hidden] { display: none; }
+.screen .hint {
+  position: absolute; inset: auto 0 10px 0; text-align: center;
+  color: #fff; font-size: 12px; opacity: 0.7; pointer-events: none;
+}
+.side .card + .card { margin-top: 14px; }
+.tree { max-height: 320px; overflow: auto; font-size: 13px; }
+.tree div { padding: 3px 0; border-bottom: 1px dashed var(--line); }

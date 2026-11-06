@@ -1,0 +1,12 @@
+{
+  "name": "@hangar/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hangar/agent": "workspace:*",
+    "@hangar/broker": "workspace:*",
+    "@hangar/client": "workspace:*",
+    "@hangar/protocol": "workspace:*"
+  }
+}

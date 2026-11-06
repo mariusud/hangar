@@ -1,0 +1,19 @@
+{
+  "name": "hangar-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.10.0",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "test": "node --test --disable-warning=ExperimentalWarning 'packages/*/src/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "pnpm typecheck && pnpm test",
+    "e2e": "HANGAR_REAL=1 node --test --test-concurrency=1 --disable-warning=ExperimentalWarning 'e2e/*.test.ts'",
+    "bench:stream": "node --disable-warning=ExperimentalWarning bench/stream.ts",
+    "hangar": "node --disable-warning=ExperimentalWarning packages/cli/src/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}
