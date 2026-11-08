@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400">
+  <defs>
+    <clipPath id="arch"><path d="M640 336 A290 270 0 0 1 1220 336 Z"/></clipPath>
+    <g id="phone">
+      <rect x="0" y="0" width="58" height="118" rx="13" fill="#15191F" stroke="#3A414B" stroke-width="2"/>
+      <rect x="22" y="6" width="14" height="4" rx="2" fill="#3A414B"/>
+    </g>
+  </defs>
+
+  <rect width="1280" height="400" fill="#0C0E12"/>
+
+  <!-- wordmark -->
+  <text x="96" y="178" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="96" font-weight="700" letter-spacing="-3">Hangar</text>
+  <text x="100" y="230" fill="#9AA3AE" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27">Simulators and emulators for</text>
+  <text x="100" y="266" fill="#9AA3AE" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27">your team, on Macs you own.</text>
+  <rect x="100" y="298" width="178" height="44" rx="10" fill="#161A20" stroke="#2A3038"/>
+  <text x="120" y="327" fill="#F5A524" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">$</text>
+  <text x="142" y="327" fill="#E6E9ED" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">hangar up</text>
+
+  <!-- the hangar: an arch with ribs -->
+  <g fill="none" stroke="#2A3038" stroke-width="2">
+    <path d="M640 336 A290 270 0 0 1 1220 336"/>
+    <path d="M676 336 A254 236 0 0 1 1184 336" stroke="#1E232A"/>
+  </g>
+  <g clip-path="url(#arch)" stroke="#1A1E24" stroke-width="2">
+    <line x1="737" y1="0" x2="737" y2="336"/>
+    <line x1="833" y1="0" x2="833" y2="336"/>
+    <line x1="930" y1="0" x2="930" y2="336"/>
+    <line x1="1027" y1="0" x2="1027" y2="336"/>
+    <line x1="1123" y1="0" x2="1123" y2="336"/>
+  </g>
+  <line x1="600" y1="336" x2="1260" y2="336" stroke="#2A3038" stroke-width="2"/>
+
+  <!-- six devices: three leased (lit), three waiting -->
+  <g transform="translate(694 206)">
+    <use href="#phone"/>
+    <rect x="6" y="16" width="46" height="94" rx="6" fill="#1B2027"/>
+  </g>
+  <g transform="translate(776 206)">
+    <use href="#phone"/>
+    <rect x="6" y="16" width="46" height="94" rx="6" fill="#F5A524"/>
+    <rect x="12" y="26" width="26" height="6" rx="3" fill="#0C0E12" opacity=".55"/>
+    <rect x="12" y="40" width="34" height="18" rx="4" fill="#0C0E12" opacity=".25"/>
+    <rect x="12" y="64" width="34" height="18" rx="4" fill="#0C0E12" opacity=".25"/>
+    <rect x="12" y="92" width="34" height="10" rx="5" fill="#0C0E12" opacity=".55"/>
+  </g>
+  <g transform="translate(858 206)">
+    <use href="#phone"/>
+    <rect x="6" y="16" width="46" height="94" rx="6" fill="#7CC4FA"/>
+    <rect x="12" y="26" width="20" height="6" rx="3" fill="#0C0E12" opacity=".55"/>
+    <rect x="12" y="40" width="34" height="4" rx="2" fill="#0C0E12" opacity=".3"/>
+    <rect x="12" y="50" width="28" height="4" rx="2" fill="#0C0E12" opacity=".3"/>
+    <rect x="12" y="60" width="34" height="4" rx="2" fill="#0C0E12" opacity=".3"/>
+    <rect x="12" y="70" width="22" height="4" rx="2" fill="#0C0E12" opacity=".3"/>
+  </g>
+  <g transform="translate(940 206)">
+    <use href="#phone"/>
+    <rect x="6" y="16" width="46" height="94" rx="6" fill="#1B2027"/>
+  </g>
+  <g transform="translate(1022 206)">
+    <use href="#phone"/>
+    <rect x="6" y="16" width="46" height="94" rx="6" fill="#8BE0A4"/>
+    <circle cx="29" cy="50" r="12" fill="#0C0E12" opacity=".3"/>
+    <rect x="14" y="72" width="30" height="5" rx="2.5" fill="#0C0E12" opacity=".5"/>
+    <rect x="18" y="82" width="22" height="4" rx="2" fill="#0C0E12" opacity=".3"/>
+  </g>
+  <g transform="translate(1104 206)">
+    <use href="#phone"/>
+    <rect x="6" y="16" width="46" height="94" rx="6" fill="#1B2027"/>
+  </g>
+
+  <!-- who holds each lit device -->
+  <g font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" text-anchor="middle">
+    <text x="805" y="190" fill="#F5A524">dev</text>
+    <text x="887" y="190" fill="#7CC4FA">ci</text>
+    <text x="1051" y="190" fill="#8BE0A4">agent</text>
+  </g>
+  <g fill="#3A414B">
+    <circle cx="723" cy="356" r="3"/><circle cx="969" cy="356" r="3"/><circle cx="1133" cy="356" r="3"/>
+  </g>
+  <g>
+    <circle cx="805" cy="356" r="3" fill="#F5A524"/><circle cx="887" cy="356" r="3" fill="#7CC4FA"/><circle cx="1051" cy="356" r="3" fill="#8BE0A4"/>
+  </g>
+</svg>

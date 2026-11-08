@@ -1,4 +1,4 @@
-# Hangar
+<p align="center"><img src="docs/assets/header.png" alt="Hangar: simulators and emulators for your team, on Macs you own" width="100%" /></p>
 
 Turn the Macs your team already owns into a pool of iOS simulators and Android emulators.
 Developers, QA, CI and AI agents lease a fresh device, use it in the browser or from code, and
@@ -12,6 +12,8 @@ hangar up
 
 Open the link it prints. It signs you in as admin, and the console lists the simulators ready to
 use. Invite your team from the People page.
+
+<p align="center"><img src="docs/assets/demo.gif" alt="A leased iPhone simulator in Hangar's console: opening Settings, scrolling, going home" width="100%" /></p>
 
 ## Use it
 
@@ -60,7 +62,7 @@ the command for anything missing. Add Android emulators with `hangar up --androi
 | [What a leased app can reach](docs/guides/isolation.md) | running Hangar as its own macOS user |
 
 Everything else: [all features](docs/features.md), [measured numbers](docs/numbers.md),
-[design](docs/design.md), [roadmap](ROADMAP.md).
+[design](docs/design.md), [brand](docs/brand.md), [roadmap](ROADMAP.md).
 
 ## Speed
 

@@ -1,28 +1,32 @@
+/* Hangar's palette (docs/brand.md): ink, signal amber, and sky and mint for other lease holders. */
 :root {
-  --bg: #f6f6f4;
+  --bg: #f7f6f3;
   --panel: #ffffff;
-  --text: #1c1c1a;
-  --muted: #6b6b66;
-  --line: #e2e2dd;
-  --accent: #2f5fd0;
-  --accent-text: #ffffff;
+  --text: #14161a;
+  --muted: #5e6670;
+  --line: #e3e1dc;
+  --accent: #f5a524;
+  --accent-text: #14161a;
+  --link: #9a5800;
   --ok: #2b8a4b;
   --warn: #a8650b;
   --bad: #b3261e;
   --radius: 10px;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #151514;
-    --panel: #1e1e1c;
-    --text: #ececea;
-    --muted: #9a9a94;
-    --line: #30302d;
-    --accent: #6f95ff;
-    --accent-text: #0b0b0a;
-    --ok: #5cc27f;
-    --warn: #e0a44a;
+    --bg: #0c0e12;
+    --panel: #14171c;
+    --text: #eef0f3;
+    --muted: #9aa3ae;
+    --line: #262b33;
+    --accent: #f5a524;
+    --accent-text: #0c0e12;
+    --link: #f7b84e;
+    --ok: #8be0a4;
+    --warn: #f5a524;
     --bad: #ff7b72;
     color-scheme: dark;
   }
@@ -34,7 +38,7 @@ body {
   color: var(--text);
   font: 15px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
-a { color: var(--accent); }
+a { color: var(--link); }
 .top {
   display: flex;
   align-items: center;
@@ -43,10 +47,11 @@ a { color: var(--accent); }
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
-.brand { font-weight: 650; color: var(--text); text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); text-decoration: none; }
+.brand img { width: 22px; height: 22px; }
 #nav { display: flex; gap: 14px; flex: 1; }
 #nav a { color: var(--muted); text-decoration: none; }
-#nav a.on { color: var(--text); }
+#nav a.on { color: var(--text); box-shadow: 0 2px 0 var(--accent); }
 #who { color: var(--muted); font-size: 14px; }
 #banner {
   padding: 8px 20px;
@@ -102,7 +107,7 @@ th { font-size: 13px; color: var(--muted); font-weight: 500; }
 .state.running, .state.flaky { color: var(--warn); }
 .state.failed { color: var(--bad); }
 code, .code {
-  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 13px/1.4 var(--mono);
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 6px;

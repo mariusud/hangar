@@ -54,6 +54,13 @@ type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> 
 
 type Recording = { dir: string; uploads: { video: string; log: string; screenshot: string }; log: sim.AppLog; finished: Promise<void> | null };
 
+// Action points are fractions of the screen, so [0.5, 0.5] is the middle.
+export function onScreen(p: [number, number]): void {
+  if (!p.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
+    throw new OpError('POINT_OFF_SCREEN', `The point [${p.join(', ')}] is off the screen. Points are fractions of the screen from 0 to 1, such as [0.5, 0.8].`);
+  }
+}
+
 export class OpError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -658,6 +665,7 @@ export class Agent {
   }
 
   private async toPoints(d: Device, p: [number, number]): Promise<[number, number]> {
+    onScreen(p);
     const s = await this.screen(d);
     return [Math.round(p[0] * s.width), Math.round(p[1] * s.height)];
   }

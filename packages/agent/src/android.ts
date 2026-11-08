@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import * as android from './drivers/android/index.ts';
 import { PROTOCOL_VERSION, type Action, type ActionResult, type AgentDevice, type AgentMessage, type BrokerMessage, type Op, type TestResult } from '@hangar/protocol';
-import { download, findAll, findOne, maestro, OpError } from './index.ts';
+import { download, findAll, findOne, maestro, onScreen, OpError } from './index.ts';
 import { Tunnels } from './tunnels.ts';
 
 const run = promisify(execFile);
@@ -329,6 +329,7 @@ export class AndroidAgent {
   }
 
   private px(d: Device, p: [number, number]): [number, number] {
+    onScreen(p);
     return [p[0] * d.screen.width, p[1] * d.screen.height];
   }
 
