@@ -576,6 +576,30 @@ test('runs and recordings are visible to their team and operators only', async (
   }
 });
 
+test('the fleet shows how each lease was taken and what its holder did; watching changes neither', async () => {
+  const { broker, dir, token } = await setup();
+  try {
+    fakeAgent(broker);
+    const admin = auth.createAccount(broker.db, 'ops', 'operator');
+    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id });
+    const qa = token('tester');
+    const lease = (await call(broker, qa, 'POST', '/v1/leases?wait=5', { via: 'checking the login flow' })).json;
+    await call(broker, qa, 'POST', `/v1/leases/${lease.id}/actions`, { actions: [{ type: 'tap', element: { label: 'Sign in' } }] });
+    const before = (await call(broker, op, 'GET', '/v1/leases?all=1')).json.find((l: { id: string }) => l.id === lease.id);
+    assert.equal(before.via, 'checking the login flow');
+    assert.equal(before.activity, 'Tapped “Sign in”');
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await call(broker, op, 'GET', `/v1/leases/${lease.id}/ui`)).status, 200);
+    const after = (await call(broker, op, 'GET', '/v1/leases?all=1')).json.find((l: { id: string }) => l.id === lease.id);
+    assert.equal(after.activity, 'Tapped “Sign in”');
+    assert.equal(after.expiresAt, before.expiresAt);
+    assert.equal((await call(broker, qa, 'POST', '/v1/leases', { via: 42 })).status, 201);
+  } finally {
+    await broker.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('an agent written for mobile-mcp drives a leased device with the same tool names', async () => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');

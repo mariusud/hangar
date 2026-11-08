@@ -281,7 +281,7 @@ export async function runAndroid(args: string[]): Promise<void> {
   stopOnCtrlC(() => (values.lease ? null : lease));
 
   const apk = await buildWithMetro(values.app ?? buildApk(p), metro(p, port));
-  lease = values.lease ? client.attach(values.lease) : await client.lease({ platform: 'android-emulator' });
+  lease = values.lease ? client.attach(values.lease) : await client.lease({ platform: 'android-emulator' }, { via: 'hangar run android' });
   await lease.metroTunnel(port);
   process.stderr.write(`Installing ${basename(apk)}...\n`);
   const { bundleId } = await lease.install(apk);
@@ -329,7 +329,7 @@ export async function runIos(args: string[]): Promise<void> {
   // Build and Metro run side by side. The lease comes after: a long build would outlast the
   // lease's idle timeout, and a warm device takes seconds.
   const app = await buildWithMetro(values.app ?? build(p, values.scheme), metro(p, port));
-  lease = values.lease ? client.attach(values.lease) : await client.lease(values.model ? { model: values.model } : {});
+  lease = values.lease ? client.attach(values.lease) : await client.lease(values.model ? { model: values.model } : {}, { via: 'hangar run ios' });
   const bundleId = await plist(app, 'CFBundleIdentifier', 'raw');
   if (!bundleId) {
     throw new HangarError(0, 'NOT_AN_APP', `${app} has no bundle id. Pass a built simulator .app.`);

@@ -63,6 +63,12 @@ export async function startCompanion(udid: string): Promise<void> {
   throw new DriverError('IDB_COMPANION_TIMEOUT', `The idb companion for ${udid} did not start within 10 s.`);
 }
 
+// Companions an earlier Hangar started outlive it when it is killed hard. They serve sockets in
+// Hangar's own folder, so this never stops anyone else's.
+export async function stopLeftoverCompanions(): Promise<void> {
+  await run('pkill', ['-f', `idb_companion .*--grpc-domain-sock ${SOCKET_DIR}/`]).catch(() => {});
+}
+
 export function stopCompanion(udid: string): void {
   const companion = companions.get(udid);
   if (companion) {

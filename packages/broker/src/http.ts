@@ -438,8 +438,8 @@ route('GET', '/v1/devices', (_req, res, ctx) => {
 
 route('POST', '/v1/leases', async (req, res, ctx) => {
   const p = me(req, ctx);
-  const b = await body<{ class?: DeviceClass; ttlSeconds?: number; maxSeconds?: number; record?: boolean }>(req);
-  const lease = ctx.leases.create(p, b.class ?? {}, b);
+  const b = await body<{ class?: DeviceClass; ttlSeconds?: number; maxSeconds?: number; record?: boolean; via?: string }>(req);
+  const lease = ctx.leases.create(p, b.class ?? {}, { ...b, via: typeof b.via === 'string' ? b.via : undefined });
   if (b.record) {
     ctx.recordings.want(p, lease.id);
   }

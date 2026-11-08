@@ -105,6 +105,7 @@ export class Agent {
     // Build the screen helper now, so the first viewer does not wait for the compiler.
     sim.screenBinary().catch((err: Error) => this.log(`${err.message} Streams will use JPEG.`));
     // Devices left from an earlier run may hold someone's data. They are deleted, never reused.
+    await sim.stopLeftoverCompanions();
     for (const d of await sim.listOwned()) {
       if (!d.name.startsWith(`${sim.NAME_PREFIX}golden-`)) {
         this.log(`Deleting leftover device ${d.name}`);

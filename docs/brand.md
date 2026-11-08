@@ -3,13 +3,21 @@
 ## Name and mark
 
 Hangar is where a team keeps its devices, and where each one goes out to whoever needs it and
-comes back. The mark is that: an arch with one device inside.
+comes back. The mark is a hangar seen from the front, its arch in two ribs, with one device
+inside it lit in amber: the one on lease. Only the device is amber, so the mark never reads as a
+yellow arch.
 
 ![The Hangar mark](assets/mark.svg)
 
-The mark is [assets/mark.svg](assets/mark.svg), in amber on any background. It also serves as
-the console's favicon (`packages/console/src/mark.svg`, a copy). Keep the clear space around it at
-least a quarter of its width, and do not outline, rotate or recolor it.
+| File | Use |
+|---|---|
+| [assets/mark.svg](assets/mark.svg) | on light backgrounds (ink arch) |
+| [assets/mark-dark.svg](assets/mark-dark.svg) | on dark backgrounds (light arch) |
+| [assets/mark-tile.svg](assets/mark-tile.svg) | favicons and app icons, on an ink tile |
+
+The console has copies in `packages/console/src` and shows the light or dark one with the theme.
+Keep clear space around the mark of at least a quarter of its width, and do not outline, rotate
+or recolor it. On an amber background, use the tile.
 
 The name is written Hangar in prose and `hangar` as a command. The wordmark is the name set in
 the system font at weight 700 with tight letter spacing, next to the mark.
@@ -43,7 +51,7 @@ fast". Errors say what happened and what to do next. No exclamation marks, no em
 
 ## Images
 
-- [assets/header.svg](assets/header.svg): the README header. Six devices under the arch, three
-  of them leased to a developer, CI and an agent. Render it to `header.png` with headless
-  Chrome at 2x (the README shows the PNG, so the fonts look the same everywhere).
-- Screenshots of the console are taken from a real `hangar up`, with the host's name replaced.
+- [assets/header.svg](assets/header.svg): the README header, rendered to `header.png` with
+  headless Chrome at 2x so the fonts look the same everywhere.
+- [assets/fleet.gif](assets/fleet.gif): the console's Fleet page during a real run: an agent, a
+  Maestro run and a tester holding devices at once. The host's name is replaced in the picture.

@@ -5,9 +5,9 @@ same device, marks flows that pass on the retry as flaky, and writes one JUnit r
 runner needs to reach the Hangar Mac (on the same network, or through a VPN such as Tailscale)
 and a token in a secret.
 
-1. In the console, make a token for CI on the Connect page and save it as the `HANGAR_TOKEN`
-   secret. Save the Mac's address as `HANGAR_URL`. The token needs the install:upload
-   permission, because the action uploads the app.
+1. An operator makes a token on the console's Connect page with "Can upload apps" ticked,
+   because the action uploads the app it tests. Save it as the `HANGAR_TOKEN` secret, and the
+   Mac's address as `HANGAR_URL`.
 2. Build a Release simulator app, so the JavaScript is in the app and no Metro is needed. Any
    macOS runner, EAS or Bazel can build it; the example below builds on the runner.
 

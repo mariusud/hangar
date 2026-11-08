@@ -32,7 +32,46 @@ export type LeaseView = {
   expiresAt: number | null;
   createdAt: number;
   owner: string;
+  // How the lease was taken ("Claude Code over MCP", "Run 3f2a, shard 2 of 3") and the last thing
+  // its holder did. Kept in memory only, for the Fleet page.
+  via: string | null;
+  activity: string | null;
+  activityAt: number | null;
 };
+
+type Status = { via: string | null; activity: string | null; activityAt: number | null };
+
+// A short line for the Fleet page, or null for ops that only look at the screen.
+export function describeOp(o: Op): string | null {
+  switch (o.op) {
+    case 'actions': {
+      const a = o.actions[o.actions.length - 1];
+      if (!a) {
+        return null;
+      }
+      if (a.type === 'tap' && 'element' in a) {
+        const name = a.element.label ?? a.element.identifier ?? a.element.role;
+        return name ? `Tapped “${name}”` : 'Tapped';
+      }
+      return { tap: 'Tapped', longPress: 'Long-pressed', swipe: 'Swiped', type: 'Typed text', key: 'Pressed a key', button: `Pressed ${'button' in a ? a.button : 'a button'}`, waitFor: 'Waited for the screen' }[a.type];
+    }
+    case 'install':
+      return 'Installed an app';
+    case 'launch':
+      return `Opened ${o.bundleId}`;
+    case 'openUrl':
+      return `Opened ${o.url.slice(0, 60)}`;
+    case 'maestro':
+      return `Maestro: ${o.flows.map((f) => f.split('/').pop()).join(', ').slice(0, 60)}`;
+    case 'xcuitest':
+    case 'espresso':
+      return `Running ${o.tests.length ? o.tests.join(', ').slice(0, 60) : 'tests'}`;
+    case 'useMetro':
+      return 'Connected to Metro';
+    default:
+      return null;
+  }
+}
 
 export class Leases {
   readonly events = new EventEmitter();
@@ -42,6 +81,7 @@ export class Leases {
   private db: Db;
   private hosts: Hosts;
   private now: () => number;
+  private status = new Map<string, Status>();
 
   constructor(db: Db, hosts: Hosts, now: () => number = Date.now) {
     this.db = db;
@@ -50,7 +90,7 @@ export class Leases {
     this.events.setMaxListeners(0);
   }
 
-  create(p: Principal, cls: DeviceClass, opts: { ttlSeconds?: number; maxSeconds?: number } = {}): m.Lease {
+  create(p: Principal, cls: DeviceClass, opts: { ttlSeconds?: number; maxSeconds?: number; via?: string } = {}): m.Lease {
     const offers = this.hosts.offers();
     // A declared image is on offer from every iOS host at once; the lease queues while it builds.
     const declared = this.db.images().find((i) => i.name.toLowerCase() === cls.image?.toLowerCase());
@@ -80,6 +120,7 @@ export class Leases {
       this.now(),
     );
     this.db.insertLease(lease);
+    this.status.set(lease.id, { via: opts.via?.trim().slice(0, 80) || null, activity: null, activityAt: null });
     this.db.audit('lease.requested', p.accountId, lease.id);
     this.emit(lease);
     void this.tick();
@@ -109,6 +150,7 @@ export class Leases {
       expiresAt: m.deadline(lease)?.at ?? null,
       createdAt: lease.createdAt,
       owner,
+      ...(this.status.get(lease.id) ?? { via: null, activity: null, activityAt: null }),
     };
   }
 
@@ -125,8 +167,13 @@ export class Leases {
 
   // Runs one device op for the lease holder. The agent maps the lease to a device itself.
   async op(p: Principal, id: string, body: Op): Promise<{ result?: unknown; binary?: Buffer }> {
-    const lease = wrap(() => m.touch(this.get(p, id), this.now()));
-    this.db.updateLease(lease);
+    // An operator watching someone else's device neither keeps it alive nor shows in its timeline.
+    const found = this.get(p, id);
+    const isHolder = found.principalId === p.accountId;
+    const lease = isHolder ? wrap(() => m.touch(found, this.now())) : found;
+    if (isHolder) {
+      this.db.updateLease(lease);
+    }
     const deviceId = lease.deviceId;
     if (!deviceId) {
       throw new ApiError(409, 'LEASE_NOT_ACTIVE', 'This lease has no device yet.');
@@ -142,8 +189,16 @@ export class Leases {
     if (!res.ok) {
       throw new ApiError(422, res.error.code, res.error.message);
     }
-    // Recordings keep a timeline of what was done.
-    this.events.emit('op', lease.id, body, startedAt, res.result);
+    if (isHolder) {
+      // Recordings keep a timeline of what was done.
+      this.events.emit('op', lease.id, body, startedAt, res.result);
+      const activity = describeOp(body);
+      const s = this.status.get(lease.id);
+      if (activity && s) {
+        s.activity = activity;
+        s.activityAt = this.now();
+      }
+    }
     return { result: res.result, ...(res.binary ? { binary: Buffer.from(res.binary, 'base64') } : {}) };
   }
 
@@ -171,6 +226,9 @@ export class Leases {
   }
 
   private emit(lease: m.Lease): void {
+    if (lease.state === 'ended') {
+      this.status.delete(lease.id);
+    }
     this.events.emit(lease.id, lease);
     this.events.emit('any', lease);
   }

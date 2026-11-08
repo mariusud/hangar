@@ -11,8 +11,9 @@ import type { ElementSelector, Point, PrivacyService } from '@hangar/protocol';
 export const CLIENT_HELP = `Client
   hangar login <url>                       sign in from this computer (opens the browser)
   hangar devices                           list devices
-  hangar lease [--android] [--model M] [--os V] [--image NAME] [--hold] [--record]
-                                           lease a device; --hold keeps it until Ctrl-C
+  hangar lease [--android] [--model M] [--os V] [--image NAME] [--hold] [--record] [--purpose TEXT]
+                                           lease a device; --hold keeps it until Ctrl-C;
+                                           --purpose shows on the Fleet page
   hangar tests                             each test's passes, flaky passes and failures
   hangar images                            device images every Mac keeps ready
   hangar image set <name> [--app A]... [--locale nb_NO] [--appearance dark]
@@ -152,12 +153,12 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       return true;
     }
     case 'lease': {
-      const { values } = parseArgs({ args, options: { android: { type: 'boolean' }, model: { type: 'string' }, os: { type: 'string' }, image: { type: 'string' }, hold: { type: 'boolean' }, ttl: { type: 'string' }, record: { type: 'boolean' } } });
+      const { values } = parseArgs({ args, options: { android: { type: 'boolean' }, model: { type: 'string' }, os: { type: 'string' }, image: { type: 'string' }, hold: { type: 'boolean' }, ttl: { type: 'string' }, record: { type: 'boolean' }, purpose: { type: 'string' } } });
       const client = await Hangar.fromEnv();
       process.stderr.write('Getting a device...\n');
       const lease = await client.lease(
         { ...(values.android ? { platform: 'android-emulator' } : {}), ...(values.model ? { model: values.model } : {}), ...(values.os ? { os: values.os } : {}), ...(values.image ? { image: values.image } : {}) },
-        { autoRenew: Boolean(values.hold), record: Boolean(values.record), ...(values.ttl ? { ttlSeconds: Number(values.ttl) } : {}) },
+        { autoRenew: Boolean(values.hold), record: Boolean(values.record), via: values.purpose ?? 'CLI', ...(values.ttl ? { ttlSeconds: Number(values.ttl) } : {}) },
       );
       console.log(lease.id);
       process.stderr.write(`Leased ${lease.info.device?.model}, ${lease.info.device?.platform === 'android-emulator' ? 'Android' : 'iOS'} ${lease.info.device?.os}.\nWatch it: ${client.url}/leases/${lease.id}\n`);

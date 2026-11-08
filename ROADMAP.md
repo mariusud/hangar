@@ -57,9 +57,8 @@ Milestone 3 has started. `hangar join <url> --token` connects another Mac's agen
 over one WebSocket (decision 0008), and it reconnects on its own. `hangar broker` runs the broker
 without devices, `Dockerfile` builds it as an image, and `deploy/helm/hangar` runs it on
 Kubernetes. `hangar export` and `hangar import` move a broker's database, builds and recordings.
-The socket and export/import are tested on one Mac only. No second Mac has joined yet. The image has
-not been built (Docker could not reach the registry here), and the Helm chart has not been
-linted or installed.
+The socket and export/import are tested on one Mac only. No second Mac has joined yet. The image builds and
+runs; the Helm chart has not been linted or installed.
 
 Android emulators on a Mac work: `hangar up --android <avd>` (or `hangar join ... --android`)
 runs read-only instances of one AVD, so a lease's wipe is killing the instance. The live screen
@@ -127,6 +126,12 @@ Done:
 - Shards are balanced by each test's last timing, longest first.
 - A device image's golden device is named after the runtime too, so an Xcode update rebuilds it.
 - `GET /v1/tests` and `hangar tests`: passes, flaky passes and failures per test.
+- The console's Fleet page: every device with a live picture, its holder, how it was leased and
+  what was last done on it. Checked with a real Claude agent over MCP, a Maestro run and a
+  scripted tester at once.
+- Fixes found on the way: action points outside the screen are refused instead of swiping
+  off-screen for 31 s, and companions left by a Hangar that was killed hard are stopped when
+  the next one starts.
 
 To do:
 
@@ -143,8 +148,8 @@ To do:
   encoding is hardware or software and its CPU per stream, clone and boot time, idle memory.
   Needs a macOS VM image with Xcode, tens of GB to download. Tart's license needs a reading.
 - A Homebrew formula, which needs a published release to point at.
-- The Docker image built and tried. On 2026-11-07 Docker here still could not pull
-  `node:22-slim` from the registry.
+- The broker's Docker image in a real deployment with an agent joined to it. It builds (411 MB)
+  and starts, serves the console and keeps its data volume across restarts (2026-11-08).
 - A public demo that resets itself.
 - Not checked: simulators booting for a `hangar` user that is logged in in the background.
 

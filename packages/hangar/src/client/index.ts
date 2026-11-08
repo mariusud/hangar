@@ -124,11 +124,12 @@ export class Hangar {
 
   // Leases a device and waits until it is active. The returned lease renews itself until released.
   // `record: true` records the whole lease; the link is in `recordings()` once it is released.
-  async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean } = {}): Promise<Lease> {
+  async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean; via?: string } = {}): Promise<Lease> {
     let info = await this.json<LeaseInfo>('POST', `/v1/leases?wait=${opts.waitSeconds ?? 120}`, {
       class: cls,
       ...(opts.ttlSeconds ? { ttlSeconds: opts.ttlSeconds } : {}),
       ...(opts.record ? { record: true } : {}),
+      ...(opts.via ? { via: opts.via } : {}),
     });
     while (info.state === 'queued' || info.state === 'preparing') {
       info = await this.json<LeaseInfo>('GET', `/v1/leases/${info.id}?wait=60`);

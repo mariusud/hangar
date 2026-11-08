@@ -48,7 +48,8 @@ for [mobile-mcp](https://github.com/mobile-next/mobile-mcp) works against the fl
 is a lease id:
 
 1. `mobile_allocate_remote_device` with `platform: "ios"` or `"android"` leases a fresh device
-   and returns its id.
+   and returns its id. An optional `purpose`, such as "check the login flow", shows next to the
+   device on the console's Fleet page. `lease_device` takes it too.
 2. `mobile_list_elements_on_screen`, `mobile_click_on_screen_at_coordinates` (x and y, or a ref
    such as `@e1`), `mobile_double_tap_on_screen`, `mobile_long_press_on_screen_at_coordinates`,
    `mobile_swipe_on_screen`, `mobile_type_keys`, `mobile_press_button`, `mobile_take_screenshot`,

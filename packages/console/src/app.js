@@ -61,7 +61,10 @@ async function render() {
   if (!me) return loginView();
   who.replaceChildren(`${me.name} · `, h('a', { href: '#', onclick: async (e) => { e.preventDefault(); await api('POST', '/v1/logout'); go('/'); } }, 'Sign out'));
   const links = [['/', 'Devices'], ['/runs', 'Runs'], ['/recordings', 'Recordings'], ['/connect', 'Connect']];
-  if (me.role === 'operator') links.push(['/people', 'People']);
+  if (me.role === 'operator') {
+    links.splice(1, 0, ['/fleet', 'Fleet']);
+    links.push(['/people', 'People']);
+  }
   nav.replaceChildren(...links.map(([href, label]) => h('a', { href, 'data-link': true, class: path === href ? 'on' : '' }, label)));
   const lease = path.match(/^\/leases\/([^/]+)$/);
   if (lease) return leaseView(lease[1]);
@@ -74,6 +77,7 @@ async function render() {
   if (path === '/connect') return connectView();
   if (path === '/cli-login') return cliLoginView();
   if (path === '/people') return peopleView();
+  if (path === '/fleet') return fleetView();
   return devicesView();
 }
 
@@ -158,7 +162,7 @@ async function devicesView() {
     button.disabled = true;
     button.textContent = 'Getting a device…';
     try {
-      const lease = await api('POST', '/v1/leases?wait=120', { class: { platform: d.platform, model: d.model, os: d.os } });
+      const lease = await api('POST', '/v1/leases?wait=120', { class: { platform: d.platform, model: d.model, os: d.os }, via: 'Console' });
       go(`/leases/${lease.id}`);
     } catch (x) {
       err.textContent = x.message;
@@ -432,6 +436,70 @@ async function leaseView(id) {
   screen.focus();
 }
 
+// Every device at once, for operators: what each holder is doing, with a live picture.
+async function fleetView() {
+  const grid = h('div', { class: 'fleet' });
+  const count = h('p', { class: 'muted' });
+  app.replaceChildren(h('h1', {}, 'Fleet'), count, grid);
+  const tiles = new Map();
+  let stopped = false;
+  const ago = (t) => {
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    return s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+  };
+  const watch = async (id, img) => {
+    while (!stopped && tiles.has(id)) {
+      if (!document.hidden) {
+        const res = await fetch(`/v1/leases/${id}/screenshot?format=jpeg&maxSize=360`).catch(() => null);
+        if (res?.ok) {
+          const url = URL.createObjectURL(await res.blob());
+          img.onload = () => URL.revokeObjectURL(url);
+          img.src = url;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  };
+  const refresh = async () => {
+    const [leases, devices] = await Promise.all([api('GET', '/v1/leases?all=1'), api('GET', '/v1/devices')]);
+    const active = leases.filter((l) => l.state === 'active' && l.device);
+    const free = devices.filter((d) => d.state === 'ready');
+    count.textContent = `${active.length} in use, ${free.length} ready`;
+    for (const [id, t] of tiles) {
+      if (!active.some((l) => l.id === id)) {
+        t.el.remove();
+        tiles.delete(id);
+      }
+    }
+    for (const l of active) {
+      let t = tiles.get(l.id);
+      if (!t) {
+        const img = h('img', { alt: '' });
+        const holder = h('div', { class: 'holder' });
+        const via = h('div', { class: 'via muted' });
+        const doing = h('div', { class: 'doing' });
+        const el = h('a', { class: 'tile', href: `/leases/${l.id}`, 'data-link': true }, h('div', { class: 'shot' }, img), h('div', { class: 'meta' }, holder, via, doing));
+        t = { el, holder, via, doing };
+        tiles.set(l.id, t);
+        void watch(l.id, img);
+      }
+      t.holder.replaceChildren(h('b', {}, l.owner), h('span', { class: 'muted' }, ` · ${l.device.model}`));
+      t.via.textContent = l.via ?? '';
+      t.doing.textContent = l.activity ? `${l.activity} · ${ago(l.activityAt)}` : 'Just started';
+    }
+    grid.replaceChildren(
+      ...active.map((l) => tiles.get(l.id).el),
+      ...free.map((d) => h('div', { class: 'tile ready' }, h('div', { class: 'shot' }, h('span', {}, 'Ready')), h('div', { class: 'meta' }, h('div', { class: 'holder' }, h('b', {}, system(d))), h('div', { class: 'via muted' }, d.host)))),
+    );
+  };
+  await refresh();
+  const t = setInterval(() => void refresh().catch(() => {}), 2000);
+  cleanup = () => {
+    stopped = true;
+    clearInterval(t);
+  };
+}
+
 async function connectView() {
   const result = h('div');
   app.replaceChildren(
@@ -440,9 +508,13 @@ async function connectView() {
       h('p', {}, 'Make a token for each agent, script or CI job, so you can revoke one without breaking the others.'),
       h('label', { for: 'label' }, 'What is it for?'),
       h('input', { id: 'label', type: 'text', placeholder: 'For example: support agent, nightly CI' }),
+      me.role === 'operator'
+        ? h('label', { class: 'check' }, h('input', { id: 'upload', type: 'checkbox' }), ' Can upload apps. CI needs this to install the build it tests.')
+        : '',
       h('p', {}, h('button', { class: 'primary', onclick: async () => {
         const label = document.getElementById('label').value || 'token';
-        const t = await api('POST', '/v1/tokens', { label });
+        const upload = document.getElementById('upload')?.checked;
+        const t = await api('POST', '/v1/tokens', { label, ...(upload ? { scopes: ['install:upload'] } : {}) });
         result.replaceChildren(
           h('h2', {}, 'Your token'),
           h('p', { class: 'muted' }, 'Copy it now. It is shown only once.'),

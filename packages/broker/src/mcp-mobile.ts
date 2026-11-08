@@ -81,9 +81,10 @@ export function registerMobileTools({ server, p, db, leases, safe, text, install
         version: z.array(z.string()).optional().describe('OS version prefixes; the first is used'),
         wait: z.boolean().optional(),
         timeoutSeconds: z.number().int().positive().optional(),
+        purpose: z.string().max(80).optional().describe('What you will do on the device, in a few words, such as "check the login flow". People watching the fleet see it.'),
       },
     },
-    ({ platform, name, version, wait, timeoutSeconds }) =>
+    ({ platform, name, version, wait, timeoutSeconds, purpose }) =>
       safe(async () => {
         const cls: DeviceClass = { platform: platform === 'ios' ? 'ios-simulator' : 'android-emulator' };
         if (name) {
@@ -92,7 +93,7 @@ export function registerMobileTools({ server, p, db, leases, safe, text, install
         if (version?.[0]) {
           cls.os = version[0];
         }
-        const lease = leases.create(p, cls);
+        const lease = leases.create(p, cls, { via: purpose ? `MCP: ${purpose}` : 'MCP' });
         const until = Date.now() + (wait === false ? 0 : (timeoutSeconds ?? 120) * 1000);
         let current = lease;
         while ((current.state === 'queued' || current.state === 'preparing') && Date.now() < until) {

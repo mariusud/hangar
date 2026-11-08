@@ -48,7 +48,12 @@ a { color: var(--link); }
   background: var(--panel);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); text-decoration: none; }
-.brand img { width: 22px; height: 22px; }
+.brand img { width: 24px; height: 24px; }
+.brand .on-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  .brand .on-light { display: none; }
+  .brand .on-dark { display: inline; }
+}
 #nav { display: flex; gap: 14px; flex: 1; }
 #nav a { color: var(--muted); text-decoration: none; }
 #nav a.on { color: var(--text); box-shadow: 0 2px 0 var(--accent); }
@@ -71,6 +76,7 @@ h2 { font-size: 16px; margin: 24px 0 10px; }
 }
 .narrow { max-width: 380px; margin: 40px auto; }
 label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--text); }
 input[type='text'], input[type='password'], input[type='url'], select {
   width: 100%;
   padding: 9px 10px;
@@ -148,3 +154,13 @@ button.recording { color: var(--bad); border-color: var(--bad); }
 }
 .step.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .step.error, .step.fault { color: var(--bad); }
+.fleet { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+.tile { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; color: var(--text); text-decoration: none; }
+a.tile:hover { border-color: var(--accent); }
+.tile .shot { aspect-ratio: 402 / 874; background: #000; display: grid; place-items: center; }
+.tile .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile.ready .shot { background: repeating-linear-gradient(135deg, var(--bg) 0 10px, var(--panel) 10px 20px); color: var(--muted); }
+.tile .meta { padding: 10px 12px 12px; font-size: 13px; display: grid; gap: 2px; }
+.tile .holder { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .via, .tile .doing { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .doing { color: var(--link); }

@@ -100,11 +100,12 @@ function buildServer(p: auth.Principal, db: Db, leases: Leases, recordings: Reco
         os: z.string().optional().describe('For example "26.5". Leave out for any.'),
         image: z.string().optional().describe('A device image by name, with apps and settings already in place. See GET /v1/images.'),
         ttlSeconds: z.number().optional().describe('Ends unless renewed within this time. Default 600.'),
+        purpose: z.string().max(80).optional().describe('What you will do on the device, in a few words, such as "check the login flow". People watching the fleet see it.'),
       },
     },
-    ({ platform, model, os, image, ttlSeconds }) =>
+    ({ platform, model, os, image, ttlSeconds, purpose }) =>
       safe(async () => {
-        const lease = leases.create(p, { ...(platform ? { platform } : {}), ...(model ? { model } : {}), ...(os ? { os } : {}), ...(image ? { image } : {}) }, ttlSeconds ? { ttlSeconds } : {});
+        const lease = leases.create(p, { ...(platform ? { platform } : {}), ...(model ? { model } : {}), ...(os ? { os } : {}), ...(image ? { image } : {}) }, { ...(ttlSeconds ? { ttlSeconds } : {}), via: purpose ? `MCP: ${purpose}` : 'MCP' });
         const until = Date.now() + 120_000;
         let current = lease;
         while (current.state === 'queued' || current.state === 'preparing') {

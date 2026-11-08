@@ -10,6 +10,9 @@ Everything Hangar does today, with links to the guides.
   type, key, button, wait for an element), install a `.app`, launch, terminate, open URL.
 - A console: invite links and passwords, the device list, a live screen in H.264 at 60 frames
   per second (JPEG on plain-HTTP pages) with touch and keyboard, install and open URL.
+- The Fleet page, for operators: every device at once with a live picture, who holds it, how
+  they got it (an agent's purpose, a run's shard, the console) and the last thing they did.
+  Watching a device does not keep its lease alive. `hangar lease --purpose` sets the line too.
 - Teams with quotas, for operators on the People page: a team holds at most its quota of
   devices at once, and requests over it wait in the queue, fairly between teams.
 - Single sign-on through any OpenID Connect provider, with groups mapped to teams and roles

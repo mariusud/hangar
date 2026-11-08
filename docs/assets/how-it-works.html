@@ -1,0 +1,177 @@
+<!doctype html>
+<!-- Source of how-it-works.gif. Render with: node docs/assets/render.mjs -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { --ink: #0c0e12; --panel: #14171c; --line: #262b33; --text: #eef0f3; --mist: #9aa3ae; --amber: #f5a524; --sky: #7cc4fa; --mint: #8be0a4; }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1200px; height: 640px; background: var(--ink); color: var(--text); font-family: -apple-system, 'SF Pro Text', 'Segoe UI', sans-serif; position: relative; overflow: hidden; }
+  .mono { font-family: 'SF Mono', Menlo, monospace; }
+  .col-title { position: absolute; top: 28px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--mist); }
+
+  .client { position: absolute; left: 40px; width: 320px; height: 128px; background: var(--panel); border: 1.5px solid var(--line); border-radius: 14px; padding: 18px 20px; transition: border-color .3s, box-shadow .3s; }
+  .client .who { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 20px; }
+  .client .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .client .how { margin-top: 6px; color: var(--mist); font-size: 14px; }
+  .client .cmd { margin-top: 12px; font-size: 13px; color: var(--text); background: #0f1216; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; white-space: nowrap; overflow: hidden; }
+  .client.on { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 18%, transparent); border-color: var(--c); }
+
+  .broker { position: absolute; left: 470px; top: 200px; width: 240px; height: 240px; background: var(--panel); border: 1.5px solid var(--line); border-radius: 18px; padding: 22px; }
+  .broker .name { display: flex; align-items: center; gap: 12px; font-size: 28px; font-weight: 700; letter-spacing: -.02em; }
+  .broker .rows { margin-top: 22px; display: grid; gap: 9px; }
+  .broker .row { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--mist); transition: color .2s; }
+  .broker .row i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); transition: background .2s, box-shadow .2s; }
+  .broker .row.on { color: var(--text); }
+  .broker .row.on i { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+
+  .mac { position: absolute; left: 800px; width: 360px; height: 236px; background: var(--panel); border: 1.5px solid var(--line); border-radius: 16px; padding: 16px 20px; }
+  .mac .host { font-size: 14px; color: var(--mist); }
+  .mac .host b { color: var(--text); font-weight: 600; }
+  .slots { display: flex; gap: 20px; margin-top: 16px; }
+  .dev { width: 92px; height: 164px; border-radius: 18px; border: 2px solid #3a414b; background: #1b2027; position: relative; transition: background .4s, border-color .4s; overflow: hidden; }
+  .dev::before { content: ''; position: absolute; top: 9px; left: 32px; width: 24px; height: 6px; border-radius: 3px; background: #3a414b; }
+  .dev .tag { position: absolute; inset: auto 0 12px 0; text-align: center; font-size: 12px; font-weight: 600; color: var(--mist); }
+  .dev .kind { position: absolute; top: 30px; inset-inline: 0; text-align: center; font-size: 11px; color: #5e6670; }
+  .dev.leased { background: var(--c); border-color: var(--c); }
+  .dev.leased .tag, .dev.leased .kind { color: var(--ink); }
+  .dev.leased::after { content: ''; position: absolute; left: 14px; right: 14px; top: 56px; height: 60px; border-radius: 8px; background: repeating-linear-gradient(180deg, rgba(12,14,18,.28) 0 8px, transparent 8px 16px); }
+  .dev.wiping { background: repeating-linear-gradient(135deg, #2a3038 0 10px, #1b2027 10px 20px); background-size: 200% 200%; animation: wipe 1s linear infinite; }
+  @keyframes wipe { to { background-position: 100% 100%; } }
+
+  svg.wires { position: absolute; inset: 0; pointer-events: none; }
+  svg.wires path { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: var(--len); stroke-dashoffset: var(--len); transition: stroke-dashoffset .7s ease-out, opacity .5s; }
+  svg.wires path.drawn { stroke-dashoffset: 0; }
+  svg.wires path.gone { opacity: 0; }
+
+  .caption { position: absolute; left: 40px; right: 40px; bottom: 26px; height: 40px; display: flex; align-items: center; gap: 14px; font-size: 21px; }
+  .caption .step { font-size: 13px; color: var(--ink); background: var(--amber); border-radius: 6px; padding: 3px 8px; font-weight: 700; }
+  .caption span.text { transition: opacity .3s; }
+</style>
+</head>
+<body>
+  <div class="col-title" style="left:40px">Who needs a device</div>
+  <div class="col-title" style="left:470px">The broker</div>
+  <div class="col-title" style="left:800px">The Macs you own</div>
+
+  <div class="client" id="agent" style="top:70px; --c: var(--mint)">
+    <div class="who"><span class="dot" style="background:var(--mint)"></span>AI agent</div>
+    <div class="how">Claude Code, Cursor, any MCP client</div>
+    <div class="cmd mono">mobile_allocate_remote_device</div>
+  </div>
+  <div class="client" id="ci" style="top:256px; --c: var(--sky)">
+    <div class="who"><span class="dot" style="background:var(--sky)"></span>CI pipeline</div>
+    <div class="how">Maestro or XCUITest on every pull request</div>
+    <div class="cmd mono">hangar run maestro .maestro --shards 3</div>
+  </div>
+  <div class="client" id="dev" style="top:442px; --c: var(--amber)">
+    <div class="who"><span class="dot" style="background:var(--amber)"></span>Developer</div>
+    <div class="how">Your app, Metro on your laptop</div>
+    <div class="cmd mono">hangar run ios</div>
+  </div>
+
+  <div class="broker">
+    <div class="name"><img src="mark.svg" width="40" height="40" alt="" />Hangar</div>
+    <div class="rows">
+      <div class="row" id="r-queue"><i></i>queue requests fairly</div>
+      <div class="row" id="r-lease"><i></i>lease a free device</div>
+      <div class="row" id="r-wipe"><i></i>wipe it when released</div>
+      <div class="row" id="r-record"><i></i>record and report</div>
+    </div>
+  </div>
+
+  <div class="mac" style="top:70px">
+    <div class="host"><b>studio-mini</b> · Mac mini</div>
+    <div class="slots"><div class="dev" id="a1"><div class="kind">iPhone 17</div><div class="tag">ready</div></div><div class="dev" id="a2"><div class="kind">iPhone 17</div><div class="tag">ready</div></div><div class="dev" id="a3"><div class="kind">iPhone 17</div><div class="tag">ready</div></div></div>
+  </div>
+  <div class="mac" style="top:334px">
+    <div class="host"><b>build-mini</b> · Mac mini</div>
+    <div class="slots"><div class="dev" id="b1"><div class="kind">iPhone 17</div><div class="tag">ready</div></div><div class="dev" id="b2"><div class="kind">iPhone SE</div><div class="tag">ready</div></div><div class="dev" id="b3"><div class="kind">Pixel 9</div><div class="tag">ready</div></div></div>
+  </div>
+
+  <svg class="wires" id="wires" width="1200" height="640"></svg>
+
+  <div class="caption"><span class="step" id="step">1/4</span><span class="text" id="text"></span></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const wires = $('wires');
+const center = (el, side) => {
+  const r = el.getBoundingClientRect();
+  return side === 'right' ? [r.right, r.top + r.height / 2] : side === 'left' ? [r.left, r.top + r.height / 2] : [r.left + r.width / 2, r.top + r.height / 2];
+};
+function wire(from, to, color) {
+  const [x1, y1] = from, [x2, y2] = to, mx = (x1 + x2) / 2;
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', `M${x1} ${y1} C${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
+  p.setAttribute('stroke', color);
+  wires.append(p);
+  const len = p.getTotalLength();
+  p.style.setProperty('--len', len);
+  requestAnimationFrame(() => requestAnimationFrame(() => p.classList.add('drawn')));
+  return p;
+}
+const broker = document.querySelector('.broker');
+const brokerIn = (y) => [broker.getBoundingClientRect().left, y];
+const brokerOut = (y) => [broker.getBoundingClientRect().right, y];
+const color = { agent: '#8be0a4', ci: '#7cc4fa', dev: '#f5a524' };
+const held = {};
+function flash(id) {
+  $(id).classList.add('on');
+  setTimeout(() => $(id).classList.remove('on'), 900);
+}
+function caption(step, text) {
+  $('step').textContent = step;
+  $('text').style.opacity = 0;
+  setTimeout(() => { $('text').textContent = text; $('text').style.opacity = 1; }, 250);
+}
+function lease(who, devices, labels) {
+  const c = $(who);
+  c.classList.add('on');
+  flash('r-queue');
+  const y = 250 + Object.keys(color).indexOf(who) * 60;
+  const inWire = wire(center(c, 'right'), brokerIn(y), color[who]);
+  held[who] = { wires: [inWire], devices };
+  setTimeout(() => {
+    flash('r-lease');
+    devices.forEach((id, i) => {
+      const d = $(id);
+      held[who].wires.push(wire(brokerOut(y), center(d, 'left'), color[who]));
+      setTimeout(() => {
+        d.style.setProperty('--c', color[who]);
+        d.classList.add('leased');
+        d.querySelector('.tag').textContent = labels[i];
+      }, 500);
+    });
+  }, 650);
+}
+function release(who) {
+  $(who).classList.remove('on');
+  flash('r-wipe');
+  for (const w of held[who].wires) w.classList.add('gone');
+  for (const id of held[who].devices) {
+    const d = $(id);
+    d.classList.remove('leased');
+    d.classList.add('wiping');
+    d.querySelector('.tag').textContent = 'wiping';
+    setTimeout(() => { d.classList.remove('wiping'); d.querySelector('.tag').textContent = 'ready'; }, 1500);
+  }
+}
+const plan = [
+  [400, () => caption('1/4', 'An AI agent asks for an iPhone over MCP and gets its own.')],
+  [700, () => lease('agent', ['a1'], ['agent'])],
+  [3000, () => caption('2/4', 'CI shards a Maestro suite over three fresh devices at once.')],
+  [3300, () => lease('ci', ['a2', 'b1', 'b2'], ['shard 1', 'shard 2', 'shard 3'])],
+  [5900, () => caption('3/4', 'A developer runs their app on another, with Fast Refresh.')],
+  [6200, () => lease('dev', ['a3'], ['you'])],
+  [8600, () => { caption('4/4', 'When each is done, the device is wiped and goes back to the pool.'); flash('r-record'); }],
+  [9000, () => release('agent')],
+  [10000, () => release('ci')],
+  [11400, () => release('dev')],
+];
+window.start = () => { for (const [t, f] of plan) setTimeout(f, t); };
+window.duration = 13600;
+if (!navigator.webdriver && !location.hash.includes('manual')) start();
+</script>
+</body>
+</html>

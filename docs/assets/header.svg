@@ -10,9 +10,15 @@
   <rect width="1280" height="400" fill="#0C0E12"/>
 
   <!-- wordmark -->
-  <text x="96" y="178" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="96" font-weight="700" letter-spacing="-3">Hangar</text>
-  <text x="100" y="230" fill="#9AA3AE" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27">Simulators and emulators for</text>
-  <text x="100" y="266" fill="#9AA3AE" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27">your team, on Macs you own.</text>
+  <g transform="translate(96 92) scale(3)">
+    <path d="M2.5 28 A13.5 16 0 0 1 29.5 28" fill="none" stroke="#EEF0F3" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M6.5 28 A9.5 11.5 0 0 1 25.5 28" fill="none" stroke="#EEF0F3" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+    <rect x="12" y="15" width="8" height="13" rx="2" fill="#F5A524"/>
+    <rect x="14.6" y="16.6" width="2.8" height="1.1" rx=".55" fill="#0C0E12"/>
+  </g>
+  <text x="206" y="178" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="96" font-weight="700" letter-spacing="-3">Hangar</text>
+  <text x="100" y="236" fill="#C9CED6" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="25">Shared simulators for people, CI and AI agents.</text>
+  <text x="100" y="272" fill="#9AA3AE" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="25">Self-hosted. Every device is wiped after use.</text>
   <rect x="100" y="298" width="178" height="44" rx="10" fill="#161A20" stroke="#2A3038"/>
   <text x="120" y="327" fill="#F5A524" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">$</text>
   <text x="142" y="327" fill="#E6E9ED" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">hangar up</text>
