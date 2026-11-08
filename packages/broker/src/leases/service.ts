@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { DeviceClass, LeaseEndReason, Op } from '@hangar/protocol';
+import type { DeviceClass, LeaseEndReason, Op, Platform } from '@hangar/protocol';
 import type { Principal } from '../auth.ts';
 import type { Db } from '../db.ts';
 import type { Hosts } from '../hosts.ts';
@@ -21,14 +21,13 @@ export class ApiError extends Error {
 }
 
 const HOST_GRACE_MS = 60_000;
-const DEFAULT_TEAM = 'default';
 
 export type LeaseView = {
   id: string;
   state: m.Lease['state'];
   reason: LeaseEndReason | null;
   class: DeviceClass;
-  device: { model: string; os: string } | null;
+  device: { model: string; os: string; platform: Platform } | null;
   queuePosition: number | null;
   expiresAt: number | null;
   createdAt: number;
@@ -53,18 +52,27 @@ export class Leases {
 
   create(p: Principal, cls: DeviceClass, opts: { ttlSeconds?: number; maxSeconds?: number } = {}): m.Lease {
     const offers = this.hosts.offers();
+    // A declared image is on offer from every iOS host at once; the lease queues while it builds.
+    const declared = this.db.images().find((i) => i.name.toLowerCase() === cls.image?.toLowerCase());
+    if (declared) {
+      for (const o of this.hosts.offers()) {
+        if ((o.platform ?? 'ios-simulator') === 'ios-simulator' && !o.image) {
+          offers.push({ ...o, image: declared.name });
+        }
+      }
+    }
     if (offers.length === 0) {
       throw new ApiError(503, 'NO_DEVICES', 'No Mac with devices is connected.', 'Run `npx hangar up` on a Mac, or check `hangar status` on the Macs you have.');
     }
     if (!offers.some((o) => m.matches(cls, { deviceId: '', ...o, build: null }))) {
-      const offered = [...new Set(offers.map((o) => `${o.model} (iOS ${o.os})`))].join(', ');
+      const offered = [...new Set(offers.map((o) => `${o.model} (${o.platform === 'android-emulator' ? 'Android' : 'iOS'} ${o.os}${o.image ? `, image ${o.image}` : ''})`))].join(', ');
       throw new ApiError(404, 'NO_MATCHING_DEVICE', `No device matches ${describeClass(cls)}.`, `Devices on offer: ${offered}.`);
     }
     const lease = m.newLease(
       {
         id: randomUUID(),
         principalId: p.accountId,
-        teamId: DEFAULT_TEAM,
+        teamId: this.db.teamOf(p.accountId),
         class: cls,
         ...(opts.ttlSeconds ? { ttlMs: opts.ttlSeconds * 1000 } : {}),
         ...(opts.maxSeconds ? { maxMs: opts.maxSeconds * 1000 } : {}),
@@ -96,7 +104,7 @@ export class Leases {
       state: lease.state,
       reason: lease.reason,
       class: lease.class,
-      device: device ? { model: device.model, os: device.os } : null,
+      device: device ? { model: device.model, os: device.os, platform: device.platform ?? 'ios-simulator' } : null,
       queuePosition: lease.state === 'queued' ? queued.findIndex((l) => l.id === lease.id) + 1 : null,
       expiresAt: m.deadline(lease)?.at ?? null,
       createdAt: lease.createdAt,
@@ -123,7 +131,9 @@ export class Leases {
     if (!deviceId) {
       throw new ApiError(409, 'LEASE_NOT_ACTIVE', 'This lease has no device yet.');
     }
-    const timeout = body.op === 'maestro' ? 31 * 60_000 : body.op === 'install' ? 300_000 : 60_000;
+    const startedAt = this.now();
+    // A recording's stop waits for the host to upload the video.
+    const timeout = body.op === 'maestro' ? 31 * 60_000 : body.op === 'install' || body.op === 'recordStop' ? 300_000 : 60_000;
     const res = await this.hosts
       .request(deviceId, (rid) => ({ type: 'op', id: rid, leaseId: lease.id, body }), timeout)
       .catch((err: Error & { code?: string }) => {
@@ -132,6 +142,8 @@ export class Leases {
     if (!res.ok) {
       throw new ApiError(422, res.error.code, res.error.message);
     }
+    // Recordings keep a timeline of what was done.
+    this.events.emit('op', lease.id, body, startedAt, res.result);
     return { result: res.result, ...(res.binary ? { binary: Buffer.from(res.binary, 'base64') } : {}) };
   }
 
@@ -189,7 +201,7 @@ export class Leases {
       const ready = this.hosts
         .devices()
         .filter((d) => d.connected && d.state === 'ready' && !used.has(d.deviceId))
-        .map((d) => ({ deviceId: d.deviceId, model: d.model, os: d.os, build: null }));
+        .map((d) => ({ deviceId: d.deviceId, model: d.model, os: d.os, build: null, platform: d.platform ?? 'ios-simulator', ...(d.image ? { image: d.image } : {}) }));
       const queued = this.db.leasesIn(['queued']);
       const active = this.db.leasesIn(['preparing', 'active']);
       const assignments = m.schedule({
@@ -197,7 +209,7 @@ export class Leases {
         ready,
         activeByTeam: countBy(active, (l) => l.teamId),
         activeByPrincipal: countBy(active, (l) => l.principalId),
-        quotaByTeam: new Map(),
+        quotaByTeam: quotas(this.db),
       });
       for (const a of assignments) {
         const lease = queued.find((l) => l.id === a.leaseId);
@@ -267,7 +279,19 @@ function countBy<T>(items: T[], key: (t: T) => string): Map<string, number> {
   return out;
 }
 
+function quotas(db: Db): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const t of db.teams()) {
+    if (t.quota !== null) {
+      out.set(t.id, t.quota);
+    }
+  }
+  return out;
+}
+
 export function describeClass(cls: DeviceClass): string {
-  const parts = [cls.model, cls.os && `iOS ${cls.os}`, cls.build && `with ${cls.build}`].filter(Boolean);
+  const system = cls.platform === 'android-emulator' ? 'Android' : 'iOS';
+  const kind = cls.platform && !cls.model && !cls.os ? (cls.platform === 'android-emulator' ? 'an Android emulator' : 'an iOS simulator') : null;
+  const parts = [kind, cls.model, cls.os && `${system} ${cls.os}`, cls.build && `with ${cls.build}`, cls.image && `image ${cls.image}`].filter(Boolean);
   return parts.length ? parts.join(', ') : 'any device';
 }

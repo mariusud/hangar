@@ -4,6 +4,7 @@ import {
   activate,
   assign,
   deadline,
+  matches,
   due,
   end,
   newLease,
@@ -181,4 +182,13 @@ test('property: no device is double-leased and every lease ends', () => {
     leases = leases.map((l) => (ending.some((x) => x.id === l.id) ? end(l, 'expired', now) : l));
     assert.ok(leases.every((l) => l.state === 'ended'), 'a lease never ended');
   }
+});
+
+test('a device class picks iOS or Android; devices without a platform are iOS simulators', () => {
+  const ios = { deviceId: 'a', model: 'iPhone 17', os: '26.5', build: null };
+  const pixel = { deviceId: 'b', model: 'Pixel 8a', os: '16', build: null, platform: 'android-emulator' as const };
+  assert.equal(matches({ platform: 'android-emulator' }, pixel), true);
+  assert.equal(matches({ platform: 'android-emulator' }, ios), false);
+  assert.equal(matches({ platform: 'ios-simulator' }, ios), true);
+  assert.equal(matches({}, pixel), true);
 });

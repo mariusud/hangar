@@ -328,6 +328,7 @@ frame. `identifier` matches exactly; `label` matches case-insensitively as a sub
 | Method and path | What it does |
 |---|---|
 | `POST /v1/runs` | Start a run. Body: `build`, `suite`, `class`, `shards`, `retries`, `record` (`never`, `on-failure`, `always`). |
+| `GET /v1/runs` | The team's recent runs. |
 | `GET /v1/runs/:id` | State, per-shard progress, pass and fail counts. |
 | `GET /v1/runs/:id/events` | Server-sent events per test. |
 | `GET /v1/runs/:id/junit.xml` | Merged JUnit report. |
@@ -361,11 +362,20 @@ recorded duration once there is history, retries failed tests on a fresh device 
 times, and marks a test flaky when a retry passes. A run holds its leases like any client, so
 quotas and the queue apply to it.
 
-Today `hangar run maestro` (in `@hangar/client`) does the coordinating itself: it leases the
-shards, installs the app, sends the flows folder to each lease (`POST /v1/leases/:id/maestro`,
-a tar of up to 10 MB), retries failed flows once on the same device, and merges JUnit. The agent
-runs `maestro --device <udid>` on the Mac, so each Maestro process sees only its lease's device.
-The runs API above replaces the client-side loop when runs need a page in the console.
+Maestro and XCUITest are the suite kinds built so far. For XCUITest, `build` is the archived
+Build/Products folder of `build-for-testing`, which holds the app too, and `suite.tests` lists
+-only-testing names to shard over; the agent reads results from xcodebuild's output. For
+Espresso, `build` is the app's .apk, `suite.testBuild` the test .apk, and `suite.tests` class
+names (or `["all"]`); Hangar shards by class rather than with `numShards`, so a failed class
+can be retried on its own. `hangar run maestro` uploads the app as a build if it
+is a path, then starts a run with the flows folder inline as a base64 tar of up to 10 MB
+(`suite: { kind: "maestro", archive, flows }`, where `flows` lists the flow files in it). The
+broker's coordinator retries a failed flow on the same device, recorded, rather than on a fresh
+one, so the recording link in the run and in JUnit shows the retry. A run's coordinator lives in
+the broker process; a run that is going when Hangar stops is marked failed on the next start.
+The agent runs `maestro --device <udid>` on the Mac, so each Maestro process sees only its
+lease's device. Per-test artifacts are the recordings linked from each flow, so there is no
+separate artifacts route yet.
 
 Appium suites do not use runs. They run where they always do, against the Appium endpoint, and
 CI parallelises them the usual way.
@@ -410,7 +420,7 @@ The broker serves a web console at `/`. People sign in with OIDC.
 
 ### SDK, CLI and CI
 
-`@hangar/client` is a typed wrapper over the REST API. `lease()` returns an object that renews
+The client (`import { Hangar } from 'hangar'`) is a typed wrapper over the REST API. `lease()` returns an object that renews
 itself and releases on dispose (`await using`). The `hangar` CLI is built on it:
 
 ```bash
@@ -430,7 +440,8 @@ Action wraps `hangar run` and uploads the JUnit report.
 ### Admin API
 
 Operator only: `/v1/hosts`, `/v1/devices` (force-wipe, quarantine, enroll, assign to team),
-`/v1/teams`, `/v1/classes`, `/v1/builds`, `/v1/tokens`, `/v1/audit`. Hosts connect at
+`/v1/teams`, `/v1/images` (declared device images, which agents build), `/v1/classes`,
+`/v1/builds`, `/v1/tokens`, `/v1/audit`. Hosts connect at
 `/v1/agent/connect`.
 
 ## 6. Lease state machine
@@ -757,81 +768,42 @@ The milestones, their done criteria and the spikes that come first are in
 
 ## 13. Repository layout
 
-The layout follows tapflow and Simlock, the two closest TypeScript projects: one pnpm workspace,
-a `protocol` package shared by both ends, one package per process, platform drivers kept apart
-from the code that schedules them, third-party code under `vendor/` with its license, and an
-`AGENTS.md` at the root and in each package for coding agents.
+One pnpm workspace with five packages, one per process plus what both ends share. Decision 0010
+merged the driver packages into the agent and the client into the CLI.
 
 ```
 hangar/
-  README.md               what it is, what works today, quick start, links to docs
-  ROADMAP.md              milestones, current status, not planned
-  CONTRIBUTING.md         setup, checks, how decisions are recorded
-  SECURITY.md             how to report a vulnerability, link to the security model
-  AGENTS.md               rules for coding agents; CLAUDE.md points here
-  LICENSE                 Apache-2.0
-  NOTICE                  attributions for vendored and bundled code
-  CHANGELOG.md            from the first release, written by changesets
-  package.json            workspace scripts: build, check, test, e2e
-  pnpm-workspace.yaml
-  tsconfig.base.json
-  vitest.config.ts
-  .changeset/
-  .github/workflows/      check.yml (lint, types, unit), e2e-macos.yml (self-hosted Mac), release.yml
-
+  AGENTS.md  README.md  ROADMAP.md  CONTRIBUTING.md  SECURITY.md  LICENSE  NOTICE
+  Dockerfile  action.yml
   packages/
-    protocol/             wire types for broker and agent; no runtime dependencies
-    broker/               the container: HTTP server and everything behind it
-      src/
-        http/             REST routes, WHEP signaling, Appium /wd/hub, error mapping
-        mcp/              remote MCP tools, thin calls into the same services
-        auth/             tokens, OIDC, sign-in proxy, roles and scopes
-        leases/           lease state machine, scheduler, deadlines (pure functions)
-        devices/          device state machine, pool targets, quarantine
-        runs/             run coordinator: sharding, retries, flaky marking, JUnit merge
-        hosts/            agent connections, reconcile on hello, version checks
-        artifacts/        disk and S3-compatible stores, retention
-        db/               schema, migrations, SQLite and Postgres adapters
-        metrics/          Prometheus endpoint
-    agent/                the host agent
-      src/
-        connection/       WebSocket to the broker, hello, reconnect
-        leases/           local lease table, deadlines, refuse unknown leases
-        pool/             warm pool, memory admission, wipe and verify
-        ops/              the fixed op list, argument checks, dispatch to a driver
-        stream/           encoder fan-out, RTP packetizer, WHEP answer, input channel
-        runners/          maestro, xcuitest, espresso, appium
-        service/          launchd and systemd install
-    driver-ios-simulator/ simctl and idb behind the driver interface
-    driver-android/       adb, emulator gRPC, UiAutomator2 server, scrcpy (milestone 2)
-    driver-ios-device/    devicectl, WebDriverAgent, go-ios (milestone 3)
-    console/              web console (Vite and React), served by the broker
-    client/               TypeScript SDK, published as @hangar/client
-    cli/                  the hangar command: lease, run, install, watch, broker and agent start
-    action/               GitHub Action wrapping hangar run (milestone 2)
-    test-utils/           fake host, fake driver, fixture apps; never published
-
-  e2e/                    end-to-end tests: fake-driver suite on any machine, real suite on a Mac
-  vendor/                 third-party code kept as-is, each with LICENSE and a README saying what changed
-  deploy/
-    docker/               Dockerfile, docker-compose.yml with broker, MinIO and coturn
-    helm/                 chart for the broker
-    launchd/              LaunchDaemon plist for the agent
-    systemd/              unit for the agent
-  hosts/versions.json     Xcode, runtime and tool versions each release is tested with
-  docs/
-    design.md             this document
-    decisions/            one file per decision, numbered, titled by the decision
-    get-started/          install, first lease, connect an agent
-    using-devices/        leases, device API, console, recordings
-    running-tests/        runs, Appium, CI
-    operate/              broker, hosts, teams, capacity, upgrades, TLS and ingress
-    reference/            REST API, MCP tools, CLI, configuration, errors
+    protocol/             types and the wire format, shared by every package
+    broker/src/
+      http.ts             REST routes and error mapping
+      mcp.ts              MCP tools, thin calls into the same services
+      auth.ts  oidc.ts    tokens, roles, single sign-on
+      leases/             lease state machine and scheduler (pure functions)
+      hosts.ts  agents.ts agent connections, the agent socket, reconcile on hello
+      runs.ts             sharding, retries, flaky marking, JUnit merge
+      stream.ts tunnel.ts live screen relay and the Metro tunnel
+      images.ts           device images
+      store.ts  db.ts     disk or S3, SQLite
+    agent/
+      src/index.ts        the iOS host: warm pool, leases, ops
+      src/android.ts      the Android host
+      src/connect.ts      `hangar join`: the socket to a broker, reconnect
+      src/drivers/ios/    simctl and the idb companion's gRPC
+      src/drivers/android/ adb and the emulator
+      native/screen.swift capture, H.264, recordings, JPEG conversion
+    console/              web console, plain JavaScript, served by the broker
+    hangar/
+      src/main.ts         the hangar command
+      src/client/         the TypeScript client, exported as `hangar`
+  e2e/  bench/            end-to-end tests and benchmarks on a real Mac
+  deploy/helm/            chart for the broker
+  docs/                   design, decisions, guides
 ```
 
-The driver packages are separate so an Xcode release that breaks one driver is fixed and released
-in one place, and so the agent can be tested against `test-utils`'s fake driver without Xcode. The
-broker never imports a driver; it only knows the protocol.
+The broker never imports the agent or a driver; it only knows the protocol.
 
 The user docs folders start empty and fill as each milestone ships. Each page describes what
 exists, not what is planned.

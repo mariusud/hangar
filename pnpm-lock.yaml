@@ -23,12 +23,12 @@ importers:
       '@hangar/broker':
         specifier: workspace:*
         version: link:../packages/broker
-      '@hangar/client':
-        specifier: workspace:*
-        version: link:../packages/client
       '@hangar/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
+      hangar:
+        specifier: workspace:*
+        version: link:../packages/hangar
 
   e2e:
     dependencies:
@@ -38,21 +38,25 @@ importers:
       '@hangar/broker':
         specifier: workspace:*
         version: link:../packages/broker
-      '@hangar/client':
-        specifier: workspace:*
-        version: link:../packages/client
       '@hangar/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
+      hangar:
+        specifier: workspace:*
+        version: link:../packages/hangar
 
   packages/agent:
     dependencies:
-      '@hangar/driver-ios-simulator':
-        specifier: workspace:*
-        version: link:../driver-ios-simulator
       '@hangar/protocol':
         specifier: workspace:*
         version: link:../protocol
+      ws:
+        specifier: ^8.22.1
+        version: 8.22.1
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.2
+        version: 8.18.2
 
   packages/broker:
     dependencies:
@@ -69,14 +73,16 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@hangar/client':
-        specifier: workspace:*
-        version: link:../client
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      hangar:
+        specifier: workspace:*
+        version: link:../hangar
 
-  packages/cli:
+  packages/console: {}
+
+  packages/hangar:
     dependencies:
       '@hangar/agent':
         specifier: workspace:*
@@ -84,23 +90,6 @@ importers:
       '@hangar/broker':
         specifier: workspace:*
         version: link:../broker
-      '@hangar/client':
-        specifier: workspace:*
-        version: link:../client
-      '@hangar/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
-  packages/client:
-    dependencies:
-      '@hangar/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-
-  packages/console: {}
-
-  packages/driver-ios-simulator:
-    dependencies:
       '@hangar/protocol':
         specifier: workspace:*
         version: link:../protocol

@@ -13,6 +13,6 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.2",
-    "@hangar/client": "workspace:*"
+    "hangar": "workspace:*"
   }
 }

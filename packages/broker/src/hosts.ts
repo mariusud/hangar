@@ -1,7 +1,7 @@
 // Connected agents, their devices, and request/response over each agent's link.
 
 import { randomUUID } from 'node:crypto';
-import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type StreamCodec } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type Platform, type StreamCodec } from '@hangar/protocol';
 
 // One link per agent: a WebSocket, or an in-memory pair when broker and agent share a process.
 export type HostLink = {
@@ -14,7 +14,7 @@ export type Host = {
   name: string;
   versions: Record<string, string>;
   memoryBytes: number;
-  offers: { model: string; os: string }[];
+  offers: { model: string; os: string; platform?: Platform; image?: string }[];
   devices: AgentDevice[];
   connected: boolean;
   lostAt: number | null;
@@ -36,6 +36,8 @@ export class Hosts {
   private pending = new Map<number, Pending>();
   private nextId = 1;
   onChange: () => void = () => {};
+  // The leases an agent says it holds, on every (re)connect.
+  onHello: (held: string[], link: HostLink) => void = () => {};
   onFrame: (leaseId: string, codec: StreamCodec, data: Uint8Array) => void = () => {};
   onStreamFailed: (leaseId: string, codec: StreamCodec, message: string) => void = () => {};
   onTunnel: (m: AgentMessage & { type: 'tunnel.open' | 'tunnel.data' | 'tunnel.close' }) => void = () => {};
@@ -65,6 +67,7 @@ export class Hosts {
           };
           this.hosts.set(host.id, host);
           link.send({ type: 'welcome', hostId: host.id });
+          this.onHello(m.leases, link);
           this.onChange();
         } else if (m.type === 'inventory' && host) {
           host.devices = m.devices;
@@ -103,14 +106,26 @@ export class Hosts {
     return null;
   }
 
-  offers(): { model: string; os: string }[] {
+  offers(): Host['offers'] {
     return [...this.hosts.values()].filter((h) => h.connected).flatMap((h) => h.offers);
+  }
+
+  connectedCount(): number {
+    return [...this.hosts.values()].filter((h) => h.connected).length;
   }
 
   devices(): (AgentDevice & { hostId: string; hostName: string; connected: boolean })[] {
     return [...this.hosts.values()].flatMap((h) =>
       h.devices.map((d) => ({ ...d, hostId: h.id, hostName: h.name, connected: h.connected })),
     );
+  }
+
+  broadcast(message: () => BrokerMessage): void {
+    for (const h of this.hosts.values()) {
+      if (h.connected) {
+        h.link.send(message());
+      }
+    }
   }
 
   notify(deviceId: string, message: BrokerMessage): void {

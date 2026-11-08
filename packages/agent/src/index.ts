@@ -2,9 +2,8 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import { createServer, type Server, type Socket } from 'node:net';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname, totalmem, cpus, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -18,13 +17,16 @@ import {
   type AgentDevice,
   type AgentMessage,
   type BrokerMessage,
+  type DeviceImage,
   type ElementSelector,
   type Frame,
   type MaestroResult,
   type Op,
   type UiNode,
 } from '@hangar/protocol';
-import * as sim from '@hangar/driver-ios-simulator';
+import * as sim from './drivers/ios/index.ts';
+import { Tunnels } from './tunnels.ts';
+import { xcuitest } from './xcuitest.ts';
 
 const run = promisify(execFile);
 
@@ -36,9 +38,21 @@ export type AgentOptions = {
   // Booted devices kept ready and unleased.
   warm?: number;
   model?: string;
+  // Where the broker is, for the paths it sends to download builds and upload recordings.
+  brokerUrl: string;
 };
 
 type Device = AgentDevice & { leaseId: string | null; screen: Frame | null };
+
+type Golden = { udid: string; model: string; os: string };
+
+// A declared image and the golden device built from it on this Mac. `failed` keeps a broken
+// declaration from being rebuilt on every message; declaring it again with a change retries.
+type ImageEntry = { image: DeviceImage; golden: Golden | null; failed: boolean };
+
+type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> | null; wantH264: boolean };
+
+type Recording = { dir: string; uploads: { video: string; log: string; screenshot: string }; log: sim.AppLog; finished: Promise<void> | null };
 
 export class OpError extends Error {
   readonly code: string;
@@ -56,11 +70,14 @@ export function defaultMaxDevices(memoryBytes = totalmem(), cores = cpus().lengt
 
 export class Agent {
   private devices = new Map<string, Device>();
-  private golden: { udid: string; model: string; os: string } | null = null;
+  private golden: Golden | null = null;
+  private images = new Map<string, ImageEntry>();
+  private imageWork: Promise<void> = Promise.resolve();
   private filling = false;
-  private streams = new Map<string, { jpeg: { stop: boolean } | null; h264: sim.ScreenStream | null; wantH264: boolean }>();
+  private streams = new Map<string, Stream>();
   private stopped = false;
-  private tunnels = new Map<string, { server: Server; port: number; sockets: Map<number, Socket> }>();
+  private tunnels: Tunnels;
+  private recordings = new Map<string, Recording>();
   readonly maxDevices: number;
   readonly warm: number;
 
@@ -70,6 +87,7 @@ export class Agent {
     this.opts = opts;
     this.maxDevices = opts.maxDevices ?? defaultMaxDevices();
     this.warm = Math.min(opts.warm ?? 1, this.maxDevices);
+    this.tunnels = new Tunnels(opts.send);
   }
 
   private log(line: string): void {
@@ -88,27 +106,37 @@ export class Agent {
       }
     }
     this.golden = await this.ensureGolden();
+    await this.hello();
+    void this.fill();
+  }
+
+  // The first message on every connection, again after a reconnect, so the broker can match
+  // its leases to the devices that still hold them.
+  async hello(): Promise<void> {
+    if (!this.golden) {
+      return;
+    }
     this.opts.send({
       type: 'hello',
       protocol: PROTOCOL_VERSION,
       hostName: hostname(),
       versions: await sim.versions(),
       memoryBytes: totalmem(),
-      offers: [{ model: this.golden.model, os: this.golden.os }],
+      offers: [{ model: this.golden.model, os: this.golden.os }, ...this.imageOffers()],
       devices: this.inventory(),
-      leases: [],
+      leases: [...this.devices.values()].flatMap((d) => (d.leaseId ? [d.leaseId] : [])),
     });
-    void this.fill();
+  }
+
+  private resolve(path: string): string {
+    return new URL(path, this.opts.brokerUrl).toString();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
-    for (const leaseId of this.tunnels.keys()) {
-      this.stopTunnel(leaseId);
-    }
+    this.tunnels.stopAll();
     for (const leaseId of this.streams.keys()) {
-      this.stopStream(leaseId, 'h264');
-      this.stopStream(leaseId, 'jpeg');
+      await this.endStreams(leaseId);
     }
     for (const d of this.devices.values()) {
       await sim.shutdown(d.deviceId).catch(() => {});
@@ -117,7 +145,90 @@ export class Agent {
     this.devices.clear();
   }
 
-  private async ensureGolden(): Promise<{ udid: string; model: string; os: string }> {
+  private imageOffers(): { model: string; os: string; image: string }[] {
+    const g = this.golden;
+    return g ? [...this.images.values()].filter((e) => !e.failed).map((e) => ({ model: g.model, os: g.os, image: e.image.name })) : [];
+  }
+
+  // Images are offered as soon as they are declared, so leases for them queue while they build.
+  private async setImages(images: DeviceImage[]): Promise<void> {
+    const offered = JSON.stringify(this.imageOffers());
+    const wanted = new Map(images.map((i) => [i.name, i]));
+    for (const [name, entry] of this.images) {
+      if (wanted.get(name)?.id === entry.image.id) {
+        continue;
+      }
+      this.images.delete(name);
+      for (const d of this.devices.values()) {
+        if (d.image === name && d.state === 'ready') {
+          this.devices.delete(d.deviceId);
+          await sim.remove(d.deviceId).catch(() => {});
+        }
+      }
+    }
+    for (const image of images) {
+      if (!this.images.has(image.name)) {
+        this.images.set(image.name, { image, golden: null, failed: false });
+      }
+    }
+    if (JSON.stringify(this.imageOffers()) !== offered) {
+      await this.hello();
+    }
+    await this.buildImages();
+  }
+
+  private async buildImages(): Promise<void> {
+    const base = this.golden;
+    if (!base) {
+      return;
+    }
+    const owned = await sim.listOwned();
+    // The base golden's model and runtime are part of the name: after an Xcode or runtime update
+    // the image is built again, not reused from the old runtime.
+    const goldenName = (e: ImageEntry): string => `${sim.NAME_PREFIX}golden-image-${e.image.id}-${base.model.replace(/\s+/g, '-')}-${base.os}`;
+    const names = new Set([...this.images.values()].map(goldenName));
+    for (const d of owned) {
+      if (d.name.startsWith(`${sim.NAME_PREFIX}golden-image-`) && !names.has(d.name)) {
+        await sim.remove(d.udid).catch(() => {});
+      }
+    }
+    for (const entry of this.images.values()) {
+      if (entry.golden || entry.failed || this.stopped) {
+        continue;
+      }
+      const name = goldenName(entry);
+      const existing = owned.find((d) => d.name === name);
+      if (existing) {
+        entry.golden = { ...base, udid: existing.udid };
+        continue;
+      }
+      this.log(`Building image ${entry.image.name}.`);
+      const udid = await sim.clone(base.udid, name);
+      try {
+        await sim.boot(udid);
+        for (const app of entry.image.apps) {
+          await this.install(udid, app.url, app.sha256);
+        }
+        if (entry.image.locale) {
+          await sim.setLocale(udid, entry.image.locale);
+        }
+        if (entry.image.appearance) {
+          await sim.appearance(udid, entry.image.appearance);
+        }
+        await sim.shutdown(udid);
+        entry.golden = { ...base, udid };
+        this.log(`Image ${entry.image.name} is ready.`);
+      } catch (err) {
+        entry.failed = true;
+        this.log(`Image ${entry.image.name} failed to build: ${err instanceof Error ? err.message : err}`);
+        await sim.remove(udid).catch(() => {});
+        await this.hello();
+      }
+    }
+    void this.fill();
+  }
+
+  private async ensureGolden(): Promise<Golden> {
     const runtime = (await sim.runtimes()).sort((a, b) => compareVersions(a.version, b.version)).at(-1);
     if (!runtime) {
       throw new OpError('NO_RUNTIME', 'No iOS simulator runtime is installed. Install one in Xcode > Settings > Components.');
@@ -144,14 +255,15 @@ export class Agent {
   }
 
   private inventory(): AgentDevice[] {
-    return [...this.devices.values()].map(({ deviceId, model, os, state }) => ({ deviceId, model, os, state }));
+    return [...this.devices.values()].map(({ deviceId, model, os, state, image }) => ({ deviceId, model, os, state, image }));
   }
 
   private publish(): void {
     this.opts.send({ type: 'inventory', devices: this.inventory() });
   }
 
-  // Keeps `warm` devices ready, without going over `maxDevices`.
+  // Keeps `warm` plain devices ready, and `warm` of each built image, without going over
+  // `maxDevices`. Plain devices come first.
   private async fill(): Promise<void> {
     if (this.filling || this.stopped || !this.golden) {
       return;
@@ -160,21 +272,34 @@ export class Agent {
     try {
       for (;;) {
         const all = [...this.devices.values()];
-        const ready = all.filter((d) => d.state === 'ready').length;
-        if (ready >= this.warm || all.length >= this.maxDevices || this.stopped) {
+        if (all.length >= this.maxDevices || this.stopped) {
           break;
         }
-        const g = this.golden;
+        const targets: { image: string | undefined; golden: Golden }[] = [{ image: undefined, golden: this.golden }];
+        for (const e of this.images.values()) {
+          if (e.golden) {
+            targets.push({ image: e.image.name, golden: e.golden });
+          }
+        }
+        const target = targets.find((t) => all.filter((d) => d.state === 'ready' && d.image === t.image).length < this.warm);
+        if (!target) {
+          break;
+        }
+        const { golden: g, image } = target;
         const udid = await sim.clone(g.udid, `${sim.NAME_PREFIX}${Date.now().toString(36)}`);
-        this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, state: 'wiping', leaseId: null, screen: null });
+        this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, image, state: 'wiping', leaseId: null, screen: null });
         try {
           await sim.boot(udid);
+          // The first tree read and screenshot on a new device take seconds; pay that here, so
+          // a lease's first call is as fast as its later ones.
+          await sim.describe(udid).catch(() => {});
+          await sim.screenshot(udid, 'jpeg', 800).catch(() => {});
           if (this.stopped) {
             await sim.remove(udid).catch(() => {});
             break;
           }
-          this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, state: 'ready', leaseId: null, screen: null });
-          this.log(`Device ready: ${g.model}, iOS ${g.os}`);
+          this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, image, state: 'ready', leaseId: null, screen: null });
+          this.log(`Device ready: ${g.model}, iOS ${g.os}${image ? `, image ${image}` : ''}`);
         } catch (err) {
           this.log(`A new device failed to boot: ${err instanceof Error ? err.message : err}`);
           this.devices.delete(udid);
@@ -200,29 +325,29 @@ export class Agent {
       this.publish();
       this.opts.send({ type: 'response', id: m.id, ok: true });
       void this.fill();
+    } else if (m.type === 'images') {
+      const images = m.images;
+      this.imageWork = this.imageWork.then(() => this.setImages(images)).catch((err) => this.log(`Images: ${err instanceof Error ? err.message : err}`));
     } else if (m.type === 'stream.start') {
       void (m.codec === 'h264' ? this.streamH264(m.leaseId) : this.streamJpeg(m.leaseId));
     } else if (m.type === 'stream.stop') {
       this.stopStream(m.leaseId, m.codec);
     } else if (m.type === 'tunnel.start') {
-      this.startTunnel(m.id, m.leaseId);
-    } else if (m.type === 'tunnel.stop') {
-      this.stopTunnel(m.leaseId);
-    } else if (m.type === 'tunnel.data') {
-      this.tunnels.get(m.leaseId)?.sockets.get(m.conn)?.write(m.data);
-    } else if (m.type === 'tunnel.close') {
-      this.tunnels.get(m.leaseId)?.sockets.get(m.conn)?.destroy();
-    } else if (m.type === 'stream.keyframe') {
-      this.streams.get(m.leaseId)?.h264?.keyframe();
-    } else if (m.type === 'lease.end') {
-      this.stopTunnel(m.leaseId);
-      this.stopStream(m.leaseId, 'h264');
-      this.stopStream(m.leaseId, 'jpeg');
-      this.streams.delete(m.leaseId);
-      const d = [...this.devices.values()].find((x) => x.leaseId === m.leaseId);
-      if (d) {
-        void this.wipe(d);
+      if ([...this.devices.values()].some((x) => x.leaseId === m.leaseId)) {
+        this.tunnels.start(m.id, m.leaseId);
+      } else {
+        this.respondError(m.id, 'LEASE_NOT_HELD', 'This Mac holds no device for that lease.');
       }
+    } else if (m.type === 'tunnel.stop') {
+      this.tunnels.stop(m.leaseId);
+    } else if (m.type === 'tunnel.data') {
+      this.tunnels.data(m.leaseId, m.conn, m.data);
+    } else if (m.type === 'tunnel.close') {
+      this.tunnels.close(m.leaseId, m.conn);
+    } else if (m.type === 'stream.keyframe') {
+      void this.streams.get(m.leaseId)?.h264?.then((h) => h.keyframe());
+    } else if (m.type === 'lease.end') {
+      void this.endLease(m.leaseId);
     } else if (m.type === 'op') {
       void this.op(m.id, m.leaseId, m.body);
     } else if (m.type === 'incompatible') {
@@ -230,7 +355,7 @@ export class Agent {
     }
   }
 
-  private streamOf(leaseId: string): { jpeg: { stop: boolean } | null; h264: sim.ScreenStream | null; wantH264: boolean } {
+  private streamOf(leaseId: string): Stream {
     let st = this.streams.get(leaseId);
     if (!st) {
       st = { jpeg: null, h264: null, wantH264: false };
@@ -246,48 +371,143 @@ export class Agent {
     }
     if (codec === 'h264') {
       st.wantH264 = false;
-      st.h264?.stop();
-      st.h264 = null;
+      // A recording keeps the helper running with nobody watching.
+      if (!this.recordings.has(leaseId)) {
+        void st.h264?.then((h) => h.stop()).catch(() => {});
+        st.h264 = null;
+      }
     } else if (st.jpeg) {
       st.jpeg.stop = true;
       st.jpeg = null;
     }
   }
 
-  // The native helper: H.264 frames only when the screen changes. If it cannot run (a new Xcode
-  // changed the private API, no Swift toolchain), the broker moves viewers to JPEG.
+  // Finishes any recording, then stops the screen helper and the JPEG loop.
+  private async endStreams(leaseId: string): Promise<void> {
+    await this.finishRecording(leaseId).catch((err: Error) => this.log(`Could not save the recording of lease ${leaseId}: ${err.message}`));
+    const st = this.streams.get(leaseId);
+    this.streams.delete(leaseId);
+    if (st) {
+      st.wantH264 = false;
+      if (st.jpeg) {
+        st.jpeg.stop = true;
+      }
+      await st.h264?.then((h) => h.stop()).catch(() => {});
+    }
+  }
+
+  // The native helper: H.264 frames only when the screen changes, sent on only while a viewer
+  // wants them. One helper per lease serves both viewers and the recording.
+  private helper(leaseId: string): Promise<sim.ScreenStream> {
+    const st = this.streamOf(leaseId);
+    if (st.h264) {
+      return st.h264;
+    }
+    const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+    if (!d) {
+      return Promise.reject(new OpError('LEASE_NOT_HELD', 'This Mac holds no device for that lease.'));
+    }
+    const started = sim.screenStream(d.deviceId, (data) => {
+      if (st.wantH264) {
+        this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data });
+      }
+    });
+    st.h264 = started;
+    started.then(
+      (stream) =>
+        void stream.exited.then((err) => {
+          if (st.h264 === started) {
+            st.h264 = null;
+            if (err && st.wantH264) {
+              this.h264Failed(leaseId, err);
+            }
+          }
+        }),
+      () => {
+        if (st.h264 === started) {
+          st.h264 = null;
+        }
+      },
+    );
+    return started;
+  }
+
+  // If the helper cannot run (a new Xcode changed the private API, no Swift toolchain), the
+  // broker moves viewers to JPEG.
+  private h264Failed(leaseId: string, message: string): void {
+    this.log(`H.264 stream failed, falling back to JPEG: ${message}`);
+    this.streamOf(leaseId).wantH264 = false;
+    this.opts.send({ type: 'stream.failed', leaseId, codec: 'h264', message });
+  }
+
   private async streamH264(leaseId: string): Promise<void> {
     const st = this.streamOf(leaseId);
     if (st.wantH264) {
       return;
     }
     st.wantH264 = true;
-    const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
-    if (!d) {
-      return;
-    }
-    const fail = (message: string): void => {
-      this.log(`H.264 stream failed, falling back to JPEG: ${message}`);
-      st.wantH264 = false;
-      this.opts.send({ type: 'stream.failed', leaseId, codec: 'h264', message });
-    };
     try {
-      const stream = await sim.screenStream(d.deviceId, (data) => this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data }));
-      if (!st.wantH264) {
-        stream.stop();
-        return;
-      }
-      st.h264 = stream;
-      void stream.exited.then((err) => {
-        if (st.h264 === stream) {
-          st.h264 = null;
-          if (err) {
-            fail(err);
-          }
-        }
-      });
+      (await this.helper(leaseId)).keyframe();
     } catch (err) {
-      fail((err as Error).message);
+      this.h264Failed(leaseId, (err as Error).message);
+    }
+  }
+
+  // Recording: the helper writes its frames to an MP4 while the app log streams to a file.
+  private async startRecording(d: Device, leaseId: string, uploads: Recording['uploads']): Promise<void> {
+    if (this.recordings.has(leaseId)) {
+      throw new OpError('ALREADY_RECORDING', 'This lease is already being recorded.');
+    }
+    for (const url of Object.values(uploads)) {
+      if (!/^https?:\/\//.test(url)) {
+        throw new OpError('BAD_UPLOAD_URL', 'Upload URLs must be http or https.');
+      }
+    }
+    const screen = await this.helper(leaseId);
+    const dir = await mkdtemp(join(tmpdir(), 'hangar-recording-'));
+    screen.record(join(dir, 'video.mp4'));
+    this.recordings.set(leaseId, { dir, uploads, log: sim.appLog(d.deviceId, join(dir, 'log.ndjson')), finished: null });
+  }
+
+  // Finishes the files and uploads them, the video last. The device is still there, so the last
+  // screenshot is current.
+  // A stop and the end of the lease can race; both wait for the same save.
+  private finishRecording(leaseId: string): Promise<void> {
+    const rec = this.recordings.get(leaseId);
+    if (!rec) {
+      return Promise.resolve();
+    }
+    rec.finished ??= this.saveRecording(leaseId, rec).finally(() => this.recordings.delete(leaseId));
+    return rec.finished;
+  }
+
+  private async saveRecording(leaseId: string, rec: Recording): Promise<void> {
+    try {
+      const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+      if (d) {
+        await writeFile(join(rec.dir, 'screenshot.png'), await sim.screenshot(d.deviceId, 'png')).catch(() => {});
+      }
+      await rec.log.stop();
+      const st = this.streams.get(leaseId);
+      await (await st?.h264)?.stopRecording();
+      if (st && !st.wantH264) {
+        await st.h264?.then((h) => h.stop()).catch(() => {});
+        st.h264 = null;
+      }
+      for (const [part, file] of [['screenshot', 'screenshot.png'], ['log', 'log.ndjson'], ['video', 'video.mp4']] as const) {
+        await upload(part, this.resolve(rec.uploads[part]), join(rec.dir, file));
+      }
+    } finally {
+      await rm(rec.dir, { recursive: true, force: true });
+    }
+  }
+
+  private async endLease(leaseId: string): Promise<void> {
+    this.tunnels.stop(leaseId);
+    await this.endStreams(leaseId);
+    const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+    if (d) {
+      await this.wipe(d);
     }
   }
 
@@ -313,54 +533,6 @@ export class Agent {
         await new Promise((r) => setTimeout(r, 500));
       }
     }
-  }
-
-  // Listens on the Mac's loopback, where the lease's simulator reaches it as localhost:<port>.
-  // Each connection is carried to the lease holder's machine (their Metro) through the broker.
-  private startTunnel(id: number, leaseId: string): void {
-    const existing = this.tunnels.get(leaseId);
-    if (existing) {
-      this.opts.send({ type: 'response', id, ok: true, result: { port: existing.port } });
-      return;
-    }
-    if (![...this.devices.values()].some((x) => x.leaseId === leaseId)) {
-      this.respondError(id, 'LEASE_NOT_HELD', 'This Mac holds no device for that lease.');
-      return;
-    }
-    const sockets = new Map<number, Socket>();
-    let next = 1;
-    const server = createServer((socket) => {
-      const conn = next++;
-      sockets.set(conn, socket);
-      this.opts.send({ type: 'tunnel.open', leaseId, conn });
-      socket.on('data', (data) => this.opts.send({ type: 'tunnel.data', leaseId, conn, data }));
-      socket.on('error', () => {});
-      socket.on('close', () => {
-        if (sockets.delete(conn)) {
-          this.opts.send({ type: 'tunnel.close', leaseId, conn });
-        }
-      });
-    });
-    server.on('error', (err) => this.respondError(id, 'TUNNEL_FAILED', err.message));
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      this.tunnels.set(leaseId, { server, port, sockets });
-      this.opts.send({ type: 'response', id, ok: true, result: { port } });
-    });
-  }
-
-  private stopTunnel(leaseId: string): void {
-    const t = this.tunnels.get(leaseId);
-    if (!t) {
-      return;
-    }
-    this.tunnels.delete(leaseId);
-    t.server.close();
-    for (const socket of t.sockets.values()) {
-      socket.destroy();
-    }
-    t.sockets.clear();
   }
 
   // A device that was leased is deleted, and a fresh clone of the golden device replaces it.
@@ -396,6 +568,7 @@ export class Agent {
 
   private async dispatch(d: Device, body: Op): Promise<{ result?: unknown; binary?: string }> {
     const udid = d.deviceId;
+    const leaseId = d.leaseId ?? '';
     switch (body.op) {
       case 'screenshot':
         return { binary: (await sim.screenshot(udid, body.format ?? 'png', body.maxSize)).toString('base64') };
@@ -433,12 +606,12 @@ export class Agent {
         await sim.openUrl(udid, body.url);
         return {};
       case 'useMetro': {
-        const tunnel = d.leaseId ? this.tunnels.get(d.leaseId) : undefined;
+        const tunnel = d.leaseId ? this.tunnels.port(d.leaseId) : undefined;
         if (!tunnel) {
           throw new OpError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease. Run `hangar run ios`, which opens one.');
         }
-        await sim.setDefault(udid, body.bundleId, 'RCT_jsLocation', `localhost:${tunnel.port}`);
-        return { result: { url: `http://localhost:${tunnel.port}` } };
+        await sim.setDefault(udid, body.bundleId, 'RCT_jsLocation', `localhost:${tunnel}`);
+        return { result: { url: `http://localhost:${tunnel}` } };
       }
       case 'push':
         await sim.push(udid, body.bundleId, body.payload);
@@ -459,48 +632,24 @@ export class Agent {
         await sim.appLocale(udid, body.bundleId, body.language);
         return {};
       case 'maestro':
-        return { result: await this.maestro(udid, body.archive, body.flows, body.env ?? {}) };
+        return { result: await maestro(udid, body.archive, body.flows, body.env ?? {}) };
+      case 'xcuitest':
+        return { result: await xcuitest(udid, this.resolve(body.artifactUrl), body.sha256, body.tests) };
+      case 'espresso':
+        throw new OpError('NOT_ON_IOS', 'Espresso tests run on Android emulators. Lease one with platform android-emulator.');
+      case 'recordStart':
+        await this.startRecording(d, leaseId, body.uploads);
+        return { result: { device: `${d.model}, iOS ${d.os}` } };
+      case 'recordStop':
+        if (!this.recordings.has(leaseId)) {
+          throw new OpError('NOT_RECORDING', 'This Mac has no recording for that lease. It may have restarted.');
+        }
+        await this.finishRecording(leaseId);
+        return {};
     }
   }
 
   // Maestro runs here, next to the simulator, on this lease's device only.
-  private async maestro(udid: string, archive: string, flows: string[], env: Record<string, string>): Promise<MaestroResult> {
-    if (!flows.length || flows.some((f) => isAbsolute(f) || f.split(/[\\/]/).includes('..'))) {
-      throw new OpError('BAD_FLOWS', 'Name one or more flows by their path inside the flows folder.');
-    }
-    const vars = Object.entries(env);
-    if (vars.some(([k]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))) {
-      throw new OpError('BAD_ENV', 'Environment variable names are letters, digits and underscores.');
-    }
-    const dir = await mkdtemp(join(tmpdir(), 'hangar-maestro-'));
-    try {
-      const root = join(dir, 'flows');
-      await mkdir(root);
-      await writeFile(join(dir, 'flows.tar'), Buffer.from(archive, 'base64'));
-      // bsdtar refuses absolute paths and .. by default.
-      await run('tar', ['-xf', join(dir, 'flows.tar'), '-C', root]);
-      const report = join(dir, 'report.xml');
-      const args = ['--no-ansi', '--device', udid, 'test', ...flows.map((f) => join(root, f)), '--format', 'junit', '--output', report, '--test-output-dir', join(dir, 'debug'), '--flatten-debug-output'];
-      for (const [k, v] of vars) {
-        args.push('-e', `${k}=${v}`);
-      }
-      const started = Date.now();
-      const out = await run('maestro', args, { maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60_000 }).then(
-        (r) => ({ ok: true, text: r.stdout + r.stderr }),
-        (err: { stdout?: string; stderr?: string; code?: unknown }) => {
-          if (err.code === 'ENOENT') {
-            throw new OpError('MAESTRO_MISSING', 'Maestro is not installed on this Mac. Install it with: curl -fsSL "https://get.maestro.mobile.dev" | bash');
-          }
-          return { ok: false, text: (err.stdout ?? '') + (err.stderr ?? '') };
-        },
-      );
-      const junit = await readFile(report, 'utf8').catch(() => '');
-      return { passed: out.ok, junit, log: out.text.slice(-20_000), durationMs: Date.now() - started };
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  }
-
   private async screen(d: Device): Promise<Frame> {
     if (!d.screen) {
       d.screen = (await sim.describe(d.deviceId)).screen;
@@ -563,24 +712,7 @@ export class Agent {
     const dir = await mkdtemp(join(tmpdir(), 'hangar-install-'));
     try {
       const archive = join(dir, 'archive');
-      const res = await fetch(url);
-      if (!res.ok || !res.body) {
-        throw new OpError('DOWNLOAD_FAILED', `Could not download the build (HTTP ${res.status}).`);
-      }
-      const hash = createHash('sha256');
-      await pipeline(
-        Readable.fromWeb(res.body as WebReadableStream),
-        async function* (source) {
-          for await (const chunk of source) {
-            hash.update(chunk as Buffer);
-            yield chunk;
-          }
-        },
-        createWriteStream(archive),
-      );
-      if (hash.digest('hex') !== sha256) {
-        throw new OpError('CHECKSUM_MISMATCH', 'The downloaded build does not match its checksum.');
-      }
+      await download(this.resolve(url), sha256, archive);
       const out = join(dir, 'out');
       await run('mkdir', ['-p', out]);
       const { stdout: kind } = await run('file', ['-b', archive]);
@@ -601,6 +733,91 @@ export class Agent {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  }
+}
+
+// PUTs a file to a one-use URL from the broker. A missing log or screenshot is left out; a
+// missing video means the recording failed.
+// Runs Maestro flows from a base64 tar against one device, named the way Maestro's --device
+// takes it: a simulator UDID or an adb serial.
+export async function maestro(device: string, archive: string, flows: string[], env: Record<string, string>): Promise<MaestroResult> {
+  if (!flows.length || flows.some((f) => isAbsolute(f) || f.split(/[\\/]/).includes('..'))) {
+    throw new OpError('BAD_FLOWS', 'Name one or more flows by their path inside the flows folder.');
+  }
+  const vars = Object.entries(env);
+  if (vars.some(([k]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))) {
+    throw new OpError('BAD_ENV', 'Environment variable names are letters, digits and underscores.');
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'hangar-maestro-'));
+  try {
+    const root = join(dir, 'flows');
+    await mkdir(root);
+    await writeFile(join(dir, 'flows.tar'), Buffer.from(archive, 'base64'));
+    // bsdtar refuses absolute paths and .. by default.
+    await run('tar', ['-xf', join(dir, 'flows.tar'), '-C', root]);
+    const report = join(dir, 'report.xml');
+    const args = ['--no-ansi', '--device', device, 'test', ...flows.map((f) => join(root, f)), '--format', 'junit', '--output', report, '--test-output-dir', join(dir, 'debug'), '--flatten-debug-output'];
+    for (const [k, v] of vars) {
+      args.push('-e', `${k}=${v}`);
+    }
+    const started = Date.now();
+    const out = await run('maestro', args, { maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60_000 }).then(
+      (r) => ({ ok: true, text: r.stdout + r.stderr }),
+      (err: { stdout?: string; stderr?: string; code?: unknown }) => {
+        if (err.code === 'ENOENT') {
+          throw new OpError('MAESTRO_MISSING', 'Maestro is not installed on this Mac. Install it with: curl -fsSL "https://get.maestro.mobile.dev" | bash');
+        }
+        return { ok: false, text: (err.stdout ?? '') + (err.stderr ?? '') };
+      },
+    );
+    const junit = await readFile(report, 'utf8').catch(() => '');
+    return { passed: out.ok, junit, log: out.text.slice(-20_000), durationMs: Date.now() - started };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// Downloads a build to `path` and checks it against the hash the broker gave.
+export async function download(url: string, sha256: string, path: string): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok || !res.body) {
+    throw new OpError('DOWNLOAD_FAILED', `Could not download the build (HTTP ${res.status}).`);
+  }
+  const hash = createHash('sha256');
+  await pipeline(
+    Readable.fromWeb(res.body as WebReadableStream),
+    async function* (source) {
+      for await (const chunk of source) {
+        hash.update(chunk as Buffer);
+        yield chunk;
+      }
+    },
+    createWriteStream(path),
+  );
+  if (hash.digest('hex') !== sha256) {
+    throw new OpError('CHECKSUM_MISMATCH', 'The downloaded build does not match its checksum.');
+  }
+}
+
+export async function upload(part: 'video' | 'log' | 'screenshot', url: string, path: string): Promise<void> {
+  const size = await stat(path).then((s) => s.size, () => null);
+  if (size === null) {
+    if (part === 'video') {
+      throw new OpError('RECORDING_FAILED', 'The screen helper wrote no video.');
+    }
+    return;
+  }
+  // A broker that stops answering must not hold up the wipe that follows.
+  const init: RequestInit & { duplex: 'half' } = {
+    method: 'PUT',
+    headers: { 'content-length': String(size) },
+    body: Readable.toWeb(createReadStream(path)) as ReadableStream,
+    duplex: 'half',
+    signal: AbortSignal.timeout(120_000),
+  };
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    throw new OpError('UPLOAD_FAILED', `The broker refused the recording upload (${res.status}).`);
   }
 }
 
@@ -681,3 +898,5 @@ function compareVersions(a: string, b: string): number {
   }
   return 0;
 }
+export { join, type HostAgent, type JoinOptions } from './connect.ts';
+export { AndroidAgent, type AndroidAgentOptions } from './android.ts';

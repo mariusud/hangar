@@ -5,7 +5,7 @@ You need a Mac running `hangar up` that your machine can reach, and a React Nati
 
 ```bash
 git clone <hangar repository URL> && cd hangar && pnpm install
-alias hangar="node --disable-warning=ExperimentalWarning $PWD/packages/cli/src/main.ts"
+alias hangar="node --disable-warning=ExperimentalWarning $PWD/packages/hangar/src/main.ts"
 ```
 
 ## Sign in once
@@ -37,6 +37,17 @@ hangar run ios
 
 Edit a file and Fast Refresh updates the leased device, usually within 200 ms. Press Ctrl-C to
 release the device; Hangar wipes it.
+
+## Debug with React Native DevTools
+
+Once the app's JavaScript runs, `hangar run ios` prints a React Native DevTools link. It opens
+the debugger for the app on the leased simulator: the console, breakpoints, the network panel,
+React components and the profiler. The debugger talks to your own Metro, and Metro talks to the
+app through the same tunnel as the bundle; a console evaluate takes about 5 ms there and back.
+
+The link uses `127.0.0.1`, not `localhost`. Expo's dev server closes debugger connections whose
+origin is not exactly its own address, without an error, so a `localhost` link shows an empty
+DevTools window.
 
 ## Things to do on the device
 

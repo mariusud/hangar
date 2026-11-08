@@ -8,7 +8,9 @@ import { z } from 'zod';
 import { PRIVACY_SERVICES, type Action, type UiNode } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
+import type { Recordings } from './recordings.ts';
 import { ApiError, type Leases } from './leases/service.ts';
+import { registerMobileTools } from './mcp-mobile.ts';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -32,14 +34,14 @@ const action = z.discriminatedUnion('type', [
   z.object({ type: z.literal('waitFor'), element: selector, gone: z.boolean().optional(), timeoutMs: z.number().optional() }),
 ]);
 
-export async function handleMcp(req: IncomingMessage, res: ServerResponse, db: Db, leases: Leases, internalUrl: string): Promise<void> {
+export async function handleMcp(req: IncomingMessage, res: ServerResponse, db: Db, leases: Leases, recordings: Recordings, internalUrl: string, publicUrl: string): Promise<void> {
   const p = auth.authenticate(db, { authorization: req.headers.authorization, cookie: req.headers.cookie }, Date.now());
   if (!p) {
     res.writeHead(401, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'Pass Authorization: Bearer <token>. Make a token in the console under Connect.' } }));
     return;
   }
-  const server = buildServer(p, db, leases, internalUrl);
+  const server = buildServer(p, db, leases, recordings, internalUrl, publicUrl);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     void transport.close();
@@ -49,7 +51,7 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, db: D
   await transport.handleRequest(req, res);
 }
 
-function buildServer(p: auth.Principal, db: Db, leases: Leases, internalUrl: string): McpServer {
+function buildServer(p: auth.Principal, db: Db, leases: Leases, recordings: Recordings, internalUrl: string, publicUrl: string): McpServer {
   const server = new McpServer({ name: 'hangar', version: '0.0.0' });
 
   // Tools that act on a device accept leaseId, and fall back to the caller's only active lease.
@@ -93,14 +95,16 @@ function buildServer(p: auth.Principal, db: Db, leases: Leases, internalUrl: str
     {
       description: 'Lease a device for your exclusive use. Waits until one is free. The device is wiped when released. Returns the lease id.',
       inputSchema: {
+        platform: z.enum(['ios-simulator', 'android-emulator']).optional().describe('Leave out for any.'),
         model: z.string().optional().describe('For example "iPhone 17". Leave out for any.'),
         os: z.string().optional().describe('For example "26.5". Leave out for any.'),
+        image: z.string().optional().describe('A device image by name, with apps and settings already in place. See GET /v1/images.'),
         ttlSeconds: z.number().optional().describe('Ends unless renewed within this time. Default 600.'),
       },
     },
-    ({ model, os, ttlSeconds }) =>
+    ({ platform, model, os, image, ttlSeconds }) =>
       safe(async () => {
-        const lease = leases.create(p, { ...(model ? { model } : {}), ...(os ? { os } : {}) }, ttlSeconds ? { ttlSeconds } : {});
+        const lease = leases.create(p, { ...(platform ? { platform } : {}), ...(model ? { model } : {}), ...(os ? { os } : {}), ...(image ? { image } : {}) }, ttlSeconds ? { ttlSeconds } : {});
         const until = Date.now() + 120_000;
         let current = lease;
         while (current.state === 'queued' || current.state === 'preparing') {
@@ -159,23 +163,20 @@ function buildServer(p: auth.Principal, db: Db, leases: Leases, internalUrl: str
       }),
   );
 
+  const install = async (leaseId: string, build: string): Promise<unknown> => {
+    const b = db.getBuild(build);
+    if (!b) {
+      throw new ApiError(404, 'BUILD_NOT_FOUND', `No build called ${build}. Registered: ${db.builds().map((x) => x.name).join(', ') || 'none'}.`);
+    }
+    const code = auth.mintToken(db, 'artifact', { expiresAt: Date.now() + 10 * 60_000 });
+    const { result } = await leases.op(p, leaseId, { op: 'install', artifactUrl: `${internalUrl}/v1/artifacts/${b.sha256}?t=${code}`, sha256: b.sha256 });
+    return result;
+  };
+
   server.registerTool(
     'install_build',
     { description: 'Install a registered build (uploaded by CI or an operator) by name or sha256.', inputSchema: { build: z.string(), leaseId: z.string().optional() } },
-    ({ build, leaseId }) =>
-      safe(async () => {
-        const b = db.getBuild(build);
-        if (!b) {
-          throw new ApiError(404, 'BUILD_NOT_FOUND', `No build called ${build}. Registered: ${db.builds().map((x) => x.name).join(', ') || 'none'}.`);
-        }
-        const code = auth.mintToken(db, 'artifact', { expiresAt: Date.now() + 10 * 60_000 });
-        const { result } = await leases.op(p, pick(leaseId), {
-          op: 'install',
-          artifactUrl: `${internalUrl}/v1/artifacts/${b.sha256}?t=${code}`,
-          sha256: b.sha256,
-        });
-        return text(result);
-      }),
+    ({ build, leaseId }) => safe(async () => text(await install(pick(leaseId), build))),
   );
 
   server.registerTool(
@@ -246,6 +247,25 @@ function buildServer(p: auth.Principal, db: Db, leases: Leases, internalUrl: str
     ({ bundleId, language, leaseId }) => safe(async () => (await leases.op(p, pick(leaseId), { op: 'locale', bundleId, language }), text(`${bundleId} uses ${language} from its next launch.`))),
   );
 
+  server.registerTool(
+    'record',
+    {
+      description:
+        'Record the screen, the app log and every action on the device. Start before reproducing a bug, stop after: stop returns a link with the video, the timeline and the log, for a bug report or a person to check.',
+      inputSchema: { action: z.enum(['start', 'stop']), leaseId: z.string().optional() },
+    },
+    ({ action, leaseId }) =>
+      safe(async () => {
+        if (action === 'start') {
+          await recordings.start(p, pick(leaseId));
+          return text('Recording. Call record with action "stop" for the link.');
+        }
+        const rec = await recordings.stop(p, pick(leaseId));
+        return text({ url: `${publicUrl}/recordings/${rec.id}`, state: rec.state, error: rec.error });
+      }),
+  );
+
+  registerMobileTools({ server, p, db, leases, safe, text, install });
   return server;
 }
 

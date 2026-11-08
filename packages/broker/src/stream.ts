@@ -9,6 +9,7 @@ import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
 import type { Leases } from './leases/service.ts';
+import type { Metrics } from './metrics.ts';
 
 // To the browser, each binary message starts with one byte: 1 is a JPEG image, 2 is an H.264
 // frame record from the agent (flags, capture time, size, Annex B).
@@ -25,7 +26,7 @@ export type Upgrades = {
   close: () => void;
 };
 
-export function attachStreams(db: Db, hosts: Hosts, leases: Leases): Upgrades {
+export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Metrics): Upgrades {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const viewers = new Map<string, Set<Viewer>>();
   const devices = new Map<string, string>();
@@ -56,6 +57,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases): Upgrades {
         continue;
       }
       if (v.ws.bufferedAmount > BACKLOG) {
+        metrics.framesDropped.inc({ codec });
         // Never queue video: skip, and for H.264 restart from the next keyframe.
         if (codec === 'h264' && !v.needsKey) {
           v.needsKey = true;
@@ -70,6 +72,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases): Upgrades {
         v.needsKey = false;
       }
       v.ws.send(message, { binary: true });
+      metrics.framesSent.inc({ codec });
     }
   };
 

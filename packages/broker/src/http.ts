@@ -1,6 +1,6 @@
 // HTTP API, console and artifact downloads on node:http.
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -8,15 +8,28 @@ import { extname, join, normalize } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Action, DeviceClass, Op, PrivacyService } from '@hangar/protocol';
 import * as auth from './auth.ts';
-import type { Db } from './db.ts';
+import type { Db, ImageSpec, RecordingRow } from './db.ts';
+import { imageId } from './images.ts';
 import type { Hosts } from './hosts.ts';
 import { ApiError, type Leases } from './leases/service.ts';
 import { handleMcp } from './mcp.ts';
+import { PART_FILES, RECORDING_PARTS, type RecordingPart, type Recordings } from './recordings.ts';
+import type { Metrics } from './metrics.ts';
+import { junit, testHistory, type Run, type RunRequest, type Runs } from './runs.ts';
+import { accountFor, type Oidc } from './oidc.ts';
+import type { Store } from './store.ts';
 
 export type Ctx = {
   db: Db;
   hosts: Hosts;
   leases: Leases;
+  recordings: Recordings;
+  runs: Runs;
+  store: Store;
+  oidc: Oidc | null;
+  metrics: Metrics;
+  // Sends the declared images to every connected host.
+  publishImages: () => void;
   dataDir: string;
   consoleDir: string;
   // Where agents in this process download artifacts from.
@@ -47,7 +60,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, ctx: Ctx
   const url = new URL(req.url ?? '/', 'http://x');
   try {
     if (url.pathname === '/mcp') {
-      await handleMcp(req, res, ctx.db, ctx.leases, ctx.internalUrl());
+      await handleMcp(req, res, ctx.db, ctx.leases, ctx.recordings, ctx.internalUrl(), ctx.publicUrl());
       return;
     }
     for (const r of routes) {
@@ -180,10 +193,54 @@ route(
   { auth: false },
 );
 
+// What the sign-in page offers, before anyone is signed in.
+route('GET', '/v1/sign-in', (_req, res, ctx) => json(res, 200, { sso: Boolean(ctx.oidc), passwords: !ctx.oidc?.config.disablePasswords }), { auth: false });
+
+const oidcRedirect = (ctx: Ctx): string => `${ctx.publicUrl()}/v1/oidc/callback`;
+
+route(
+  'GET',
+  '/v1/oidc/start',
+  async (req, res, ctx) => {
+    if (!ctx.oidc) {
+      throw new ApiError(404, 'NO_SSO', 'Single sign-on is not set up. An operator sets HANGAR_OIDC_ISSUER and HANGAR_OIDC_CLIENT_ID.');
+    }
+    res.writeHead(302, { location: await ctx.oidc.start(oidcRedirect(ctx), query(req).get('next') ?? '/') });
+    res.end();
+  },
+  { auth: false },
+);
+
+route(
+  'GET',
+  '/v1/oidc/callback',
+  async (req, res, ctx) => {
+    if (!ctx.oidc) {
+      throw new ApiError(404, 'NO_SSO', 'Single sign-on is not set up.');
+    }
+    const q = query(req);
+    if (q.get('error')) {
+      res.writeHead(302, { location: `/?error=sso&message=${encodeURIComponent(q.get('error_description') ?? q.get('error') ?? '')}` });
+      res.end();
+      return;
+    }
+    const { claims, next } = await ctx.oidc.finish(oidcRedirect(ctx), q.get('code') ?? '', q.get('state') ?? '');
+    const accountId = accountFor(ctx.db, ctx.oidc.config, claims);
+    ctx.db.audit('login.oidc', accountId, null);
+    const session = auth.startSession(ctx.db, accountId, Date.now());
+    res.writeHead(302, { 'set-cookie': auth.sessionCookie(session, ctx.publicUrl().startsWith('https')), location: next });
+    res.end();
+  },
+  { auth: false },
+);
+
 route(
   'POST',
   '/v1/login',
   async (req, res, ctx) => {
+    if (ctx.oidc?.config.disablePasswords) {
+      throw new ApiError(403, 'PASSWORDS_OFF', 'Sign in with your company account; passwords are turned off here.');
+    }
     const { name, password } = await body<{ name?: string; password?: string }>(req);
     const account = name ? ctx.db.accountByName(name) : null;
     if (!account?.passwordHash || !password || !(await auth.checkPassword(password, account.passwordHash))) {
@@ -227,7 +284,127 @@ route('POST', '/v1/invites', async (req, res, ctx) => {
 
 route('GET', '/v1/people', (req, res, ctx) => {
   operator(req, ctx);
-  json(res, 200, ctx.db.accounts().map((a) => ({ name: a.name, role: a.role })));
+  json(res, 200, ctx.db.accounts().map((a) => ({ name: a.name, role: a.role, team: ctx.db.teamOf(a.id) })));
+});
+
+// Device images: an operator declares the apps and settings; every host builds the image once
+// and keeps clones of it ready. Lease one with { "class": { "image": "<name>" } }.
+route('GET', '/v1/images', (req, res, ctx) => {
+  me(req, ctx);
+  json(res, 200, ctx.db.images().map((spec) => ({ ...spec, id: imageId(spec) })));
+});
+
+route('PUT', '/v1/images/:name', async (req, res, ctx) => {
+  operator(req, ctx);
+  const name = req.params.name ?? '';
+  if (!/^[a-z0-9][a-z0-9._-]{0,62}$/i.test(name)) {
+    throw new ApiError(400, 'BAD_IMAGE_NAME', 'Image names are letters, digits, dots, dashes and underscores, up to 63 characters.');
+  }
+  const b = await body<{ apps?: string[]; locale?: string; appearance?: string }>(req);
+  const apps: string[] = [];
+  for (const ref of b.apps ?? []) {
+    const build = ctx.db.getBuild(ref);
+    if (!build) {
+      throw new ApiError(404, 'BUILD_NOT_FOUND', `No build called ${ref}.`, 'Upload it first with POST /v1/builds, or list them at GET /v1/builds.');
+    }
+    apps.push(build.sha256);
+  }
+  if (b.locale !== undefined && !/^[a-z]{2,3}(_[A-Z]{2})?$/.test(b.locale)) {
+    throw new ApiError(400, 'BAD_LOCALE', `${b.locale} is not a locale. Write it like nb_NO or en_US.`);
+  }
+  if (b.appearance !== undefined && b.appearance !== 'light' && b.appearance !== 'dark') {
+    throw new ApiError(400, 'BAD_APPEARANCE', 'appearance is light or dark.');
+  }
+  const spec: ImageSpec = { name, apps };
+  if (b.locale) {
+    spec.locale = b.locale;
+  }
+  if (b.appearance) {
+    spec.appearance = b.appearance;
+  }
+  ctx.db.saveImage(spec);
+  ctx.publishImages();
+  json(res, 200, { ...spec, id: imageId(spec) });
+});
+
+route('DELETE', '/v1/images/:name', (req, res, ctx) => {
+  operator(req, ctx);
+  if (!ctx.db.removeImage(req.params.name ?? '')) {
+    throw new ApiError(404, 'IMAGE_NOT_FOUND', `No image called ${req.params.name}.`);
+  }
+  ctx.publishImages();
+  res.writeHead(204).end();
+});
+
+// Teams: each has members and a quota, the most leases it holds at once. A request over the
+// quota waits in the queue; it is never refused.
+route('GET', '/v1/teams', (req, res, ctx) => {
+  operator(req, ctx);
+  const live = ctx.db.leasesIn(['preparing', 'active']);
+  const accounts = ctx.db.accounts();
+  json(
+    res,
+    200,
+    ctx.db.teams().map((t) => ({
+      ...t,
+      members: accounts.filter((a) => ctx.db.teamOf(a.id) === t.id).length,
+      activeLeases: live.filter((l) => l.teamId === t.id).length,
+    })),
+  );
+});
+
+function quotaOf(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new ApiError(400, 'BAD_QUOTA', 'A quota is a whole number of leases, or null for no limit.');
+  }
+  return n;
+}
+
+route('POST', '/v1/teams', async (req, res, ctx) => {
+  const p = operator(req, ctx);
+  const b = await body<{ name?: string; quota?: number | null }>(req);
+  const name = String(b.name ?? '').trim();
+  if (!name || name.length > 60) {
+    throw new ApiError(400, 'BAD_NAME', 'Give the team a name of up to 60 characters.');
+  }
+  if (ctx.db.teams().some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+    throw new ApiError(409, 'TEAM_EXISTS', `There is already a team called ${name}.`);
+  }
+  const team = { id: randomUUID(), name, quota: quotaOf(b.quota) };
+  ctx.db.saveTeam(team);
+  ctx.db.audit(`team.create ${name}`, p.accountId, null);
+  json(res, 201, team);
+});
+
+route('PATCH', '/v1/teams/:id', async (req, res, ctx) => {
+  const p = operator(req, ctx);
+  const team = ctx.db.teams().find((t) => t.id === req.params.id);
+  if (!team) {
+    throw new ApiError(404, 'TEAM_NOT_FOUND', `No team ${req.params.id}.`);
+  }
+  const b = await body<{ name?: string; quota?: number | null }>(req);
+  const next = { ...team, ...(b.name ? { name: String(b.name).trim() } : {}), ...('quota' in b ? { quota: quotaOf(b.quota) } : {}) };
+  ctx.db.saveTeam(next);
+  ctx.db.audit(`team.update ${next.name} quota=${next.quota ?? 'none'}`, p.accountId, null);
+  void ctx.leases.tick();
+  json(res, 200, next);
+});
+
+route('PUT', '/v1/people/:name/team', async (req, res, ctx) => {
+  const p = operator(req, ctx);
+  const account = ctx.db.accountByName(req.params.name ?? '');
+  const { team: ref } = await body<{ team?: string }>(req);
+  const team = ctx.db.teams().find((t) => t.id === ref || t.name.toLowerCase() === String(ref ?? '').toLowerCase());
+  if (!account || !team) {
+    throw new ApiError(404, 'NOT_FOUND', !account ? `No person called ${req.params.name}.` : `No team ${ref}.`);
+  }
+  ctx.db.setTeam(account.id, team.id);
+  ctx.db.audit(`person.team ${account.name} ${team.name}`, p.accountId, null);
+  json(res, 200, { name: account.name, team: team.id });
 });
 
 route('POST', '/v1/tokens', async (req, res, ctx) => {
@@ -249,8 +426,10 @@ route('GET', '/v1/devices', (_req, res, ctx) => {
     res,
     200,
     ctx.hosts.devices().map((d) => ({
+      platform: d.platform ?? 'ios-simulator',
       model: d.model,
       os: d.os,
+      image: d.image ?? null,
       host: d.hostName,
       state: !d.connected ? 'offline' : held.has(d.deviceId) ? 'leased' : d.state,
     })),
@@ -259,8 +438,11 @@ route('GET', '/v1/devices', (_req, res, ctx) => {
 
 route('POST', '/v1/leases', async (req, res, ctx) => {
   const p = me(req, ctx);
-  const b = await body<{ class?: DeviceClass; ttlSeconds?: number; maxSeconds?: number }>(req);
+  const b = await body<{ class?: DeviceClass; ttlSeconds?: number; maxSeconds?: number; record?: boolean }>(req);
   const lease = ctx.leases.create(p, b.class ?? {}, b);
+  if (b.record) {
+    ctx.recordings.want(p, lease.id);
+  }
   const wait = Number(query(req).get('wait') ?? 0);
   if (wait > 0) {
     json(res, 201, ctx.leases.view(await waitFor(ctx, lease.id, Math.min(wait, 600) * 1000)));
@@ -465,6 +647,190 @@ route('POST', '/v1/leases/:id/maestro', async (req, res, ctx) => {
   json(res, 200, (await op(req, ctx, { op: 'maestro', archive: b.archive, flows: b.flows.map(String), env: b.env ?? {} })).result ?? {});
 });
 
+// Runs and recordings belong to the team of the person who made them. Members see their team's;
+// operators see all. Another team's looks the same as one that does not exist.
+function sameTeam(ctx: Ctx, p: auth.Principal, accountId: string): boolean {
+  return p.role === 'operator' || ctx.db.teamOf(accountId) === ctx.db.teamOf(p.accountId);
+}
+
+function teamRun(req: Req, ctx: Ctx): Run {
+  const run = ctx.runs.get(req.params.id ?? '');
+  if (!sameTeam(ctx, me(req, ctx), run.accountId)) {
+    throw new ApiError(404, 'RUN_NOT_FOUND', `No run ${req.params.id}.`);
+  }
+  return run;
+}
+
+function teamRecording(req: Req, ctx: Ctx): RecordingRow {
+  const recording = ctx.recordings.get(req.params.id ?? '');
+  if (!sameTeam(ctx, me(req, ctx), recording.accountId)) {
+    throw new ApiError(404, 'RECORDING_NOT_FOUND', `No recording ${req.params.id}.`);
+  }
+  return recording;
+}
+
+// Runs: a suite sharded over fresh devices, coordinated by the broker.
+route('POST', '/v1/runs', async (req, res, ctx) => {
+  const b = await body<RunRequest>(req, 15_000_000);
+  json(res, 201, ctx.runs.view(ctx.runs.start(me(req, ctx), b)));
+});
+
+route('GET', '/v1/runs', (req, res, ctx) => {
+  const p = me(req, ctx);
+  json(res, 200, ctx.runs.list().filter((r) => sameTeam(ctx, p, r.accountId)).map((r) => ctx.runs.view(r)));
+});
+
+// Per test over the team's last 200 runs: passes, failures and flaky passes.
+route('GET', '/v1/tests', (req, res, ctx) => {
+  const p = me(req, ctx);
+  json(res, 200, testHistory(ctx.db.recentRuns(200).filter((r) => sameTeam(ctx, p, r.accountId))));
+});
+
+route('GET', '/v1/runs/:id', (req, res, ctx) => {
+  json(res, 200, ctx.runs.view(teamRun(req, ctx)));
+});
+
+// One event per change, until the run ends.
+route('GET', '/v1/runs/:id/events', (req, res, ctx) => {
+  const run = teamRun(req, ctx);
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  const send = (r: typeof run): void => {
+    res.write(`event: ${r.state}\ndata: ${JSON.stringify(ctx.runs.view(r))}\n\n`);
+    if (r.state !== 'running') {
+      res.end();
+    }
+  };
+  send(run);
+  ctx.runs.events.on(run.id, send);
+  const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+  req.on('close', () => {
+    clearInterval(ping);
+    ctx.runs.events.off(run.id, send);
+  });
+});
+
+route('GET', '/v1/runs/:id/junit.xml', (req, res, ctx) => {
+  const run = teamRun(req, ctx);
+  res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8' });
+  res.end(junit(run));
+});
+
+route('DELETE', '/v1/runs/:id', (req, res, ctx) => {
+  json(res, 200, ctx.runs.view(ctx.runs.cancel(me(req, ctx), req.params.id ?? '')));
+});
+
+// Counts and timings for Prometheus. No names or ids, so it needs no token.
+route(
+  'GET',
+  '/metrics',
+  (_req, res, ctx) => {
+    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
+    res.end(ctx.metrics.render());
+  },
+  { auth: false },
+);
+
+// Recordings
+
+function recordingView(ctx: Ctx, r: RecordingRow): unknown {
+  const files = `/v1/recordings/${r.id}`;
+  return {
+    id: r.id,
+    leaseId: r.leaseId,
+    state: r.state,
+    owner: ctx.db.getAccount(r.accountId)?.name ?? 'unknown',
+    device: r.device,
+    startedAt: r.startedAt,
+    durationMs: r.startedAt && r.endedAt ? r.endedAt - r.startedAt : null,
+    bytes: r.bytes,
+    error: r.error,
+    url: `${ctx.publicUrl()}/recordings/${r.id}`,
+    files: { video: `${files}/video.mp4`, log: `${files}/log.ndjson`, screenshot: `${files}/screenshot.png`, timeline: `${files}/timeline.json` },
+  };
+}
+
+route('POST', '/v1/leases/:id/recording', async (req, res, ctx) => {
+  json(res, 201, recordingView(ctx, await ctx.recordings.start(me(req, ctx), req.params.id ?? '')));
+});
+
+route('POST', '/v1/leases/:id/recording/stop', async (req, res, ctx) => {
+  json(res, 200, recordingView(ctx, await ctx.recordings.stop(me(req, ctx), req.params.id ?? '')));
+});
+
+// Everyone signed in can watch the team's recordings: a bug link is for the whole team.
+route('GET', '/v1/recordings', (req, res, ctx) => {
+  const p = me(req, ctx);
+  const all = query(req).get('all') === '1';
+  const rows = ctx.db.recordings(all ? null : p.accountId).filter((r) => sameTeam(ctx, p, r.accountId));
+  json(res, 200, rows.map((r) => recordingView(ctx, r)));
+});
+
+route('GET', '/v1/recordings/:id', (req, res, ctx) => {
+  json(res, 200, recordingView(ctx, teamRecording(req, ctx)));
+});
+
+route('DELETE', '/v1/recordings/:id', async (req, res, ctx) => {
+  await ctx.recordings.delete(me(req, ctx), req.params.id ?? '');
+  res.writeHead(204).end();
+});
+
+const FILE_PARTS: Record<string, RecordingPart | 'timeline'> = {
+  'video.mp4': 'video',
+  'log.ndjson': 'log',
+  'screenshot.png': 'screenshot',
+  'timeline.json': 'timeline',
+};
+
+route('GET', '/v1/recordings/:id/:file', async (req, res, ctx) => {
+  const part = FILE_PARTS[req.params.file ?? ''];
+  if (!part) {
+    throw new ApiError(404, 'NOT_FOUND', 'A recording has video.mp4, log.ndjson, screenshot.png and timeline.json.');
+  }
+  const key = ctx.recordings.key(teamRecording(req, ctx).id, part);
+  const size = await ctx.store.size(key);
+  if (size === null) {
+    throw new ApiError(404, 'NOT_FOUND', `This recording has no ${req.params.file}.`);
+  }
+  const type = part === 'timeline' ? 'application/json' : PART_FILES[part].type;
+  // Browsers seek in a video with range requests.
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+  if (range && size > 0) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start > end || start >= size) {
+      res.writeHead(416, { 'content-range': `bytes */${size}` }).end();
+      return;
+    }
+    const slice = await ctx.store.open(key, { start, end });
+    if (!slice) {
+      throw new ApiError(404, 'NOT_FOUND', `This recording has no ${req.params.file}.`);
+    }
+    res.writeHead(206, { 'content-type': type, 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${size}`, 'accept-ranges': 'bytes' });
+    await pipeline(slice.stream, res);
+    return;
+  }
+  const file = await ctx.store.open(key);
+  if (!file) {
+    throw new ApiError(404, 'NOT_FOUND', `This recording has no ${req.params.file}.`);
+  }
+  res.writeHead(200, { 'content-type': type, 'content-length': size, 'accept-ranges': 'bytes' });
+  await pipeline(file.stream, res);
+});
+
+route(
+  'PUT',
+  '/v1/uploads/recordings/:id/:part',
+  async (req, res, ctx) => {
+    const part = req.params.part ?? '';
+    if (!(RECORDING_PARTS as readonly string[]).includes(part)) {
+      throw new ApiError(404, 'NOT_FOUND', 'No such part.');
+    }
+    await ctx.recordings.upload(req, req.params.id ?? '', part, query(req).get('t') ?? '');
+    res.writeHead(204).end();
+  },
+  { auth: false },
+);
+
 // Builds and artifacts
 
 route('POST', '/v1/builds', async (req, res, ctx) => {
@@ -492,8 +858,12 @@ route(
     if (!build) {
       throw new ApiError(404, 'NOT_FOUND', 'No such artifact.');
     }
+    const file = await ctx.store.open(`builds/${build.sha256}`);
+    if (!file) {
+      throw new ApiError(404, 'NOT_FOUND', 'The build file is gone from storage.');
+    }
     res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': build.size });
-    await pipeline(createReadStream(build.path), res);
+    await pipeline(file.stream, res);
   },
   { auth: false },
 );
@@ -532,6 +902,7 @@ async function saveUpload(req: IncomingMessage, ctx: Ctx, name: string): Promise
   const sha256 = hash.digest('hex');
   const path = join(dir, sha256);
   await rename(tmp, path);
+  await ctx.store.saved(`builds/${sha256}`);
   ctx.db.insertBuild(sha256, name, path, size);
   return { sha256, name, size };
 }

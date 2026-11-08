@@ -60,22 +60,37 @@ async function render() {
   if (invite) return inviteView(invite[1]);
   if (!me) return loginView();
   who.replaceChildren(`${me.name} · `, h('a', { href: '#', onclick: async (e) => { e.preventDefault(); await api('POST', '/v1/logout'); go('/'); } }, 'Sign out'));
-  const links = [['/', 'Devices'], ['/connect', 'Connect']];
+  const links = [['/', 'Devices'], ['/runs', 'Runs'], ['/recordings', 'Recordings'], ['/connect', 'Connect']];
   if (me.role === 'operator') links.push(['/people', 'People']);
   nav.replaceChildren(...links.map(([href, label]) => h('a', { href, 'data-link': true, class: path === href ? 'on' : '' }, label)));
   const lease = path.match(/^\/leases\/([^/]+)$/);
   if (lease) return leaseView(lease[1]);
+  const recording = path.match(/^\/recordings\/([^/]+)$/);
+  if (recording) return recordingView(recording[1]);
+  if (path === '/recordings') return recordingsView();
+  const run = path.match(/^\/runs\/([^/]+)$/);
+  if (run) return runView(run[1]);
+  if (path === '/runs') return runsView();
   if (path === '/connect') return connectView();
   if (path === '/cli-login') return cliLoginView();
   if (path === '/people') return peopleView();
   return devicesView();
 }
 
-function loginView() {
+async function loginView() {
   nav.replaceChildren();
   who.replaceChildren();
-  const used = new URLSearchParams(location.search).get('error') === 'link-used';
-  const err = h('p', { class: 'error' }, used ? 'That sign-in link was already used or has expired. Sign in with your name and password, or run `hangar up` again for a new admin link.' : '');
+  const params = new URLSearchParams(location.search);
+  const offer = await api('GET', '/v1/sign-in').catch(() => ({ sso: false, passwords: true }));
+  const used = params.get('error') === 'link-used';
+  const sso = params.get('error') === 'sso' ? `Single sign-on failed: ${params.get('message') ?? 'no reason given'}.` : '';
+  const err = h('p', { class: 'error' }, used ? 'That sign-in link was already used or has expired. Sign in with your name and password, or run `hangar up` again for a new admin link.' : sso);
+  const next = location.pathname === '/cli-login' ? location.pathname + location.search : '/';
+  const ssoButton = offer.sso ? h('p', {}, h('a', { class: 'button primary', href: `/v1/oidc/start?next=${encodeURIComponent(next)}` }, 'Sign in with your company account')) : '';
+  if (!offer.passwords) {
+    app.replaceChildren(h('div', { class: 'card narrow' }, h('h1', {}, 'Sign in'), ssoButton, err));
+    return;
+  }
   const form = h(
     'form',
     {
@@ -84,13 +99,14 @@ function loginView() {
         e.preventDefault();
         try {
           await api('POST', '/v1/login', { name: form.name.value, password: form.password.value });
-          go(location.pathname === '/cli-login' ? location.pathname + location.search : '/');
+          go(next);
         } catch (x) {
           err.textContent = x.message;
         }
       },
     },
     h('h1', {}, 'Sign in'),
+    ssoButton,
     h('label', { for: 'name' }, 'Name'),
     h('input', { id: 'name', name: 'name', type: 'text', autocomplete: 'username', required: true }),
     h('label', { for: 'password' }, 'Password'),
@@ -135,14 +151,14 @@ async function devicesView() {
   const err = h('p', { class: 'error' });
   const [devices, leases] = await Promise.all([api('GET', '/v1/devices'), api('GET', '/v1/leases')]);
   const mine = leases.filter((l) => l.state !== 'ended');
-  const models = [...new Map(devices.map((d) => [`${d.model}|${d.os}`, d])).values()];
+  const models = [...new Map(devices.map((d) => [`${d.platform}|${d.model}|${d.os}`, d])).values()];
   let waiting = false;
   const use = async (d, button) => {
     waiting = true;
     button.disabled = true;
     button.textContent = 'Getting a device…';
     try {
-      const lease = await api('POST', '/v1/leases?wait=120', { class: { model: d.model, os: d.os } });
+      const lease = await api('POST', '/v1/leases?wait=120', { class: { platform: d.platform, model: d.model, os: d.os } });
       go(`/leases/${lease.id}`);
     } catch (x) {
       err.textContent = x.message;
@@ -156,7 +172,7 @@ async function devicesView() {
     mine.length
       ? h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Your devices'), ...mine.map((l) =>
           h('div', { class: 'row', style: 'justify-content:space-between;padding:6px 0' },
-            h('span', {}, `${l.device ? `${l.device.model}, iOS ${l.device.os}` : 'Waiting for a device'} `, h('span', { class: `state ${l.state}` }, l.state)),
+            h('span', {}, `${l.device ? system(l.device) : 'Waiting for a device'} `, h('span', { class: `state ${l.state}` }, l.state)),
             h('a', { href: `/leases/${l.id}`, 'data-link': true }, 'Open')),
         ))
       : '',
@@ -166,10 +182,10 @@ async function devicesView() {
           h('table', {},
             h('tr', {}, h('th', {}, 'Device'), h('th', {}, 'Free'), h('th', {}, 'Mac'), h('th', {})),
             ...models.map((d) => {
-              const same = devices.filter((x) => x.model === d.model && x.os === d.os);
+              const same = devices.filter((x) => x.platform === d.platform && x.model === d.model && x.os === d.os);
               const free = same.filter((x) => x.state === 'ready').length;
               const b = h('button', { class: 'primary', onclick: () => use(d, b) }, 'Use one');
-              return h('tr', {}, h('td', {}, `${d.model}, iOS ${d.os}`), h('td', {}, `${free} of ${same.length}`), h('td', { class: 'muted' }, d.host), h('td', { style: 'text-align:right' }, b));
+              return h('tr', {}, h('td', {}, system(d)), h('td', {}, `${free} of ${same.length}`), h('td', { class: 'muted' }, d.host), h('td', { style: 'text-align:right' }, b));
             }),
           ))
       : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `npx hangar up` on a Mac with Xcode.'),
@@ -359,7 +375,8 @@ async function leaseView(id) {
       out.textContent = x.message;
     }
   };
-  const file = h('input', { type: 'file', accept: '.zip,.tar,.tgz,.gz' });
+  const isAndroid = lease.device.platform === 'android-emulator';
+  const file = h('input', { type: 'file', accept: isAndroid ? '.apk' : '.zip,.tar,.tgz,.gz' });
   const urlInput = h('input', { type: 'url', placeholder: 'https://example.com or myapp://path' });
 
   app.replaceChildren(
@@ -376,9 +393,10 @@ async function leaseView(id) {
       ),
       h('div', { class: 'side' },
         h('div', { class: 'card' },
-          h('h1', { style: 'margin-bottom:4px' }, `${lease.device.model}, iOS ${lease.device.os}`),
+          h('h1', { style: 'margin-bottom:4px' }, system(lease.device)),
           h('p', { class: 'muted', style: 'margin-top:0' }, 'Yours until you release it or leave it idle for 5 minutes. It is wiped when released.'),
           h('div', { class: 'row' },
+            recordButton(id, out),
             h('button', { onclick: () => navigator.clipboard.writeText(location.href).then(() => (out.textContent = 'Link copied.')) }, 'Copy link'),
             h('button', { class: 'danger', onclick: async () => { await api('DELETE', `/v1/leases/${id}`); go('/'); } }, 'Release'),
           ),
@@ -386,7 +404,7 @@ async function leaseView(id) {
         ),
         h('div', { class: 'card' },
           h('h2', { style: 'margin-top:0' }, 'Install an app'),
-          h('p', { class: 'muted' }, 'A zipped simulator build (.app folder). Uploading needs permission from an operator.'),
+          h('p', { class: 'muted' }, `${isAndroid ? 'An .apk' : 'A zipped simulator build (.app folder)'}. Uploading needs permission from an operator.`),
           h('div', { class: 'row' }, file, h('button', { onclick: () => file.files[0] && run('Installing', async () => {
             const r = await api('POST', `/v1/leases/${id}/apps?name=${encodeURIComponent(file.files[0].name)}`, file.files[0]);
             await api('POST', `/v1/leases/${id}/apps/${encodeURIComponent(r.bundleId)}/launch`);
@@ -471,13 +489,38 @@ function cliLoginView() {
 }
 
 async function peopleView() {
-  const people = await api('GET', '/v1/people');
+  const [people, teams] = await Promise.all([api('GET', '/v1/people'), api('GET', '/v1/teams')]);
   const result = h('div');
+  const status = h('p', { class: 'muted' });
   const role = h('select', {}, h('option', { value: 'member' }, 'Member: uses devices'), h('option', { value: 'operator' }, 'Operator: runs Hangar, can upload apps'));
+  const save = (fn) => fn().then(() => peopleView(), (x) => (status.textContent = x.message));
+  // Only shown once there is a second team: one-team setups never see the concept.
+  const teamPicker = (p) => h('select', { onchange: (e) => save(() => api('PUT', `/v1/people/${encodeURIComponent(p.name)}/team`, { team: e.target.value })) },
+    ...teams.map((t) => h('option', { value: t.id, selected: t.id === p.team }, t.name)));
+  const manyTeams = teams.length > 1;
+  const newTeam = h('input', { placeholder: 'Team name' });
   app.replaceChildren(
     h('h1', {}, 'People'),
     h('div', { class: 'card' },
-      h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Role')), ...people.map((p) => h('tr', {}, h('td', {}, p.name), h('td', { class: 'muted' }, p.role)))),
+      h('table', {},
+        h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Role'), manyTeams ? h('th', {}, 'Team') : ''),
+        ...people.map((p) => h('tr', {}, h('td', {}, p.name), h('td', { class: 'muted' }, p.role), manyTeams ? h('td', {}, teamPicker(p)) : '')),
+      ),
+    ),
+    h('h2', {}, 'Teams'),
+    h('div', { class: 'card' },
+      h('p', { class: 'muted' }, 'A quota is the most devices a team holds at once. Requests over it wait in the queue. Leave it empty for no limit.'),
+      h('table', {},
+        h('tr', {}, h('th', {}, 'Team'), h('th', {}, 'People'), h('th', {}, 'In use'), h('th', {}, 'Quota')),
+        ...teams.map((t) => h('tr', {},
+          h('td', {}, t.name),
+          h('td', {}, t.members),
+          h('td', {}, t.activeLeases),
+          h('td', {}, h('input', { type: 'number', min: 0, value: t.quota ?? '', style: 'width:6em', onchange: (e) => save(() => api('PATCH', `/v1/teams/${t.id}`, { quota: e.target.value === '' ? null : Number(e.target.value) })) })),
+        )),
+      ),
+      h('div', { class: 'row' }, newTeam, h('button', { onclick: () => save(() => api('POST', '/v1/teams', { name: newTeam.value })) }, 'Add team')),
+      status,
     ),
     h('h2', {}, 'Invite someone'),
     h('div', { class: 'card' },
@@ -492,3 +535,187 @@ async function peopleView() {
 }
 
 render();
+
+// Recordings: start one while testing, stop it, and paste the link into the bug report.
+
+function recordButton(leaseId, out) {
+  let recording = false;
+  const button = h('button', { onclick: async () => {
+    button.disabled = true;
+    try {
+      if (!recording) {
+        await api('POST', `/v1/leases/${leaseId}/recording`);
+        out.textContent = 'Recording the screen, the app log and what you do.';
+      } else {
+        out.textContent = 'Saving the recording…';
+        const rec = await api('POST', `/v1/leases/${leaseId}/recording/stop`);
+        out.replaceChildren('Saved: ', h('a', { href: `/recordings/${rec.id}`, 'data-link': true }, 'open the recording'), '. Paste its link into the bug report.');
+      }
+      recording = !recording;
+      button.textContent = recording ? 'Stop recording' : 'Record';
+      button.classList.toggle('recording', recording);
+    } catch (x) {
+      out.textContent = x.message;
+    } finally {
+      button.disabled = false;
+    }
+  } }, 'Record');
+  return button;
+}
+
+const seconds = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+async function recordingsView() {
+  const list = await api('GET', '/v1/recordings?all=1');
+  app.replaceChildren(
+    h('h1', {}, 'Recordings'),
+    list.length === 0
+      ? h('p', { class: 'muted' }, 'No recordings yet. Press Record on a device, or lease with `hangar lease --record`. Recordings are kept for 14 days.')
+      : h('table', {},
+          h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Who'), h('th', {}, 'Device'), h('th', {}, 'Length'), h('th', {}, 'State')),
+          ...list.map((r) => h('tr', {},
+            h('td', {}, h('a', { href: `/recordings/${r.id}`, 'data-link': true }, r.startedAt ? new Date(r.startedAt).toLocaleString() : 'not started')),
+            h('td', {}, r.owner),
+            h('td', {}, r.device ?? ''),
+            h('td', {}, r.durationMs === null ? '' : seconds(r.durationMs)),
+            h('td', { class: `state ${r.state}` }, r.state),
+          )),
+        ),
+  );
+}
+
+async function recordingView(id) {
+  const rec = await api('GET', `/v1/recordings/${id}`).catch((x) => ({ error: x.message }));
+  if (rec.error) {
+    app.replaceChildren(h('p', { class: 'error' }, rec.error), h('a', { href: '/recordings', 'data-link': true }, 'All recordings'));
+    return;
+  }
+  const title = h('h1', { style: 'margin-bottom:4px' }, `${rec.device ?? 'Device'}, recorded by ${rec.owner}`);
+  const meta = h('p', { class: 'muted', style: 'margin-top:0' }, rec.startedAt ? `${new Date(rec.startedAt).toLocaleString()} · ${rec.durationMs === null ? '' : seconds(rec.durationMs)}` : '');
+  if (rec.state !== 'ready') {
+    const why = { waiting: 'Waiting for the device.', recording: 'Still recording.', saving: 'The Mac is saving the recording. Reload in a moment.', failed: `The recording failed: ${rec.error}` };
+    app.replaceChildren(title, meta, h('p', {}, why[rec.state] ?? rec.state));
+    return;
+  }
+
+  const video = h('video', { src: rec.files.video, controls: true, playsinline: true, preload: 'auto' });
+  const seek = (ms) => {
+    video.currentTime = ms / 1000;
+    video.play().catch(() => {});
+  };
+  const timeline = await fetch(rec.files.timeline).then((r) => (r.ok ? r.json() : []), () => []);
+  const logText = await fetch(rec.files.log).then((r) => (r.ok ? r.text() : ''), () => '');
+  const log = logText.split('\n').filter(Boolean).flatMap((line) => {
+    try {
+      const e = JSON.parse(line);
+      return [{ at: Date.parse(e.timestamp.replace(' ', 'T').replace(/(\.\d{3})\d*/, '$1').replace(/([+-]\d{2})(\d{2})$/, '$1:$2')) - rec.startedAt, process: e.processImagePath?.split('/').pop() ?? '', level: e.messageType ?? '', message: e.eventMessage ?? '' }];
+    } catch {
+      return [];
+    }
+  });
+
+  // Highlights the step that was last done at the video's current time.
+  const steps = timeline.map((e) => h('button', { class: e.failed ? 'step error' : 'step', title: e.failed ?? '', onclick: () => seek(e.at) }, h('span', { class: 'muted' }, seconds(e.at)), ' ', e.what, e.failed ? ` (failed: ${e.failed})` : ''));
+  video.addEventListener('timeupdate', () => {
+    const now = video.currentTime * 1000;
+    let current = -1;
+    timeline.forEach((e, i) => { if (e.at <= now) current = i; });
+    steps.forEach((el, i) => el.classList.toggle('on', i === current));
+  });
+
+  app.replaceChildren(
+    h('div', { class: 'lease' },
+      h('div', {}, h('div', { class: 'screen recording' }, video)),
+      h('div', { class: 'side' },
+        h('div', { class: 'card' },
+          title,
+          meta,
+          h('div', { class: 'row' },
+            h('button', { onclick: (e) => navigator.clipboard.writeText(location.href).then(() => (e.target.textContent = 'Link copied')) }, 'Copy link'),
+            h('a', { class: 'button', href: rec.files.video, download: `hangar-${id}.mp4` }, 'Video'),
+            h('a', { class: 'button', href: rec.files.screenshot, download: `hangar-${id}.png` }, 'Last screenshot'),
+            h('a', { class: 'button', href: rec.files.log, download: `hangar-${id}.ndjson` }, 'App log'),
+          ),
+        ),
+        h('div', { class: 'card' },
+          h('h2', { style: 'margin-top:0' }, 'What happened'),
+          steps.length ? h('div', { class: 'steps' }, steps) : h('p', { class: 'muted' }, 'No actions were taken during the recording.'),
+        ),
+        h('div', { class: 'card' },
+          h('h2', { style: 'margin-top:0' }, 'App log'),
+          log.length
+            ? h('div', { class: 'log' }, log.slice(-500).map((e) => h('button', { class: `step ${e.level.toLowerCase()}`, onclick: () => seek(e.at) }, h('span', { class: 'muted' }, seconds(e.at)), ' ', h('strong', {}, e.process), ' ', e.message)))
+            : h('p', { class: 'muted' }, 'The apps on the device logged nothing.'),
+        ),
+      ),
+    ),
+  );
+}
+
+const system = (d) => `${d.model}, ${d.platform === 'android-emulator' ? 'Android' : 'iOS'} ${d.os}`;
+
+const counts = (r) => [r.counts.passed && `${r.counts.passed} passed`, r.counts.flaky && `${r.counts.flaky} flaky`, r.counts.failed && `${r.counts.failed} failed`, r.counts.pending && `${r.counts.pending} to go`].filter(Boolean).join(', ');
+
+async function runsView() {
+  const list = await api('GET', '/v1/runs');
+  app.replaceChildren(
+    h('h1', {}, 'Runs'),
+    list.length === 0
+      ? h('p', { class: 'muted' }, 'No runs yet. Start one with `hangar run maestro <flows-dir> --app <App.app>`, or from CI with the GitHub Action.')
+      : h('table', {},
+          h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Who'), h('th', {}, 'Build'), h('th', {}, 'Flows'), h('th', {}, 'Length'), h('th', {}, 'State')),
+          ...list.map((r) => h('tr', {},
+            h('td', {}, h('a', { href: `/runs/${r.id}`, 'data-link': true }, new Date(r.createdAt).toLocaleString())),
+            h('td', {}, r.owner),
+            h('td', {}, r.build),
+            h('td', {}, counts(r)),
+            h('td', {}, seconds(r.durationMs)),
+            h('td', { class: `state ${r.state}` }, r.state),
+          )),
+        ),
+  );
+}
+
+async function runView(id) {
+  const first = await api('GET', `/v1/runs/${id}`).catch((x) => ({ error: x.message }));
+  if (first.error) {
+    app.replaceChildren(h('p', { class: 'error' }, first.error), h('a', { href: '/runs', 'data-link': true }, 'All runs'));
+    return;
+  }
+  const show = (r) => {
+    const cancel = r.state === 'running' && (r.owner === me.name || me.role === 'operator')
+      ? h('button', { onclick: () => api('DELETE', `/v1/runs/${id}`).then(show) }, 'Cancel run')
+      : '';
+    app.replaceChildren(
+      h('h1', { style: 'margin-bottom:4px' }, `${r.build}, started by ${r.owner}`),
+      h('p', { class: 'muted', style: 'margin-top:0' }, `${new Date(r.createdAt).toLocaleString()} · ${r.shards} shard${r.shards === 1 ? '' : 's'} · ${seconds(r.durationMs)} · `, h('span', { class: `state ${r.state}` }, r.state)),
+      r.error ? h('p', { class: 'error' }, r.error) : '',
+      h('div', { class: 'row' }, h('a', { class: 'button', href: r.junit, download: `hangar-run-${id}.xml` }, 'JUnit report'), cancel),
+      h('table', {},
+        h('tr', {}, h('th', {}, 'Flow'), h('th', {}, 'Shard'), h('th', {}, 'Attempts'), h('th', {}, 'State'), h('th', {}, '')),
+        ...r.flows.map((f) => h('tr', {},
+          h('td', {}, f.flow, f.message ? h('div', { class: 'muted' }, f.message) : ''),
+          h('td', {}, f.shard + 1),
+          h('td', {}, f.attempts),
+          h('td', { class: `state ${f.status}` }, f.status),
+          h('td', {}, f.recording ? h('a', { href: new URL(f.recording).pathname, 'data-link': true }, 'Recording') : ''),
+        )),
+      ),
+    );
+  };
+  show(first);
+  if (first.state === 'running') {
+    const events = new EventSource(`/v1/runs/${id}/events`);
+    for (const state of ['running', 'passed', 'failed', 'cancelled']) {
+      events.addEventListener(state, (e) => {
+        show(JSON.parse(e.data));
+        // The server ends the stream once the run is over; without this EventSource reconnects.
+        if (state !== 'running') events.close();
+      });
+    }
+    cleanup = () => events.close();
+  }
+}

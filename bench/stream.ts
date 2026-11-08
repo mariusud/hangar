@@ -10,7 +10,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { Lease } from '@hangar/client';
+import type { Lease } from 'hangar';
 import { start } from '../e2e/harness.ts';
 
 const TRIALS = Number(process.env.TRIALS ?? 15);

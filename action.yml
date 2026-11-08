@@ -1,0 +1,61 @@
+name: Hangar Maestro run
+description: Run Maestro flows sharded over fresh simulators on your Hangar, with retries, recordings of failed flows and one JUnit report.
+inputs:
+  url:
+    description: The Hangar address, such as https://hangar.example.ts.net.
+    required: true
+  token:
+    description: A Hangar token for CI, made on the console's Connect page. Pass it from a secret.
+    required: true
+  app:
+    description: A built simulator .app, an archive of one, or the name of a build already on Hangar.
+    required: true
+  flows:
+    description: The folder with the Maestro flow files.
+    default: .maestro
+  shards:
+    description: How many devices to split the flows over.
+    default: '1'
+  retries:
+    description: How many times to retry a failed flow, recorded.
+    default: '1'
+  model:
+    description: A simulator model, such as iPhone 17. Any model if left out.
+    default: ''
+  env:
+    description: Variables for the flows, one KEY=VALUE per line.
+    default: ''
+  junit:
+    description: Where to write the JUnit report.
+    default: hangar-maestro.xml
+outputs:
+  junit:
+    description: The path of the JUnit report.
+    value: ${{ inputs.junit }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - shell: bash
+      run: corepack enable && pnpm --dir "$GITHUB_ACTION_PATH" install --frozen-lockfile --prod
+    - shell: bash
+      env:
+        HANGAR_URL: ${{ inputs.url }}
+        HANGAR_TOKEN: ${{ inputs.token }}
+        # Inputs go through the environment, never into the script text, so a value cannot run as shell.
+        INPUT_FLOWS: ${{ inputs.flows }}
+        INPUT_APP: ${{ inputs.app }}
+        INPUT_SHARDS: ${{ inputs.shards }}
+        INPUT_RETRIES: ${{ inputs.retries }}
+        INPUT_JUNIT: ${{ inputs.junit }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_ENV: ${{ inputs.env }}
+      run: |
+        args=(run maestro "$INPUT_FLOWS" --app "$INPUT_APP" --shards "$INPUT_SHARDS" --retries "$INPUT_RETRIES" --junit "$INPUT_JUNIT")
+        if [ -n "$INPUT_MODEL" ]; then args+=(--model "$INPUT_MODEL"); fi
+        while IFS= read -r line; do
+          if [ -n "$line" ]; then args+=(-e "$line"); fi
+        done <<< "$INPUT_ENV"
+        node --disable-warning=ExperimentalWarning "$GITHUB_ACTION_PATH/packages/hangar/src/main.ts" "${args[@]}"

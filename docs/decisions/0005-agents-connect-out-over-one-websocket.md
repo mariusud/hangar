@@ -1,6 +1,6 @@
 # 0005. Agents connect out over one WebSocket
 
-- **Status:** Proposed
+- **Status:** Accepted. The frame format is superseded by 0008.
 - **Date:** 2026-11-05
 
 ## Context

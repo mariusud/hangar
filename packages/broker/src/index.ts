@@ -5,19 +5,36 @@ import type { AgentMessage } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import { Db } from './db.ts';
 import { Hosts, type HostLink } from './hosts.ts';
+import { imagesMessage } from './images.ts';
 import { handle, type Ctx } from './http.ts';
 import { Leases } from './leases/service.ts';
+import { Metrics } from './metrics.ts';
+import { Recordings } from './recordings.ts';
+import { Runs } from './runs.ts';
+import { Store, type S3Config } from './store.ts';
+import { Oidc, type OidcConfig } from './oidc.ts';
+import { attachAgents } from './agents.ts';
 import { attachStreams } from './stream.ts';
 import { attachTunnels } from './tunnel.ts';
 
 export type { HostLink } from './hosts.ts';
 export { ApiError } from './leases/service.ts';
+export { Db } from './db.ts';
+export { oidcFromEnv, type OidcConfig } from './oidc.ts';
+export { s3FromEnv, type S3Config } from './store.ts';
+
+// A token for `hangar join` on another Mac. It does not expire.
+export function mintHostToken(db: Db): string {
+  return auth.mintToken(db, 'host', { label: 'join' });
+}
 
 export type BrokerOptions = {
   dataDir: string;
   port: number;
   host?: string;
   publicUrl?: string;
+  oidc?: OidcConfig;
+  s3?: S3Config;
 };
 
 export type Broker = {
@@ -28,6 +45,7 @@ export type Broker = {
   url: string;
   attach(link: HostLink): { message(m: AgentMessage): void; closed(): void };
   welcomeLink(): string;
+  joinToken(): string;
   close(): Promise<void>;
 };
 
@@ -37,19 +55,44 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   const hosts = new Hosts();
   const leases = new Leases(db, hosts);
   hosts.onChange = () => void leases.tick();
+  // A lease that ended while its agent was away (or before a broker restart) is ended there too.
+  hosts.onHello = (held, link) => {
+    for (const leaseId of held) {
+      const lease = db.getLease(leaseId);
+      if (!lease || lease.state === 'ended') {
+        link.send({ type: 'lease.end', leaseId });
+      }
+    }
+    link.send(imagesMessage(db, internalUrl()));
+  };
 
   let url = '';
+  let port = opts.port;
+  // Paths agents fetch from (artifacts, recording uploads) go out without a host. Each agent
+  // resolves them against the address it reached the broker at, local or across the network.
+  const internalUrl = (): string => '';
+  const store = new Store(opts.dataDir, opts.s3);
+  const recordings = new Recordings(db, leases, store, internalUrl);
+  const metrics = new Metrics(db, hosts, leases);
+  const publicUrl = (): string => opts.publicUrl ?? url;
+  const runs = new Runs(db, leases, recordings, internalUrl, publicUrl);
   const ctx: Ctx = {
     db,
     hosts,
     leases,
+    recordings,
+    runs,
+    store,
+    oidc: opts.oidc ? new Oidc(opts.oidc) : null,
+    metrics,
+    publishImages: () => hosts.broadcast(() => imagesMessage(db, internalUrl())),
     dataDir: opts.dataDir,
     consoleDir: join(import.meta.dirname, '..', '..', 'console', 'src'),
-    internalUrl: () => `http://127.0.0.1:${port}`,
-    publicUrl: () => opts.publicUrl ?? url,
+    internalUrl,
+    publicUrl,
   };
   const server = createServer((req, res) => void handle(req, res, ctx));
-  const upgrades = [attachStreams(db, hosts, leases), attachTunnels(db, hosts, leases)];
+  const upgrades = [attachStreams(db, hosts, leases, metrics), attachTunnels(db, hosts, leases), attachAgents(db, hosts)];
   server.on('upgrade', (req, socket, head) => {
     if (!upgrades.some((u) => u.upgrade(req, socket, head))) {
       socket.destroy();
@@ -60,10 +103,13 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     server.listen(opts.port, opts.host ?? '0.0.0.0', resolve);
   });
   const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : opts.port;
+  port = typeof address === 'object' && address ? address.port : opts.port;
   url = opts.publicUrl ?? `http://${opts.host && opts.host !== '0.0.0.0' ? opts.host : 'localhost'}:${port}`;
 
   const timer = setInterval(() => void leases.tick(), 1000);
+  const sweep = (): void => void recordings.sweep().catch((err: Error) => console.error(`Recording cleanup failed: ${err.message}`));
+  sweep();
+  const sweeper = setInterval(sweep, 3600_000);
 
   return {
     server,
@@ -73,6 +119,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     url,
     attach: (link) => hosts.attach(link),
     // A one-use sign-in link for the first operator. Creates the account on first use of `up`.
+    joinToken: () => mintHostToken(db),
     welcomeLink: () => {
       const admin = db.accounts().find((a) => a.role === 'operator') ?? auth.createAccount(db, 'admin', 'operator');
       const code = auth.mintToken(db, 'welcome', { accountId: admin.id, expiresAt: Date.now() + 30 * 60_000 });
@@ -80,6 +127,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     },
     close: async () => {
       clearInterval(timer);
+      clearInterval(sweeper);
       hosts.onChange = () => {};
       leases.stopped = true;
       for (const u of upgrades) {

@@ -6,7 +6,7 @@
   "dependencies": {
     "@hangar/agent": "workspace:*",
     "@hangar/broker": "workspace:*",
-    "@hangar/client": "workspace:*",
-    "@hangar/protocol": "workspace:*"
+    "@hangar/protocol": "workspace:*",
+    "hangar": "workspace:*"
   }
 }

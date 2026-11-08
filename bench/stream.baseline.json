@@ -1,32 +1,32 @@
 {
   "machine": "Apple M4 Pro, Xcode 26.6",
-  "date": "2026-11-06",
+  "date": "2026-11-07",
   "h264": {
     "trials": 12,
     "inputToFrame": {
-      "p50": 86,
-      "p95": 339
+      "p50": 109,
+      "p95": 197
     },
     "inputToCapture": {
-      "p50": 76.8,
-      "p95": 327.4
+      "p50": 91.1,
+      "p95": 187.9
     },
     "captureToClient": {
-      "p50": 8.9,
-      "p95": 19.9
+      "p50": 10.7,
+      "p95": 28.9
     },
-    "motionFps": 58,
-    "motionKBps": 691
+    "motionFps": 52,
+    "motionKBps": 509
   },
   "jpeg": {
     "trials": 12,
     "inputToFrame": {
-      "p50": 228,
-      "p95": 669
+      "p50": 137,
+      "p95": 443
     },
     "inputToCapture": null,
     "captureToClient": null,
-    "motionFps": 6,
-    "motionKBps": 195
+    "motionFps": 38,
+    "motionKBps": 1168
   }
 }

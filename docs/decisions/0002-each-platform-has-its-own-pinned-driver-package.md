@@ -1,6 +1,7 @@
 # 0002. Each platform has its own pinned driver package
 
-- **Status:** Proposed, waiting on spike 1 in ROADMAP.md
+- **Status:** Superseded by [0010](0010-hangar-2.md): the drivers live in the agent package,
+  since nothing else uses them. Pinned tool versions per driver still apply.
 - **Date:** 2026-11-05
 
 ## Context

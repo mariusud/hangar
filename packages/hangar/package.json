@@ -1,0 +1,16 @@
+{
+  "name": "hangar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": "./src/client/index.ts",
+  "dependencies": {
+    "@hangar/protocol": "workspace:*",
+    "@hangar/broker": "workspace:*",
+    "@hangar/agent": "workspace:*"
+  },
+  "bin": {
+    "hangar": "./src/main.ts"
+  }
+}

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Agent } from '@hangar/agent';
 import { startBroker, type Broker } from '@hangar/broker';
-import { Hangar } from '@hangar/client';
+import { Hangar } from 'hangar';
 import * as auth from '../packages/broker/src/auth.ts';
 
 export type Harness = {
@@ -20,7 +20,7 @@ export async function start(max: number, log: (line: string) => void = (l) => co
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   let toAgent: (m: Parameters<Agent['receive']>[0]) => void = () => {};
   const handlers = broker.attach({ send: (m) => setImmediate(() => toAgent(m)), close: () => {} });
-  const agent = new Agent({ send: (m) => setImmediate(() => handlers.message(m)), maxDevices: max, warm: 1, log });
+  const agent = new Agent({ send: (m) => setImmediate(() => handlers.message(m)), brokerUrl: broker.url, maxDevices: max, warm: 1, log });
   toAgent = (m) => agent.receive(m);
   await agent.start();
   return {

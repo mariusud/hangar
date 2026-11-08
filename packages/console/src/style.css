@@ -86,7 +86,7 @@ button, .button {
   cursor: pointer;
   text-decoration: none;
 }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--bad); }
 button:disabled { opacity: 0.5; cursor: default; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -97,7 +97,10 @@ th { font-size: 13px; color: var(--muted); font-weight: 500; }
 .state { font-size: 13px; }
 .state.ready, .state.active { color: var(--ok); }
 .state.leased, .state.queued, .state.preparing, .state.wiping { color: var(--warn); }
-.state.offline, .state.ended { color: var(--muted); }
+.state.offline, .state.ended, .state.cancelled { color: var(--muted); }
+.state.passed { color: var(--ok); }
+.state.running, .state.flaky { color: var(--warn); }
+.state.failed { color: var(--bad); }
 code, .code {
   font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--bg);
@@ -130,3 +133,13 @@ code, .code {
 .side .card + .card { margin-top: 14px; }
 .tree { max-height: 320px; overflow: auto; font-size: 13px; }
 .tree div { padding: 3px 0; border-bottom: 1px dashed var(--line); }
+button.recording { color: var(--bad); border-color: var(--bad); }
+.screen.recording video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+.steps, .log { max-height: 360px; overflow: auto; font-size: 13px; }
+.step {
+  display: block; width: 100%; text-align: left;
+  border: 0; border-bottom: 1px dashed var(--line); border-radius: 0;
+  padding: 5px 2px; background: none;
+}
+.step.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.step.error, .step.fault { color: var(--bad); }

@@ -1,6 +1,6 @@
 // Lease state machine and scheduler. Pure: no clock, no I/O. Callers pass `now`.
 
-import type { DeviceClass, LeaseEndReason, LeaseState } from '@hangar/protocol';
+import type { DeviceClass, LeaseEndReason, LeaseState, Platform } from '@hangar/protocol';
 
 export type Lease = {
   id: string;
@@ -29,6 +29,8 @@ export type PoolDevice = {
   model: string;
   os: string;
   build: string | null;
+  platform?: Platform;
+  image?: string;
 };
 
 export const DEFAULTS = {
@@ -88,6 +90,9 @@ export function deadline(lease: Lease): { at: number; reason: LeaseEndReason } |
 }
 
 export function matches(cls: DeviceClass, device: PoolDevice): boolean {
+  if (cls.platform && cls.platform !== (device.platform ?? 'ios-simulator')) {
+    return false;
+  }
   if (cls.model && !looseEquals(cls.model, device.model)) {
     return false;
   }
@@ -95,6 +100,10 @@ export function matches(cls: DeviceClass, device: PoolDevice): boolean {
     return false;
   }
   if (cls.build && cls.build !== device.build) {
+    return false;
+  }
+  // A plain request never gets a device with someone's image on it, and the reverse.
+  if ((cls.image?.toLowerCase() ?? null) !== (device.image?.toLowerCase() ?? null)) {
     return false;
   }
   return true;

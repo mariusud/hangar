@@ -7,6 +7,9 @@
   "exports": "./src/index.ts",
   "dependencies": {
     "@hangar/protocol": "workspace:*",
-    "@hangar/driver-ios-simulator": "workspace:*"
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
   }
 }
