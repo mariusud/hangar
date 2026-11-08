@@ -116,7 +116,7 @@ Done:
 
 - Device calls go straight to the idb companion's gRPC, and JPEG screenshots come from the
   simulator's display through a long-lived process in the Swift helper: the element tree went
-  from 303 ms to 3 to 5 ms, a JPEG screenshot from 594 ms to 39 ms (README, Numbers).
+  from 303 ms to 3 to 5 ms, a JPEG screenshot from 594 ms to 39 ms (docs/numbers.md).
 - Five packages instead of eight: the drivers are in the agent, and the CLI and client are one
   package, `hangar`.
 - mobile-mcp's tool names on the MCP endpoint, a device being a lease

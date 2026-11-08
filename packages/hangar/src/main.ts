@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 import { parseArgs } from 'node:util';
 import { HangarError } from './client/index.ts';
 import { CLIENT_HELP, clientCommand } from './client.ts';

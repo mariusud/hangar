@@ -4,8 +4,8 @@ You need a Mac running `hangar up` that your machine can reach, and a React Nati
 `ios` folder. Hangar is not on npm yet, so run the CLI from a clone:
 
 ```bash
-git clone <hangar repository URL> && cd hangar && pnpm install
-alias hangar="node --disable-warning=ExperimentalWarning $PWD/packages/hangar/src/main.ts"
+git clone https://github.com/mariusud/hangar && cd hangar
+pnpm install && npm install -g ./packages/hangar
 ```
 
 ## Sign in once

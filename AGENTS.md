@@ -22,7 +22,7 @@ Hangar's goal is to be the fastest remote simulator for React Native teams. The 
 the design under "Targets".
 
 - Measure before optimizing. A performance change shows before and after numbers from a script
-  in the repo, and the README numbers stay true.
+  in the repo, and the numbers in the README and docs/numbers.md stay true.
 - Hot paths are native: capture, encode and input. No process spawn, JSON or base64 per frame
   or per tap. Everything else is TypeScript on Node 22 with no build step.
 - Never queue video. Drop stale frames and send a keyframe instead.
