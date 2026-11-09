@@ -1,21 +1,22 @@
 <p align="center"><img src="docs/assets/header.png" alt="Hangar: the open source device broker for React Native teams. A free alternative to Expo Simulators and EAS Maestro jobs, for developers, CI and AI agents." width="100%" /></p>
 
-Hangar is a free, open source device broker. It hands out iOS simulators and Android emulators
-from your own Macs to your developers, your CI and your AI agents, and wipes each device when it
-comes back. Use it in place of Expo Simulators and EAS Maestro jobs, next to the rest of EAS or
-without it. Physical phones are next on the [roadmap](ROADMAP.md).
+Hangar is a free, open source device broker. It runs iOS simulators and Android emulators on
+your Macs and lends them to your developers, your CI and your AI agents. When one of them is done,
+Hangar wipes the device and puts it back. You can use it instead of Expo Simulators and EAS
+Maestro jobs, with or without the rest of EAS. Physical phones are on the [roadmap](ROADMAP.md).
 
 ## What you can use it for
 
-- **Develop on a device you don't have.** Run your app on a leased simulator with
-  `hangar run ios`. Fast Refresh, React DevTools and the debugger work as if it were local.
-- **Test every pull request.** Maestro flows split over fresh devices, a failed flow retries
-  once, and the run writes one JUnit report with a video of each failure. XCUITest and Espresso
-  run the same way.
-- **Let AI agents check their own work.** Claude Code, Cursor and other MCP clients lease a
-  device, tap through the app and read the screen.
-- **Try a build by hand.** Open any device in the browser, use it with mouse and keyboard, and
-  record a bug as a link to send.
+- **Develop on a device you don't have.** `hangar run ios` builds your app, borrows a simulator
+  and connects it to Metro on your laptop. Fast Refresh, React DevTools and the debugger work as
+  they do locally.
+- **Test every pull request.** The GitHub Action splits your Maestro flows over fresh devices,
+  runs a failed flow once more, and writes one JUnit report with a video of each failure.
+  XCUITest and Espresso work the same way.
+- **Let AI agents check their own work.** Claude Code, Cursor or any MCP client can take a device,
+  tap through your app and read what is on the screen.
+- **Try a build by hand.** Open a device in the browser, click and type on it, and send a
+  recording of the bug as a link.
 
 ## Start
 
@@ -29,7 +30,7 @@ hangar up
 
 Open the link it prints to see the devices. Invite your team from the console's People page.
 
-<p align="center"><img src="docs/assets/how-it-works.gif" alt="An AI agent, a CI pipeline and a developer each lease devices from Hangar on two Macs at once; each device is wiped when it comes back" width="100%" /></p>
+<p align="center"><img src="docs/assets/how-it-works.gif" alt="Claude taps through a sign-in screen on one iPhone, a pull request runs 12 Maestro flows on three more, and a developer saves a file and sees the change on a fourth. Hangar wipes each device when they finish." width="100%" /></p>
 
 ## Connect
 
@@ -42,10 +43,10 @@ Open the link it prints to see the devices. Invite your team from the console's 
 | A test by hand | the console: Use one, then Record for a bug link |
 | Your own code | `const device = await hangar.lease()` ([client](docs/guides/agents.md#rest-for-agents-with-their-own-tools)) |
 
-On the Hangar Mac these work right away. From your laptop, install the CLI the same way and run
-`hangar login http://your-mac.local:7420` once. CI has to reach the Mac too: run the CI runner on
-the same network, or join the job to a VPN with a step such as
-[Tailscale's GitHub Action](https://github.com/tailscale/github-action).
+These work on the Hangar Mac as they are. On your laptop, install the CLI the same way and run
+`hangar login http://your-mac.local:7420` once. Your CI also has to reach the Mac: put the runner
+on the same network, or add a VPN step such as
+[Tailscale's GitHub Action](https://github.com/tailscale/github-action) to the job.
 
 Each guide has the details: [agents](docs/guides/agents.md),
 [GitHub Actions](docs/guides/github-actions.md), [your app](docs/guides/expo.md),
@@ -54,18 +55,18 @@ Each guide has the details: [agents](docs/guides/agents.md),
 
 ## Why Hangar
 
-- **Free and open source.** Apache-2.0, with no account, no telemetry and no bill per minute. It
-  works without internet.
-- **One pool for everyone.** People, CI and agents use the same devices. The Fleet page shows who
-  has which device and what they are doing with it.
-- **A clean device every time.** Each device is deleted and replaced after use, so nothing leaks
-  from one test or person to the next.
-- **Builds stay with you.** Unreleased apps and test accounts never leave your network.
-- **Fast.** 52 frames a second in the browser, and 87 ms from saving a file to seeing the change on
-  the leased device, measured on one Mac ([numbers](docs/numbers.md)).
+- **Free and open source.** Apache-2.0. You need no account, Hangar sends no telemetry, and it
+  works offline.
+- **One pool for everyone.** Your developers, CI and agents draw from the same devices, and the
+  Fleet page shows who has which one and what they are doing on it.
+- **A clean device every time.** Hangar deletes each device after use and clones a fresh one, so
+  a test can't inherit a login or a half-finished state from the one before.
+- **Builds stay with you.** Your unreleased app and your test accounts stay on your own network.
+- **Fast.** On one Mac we measured 52 frames a second in the browser and 87 ms from saving a file
+  to seeing the change on the device ([numbers](docs/numbers.md)).
 
-Hosted is easier when nobody on the team wants to look after a Mac, or when your agents run in
-the cloud and cannot reach your network.
+Pick a hosted service if nobody on your team wants to look after a Mac, or if your agents run in
+the cloud and can't reach your network.
 
 | | Hangar | Simlock | Argent | Expo Simulators |
 |---|---|---|---|---|

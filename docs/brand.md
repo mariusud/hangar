@@ -50,7 +50,7 @@ tokens and logs. Hangar loads no web fonts, because it makes no calls to the int
 |---|---|
 | Headline | The open source device broker for React Native teams. |
 | Second line | A free alternative to Expo Simulators and EAS Maestro jobs, on your own Macs. |
-| One sentence | Hangar hands out iOS simulators and Android emulators from your own Macs to your developers, your CI and your AI agents, and wipes each device when it comes back. |
+| One sentence | Hangar runs iOS simulators and Android emulators on your Macs and lends them to your developers, your CI and your AI agents. |
 | Uses | Develop on a device you don't have. Test every pull request. Let AI agents check their own work. Try a build by hand. |
 
 Hangar is a broker for devices. Simulators and emulators work today. Physical phones are on the
@@ -60,9 +60,9 @@ Name Expo only to compare: "an alternative to Expo Simulators". Never put Expo i
 domain or logo, and never suggest that Hangar comes from Expo. Expo's brand page forbids both. The
 README ends with "Hangar is not affiliated with Expo."
 
-Lead with free, open source and the four uses. Avoid cost sums: a price comparison invites
-arguments about hardware and upkeep, and Hangar wins on other grounds. Hosted prices stay in
-[comparison.md](comparison.md) for readers who want them.
+Lead with free, open source and the four uses. Leave cost sums out of the pitch, because readers
+start arguing about hardware and upkeep instead. Hosted prices stay in
+[comparison.md](comparison.md).
 
 ## Voice
 
@@ -73,6 +73,7 @@ fast". Errors say what happened and what to do next. No exclamation marks, no em
 
 - [assets/header.svg](assets/header.svg): the README header, rendered to `header.png` with
   headless Chrome at 2x so the fonts look the same everywhere.
-- [assets/how-it-works.gif](assets/how-it-works.gif): an agent, CI and a developer leasing from
-  the pool. Its source is [assets/how-it-works.html](assets/how-it-works.html), recorded from
+- [assets/how-it-works.gif](assets/how-it-works.gif): Claude tests a sign-in screen, a pull
+  request runs 12 Maestro flows on three devices, a developer saves a file, and Hangar wipes each
+  device afterwards. It ends on the name and `hangar up`. Its source is [assets/how-it-works.html](assets/how-it-works.html), recorded from
   headless Chrome and turned into a GIF with ffmpeg.
