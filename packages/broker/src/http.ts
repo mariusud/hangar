@@ -1,4 +1,3 @@
-// HTTP API, console and artifact downloads on node:http.
 
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -28,11 +27,9 @@ export type Ctx = {
   store: Store;
   oidc: Oidc | null;
   metrics: Metrics;
-  // Sends the declared images to every connected host.
   publishImages: () => void;
   dataDir: string;
   consoleDir: string;
-  // Where agents in this process download artifacts from.
   internalUrl: () => string;
   publicUrl: () => string;
 };
@@ -146,7 +143,6 @@ function query(req: Req): URLSearchParams {
   return new URL(req.url, 'http://x').searchParams;
 }
 
-// Accounts and sign-in
 
 route(
   'GET',
@@ -193,7 +189,6 @@ route(
   { auth: false },
 );
 
-// What the sign-in page offers, before anyone is signed in.
 route('GET', '/v1/sign-in', (_req, res, ctx) => json(res, 200, { sso: Boolean(ctx.oidc), passwords: !ctx.oidc?.config.disablePasswords }), { auth: false });
 
 const oidcRedirect = (ctx: Ctx): string => `${ctx.publicUrl()}/v1/oidc/callback`;
@@ -287,8 +282,6 @@ route('GET', '/v1/people', (req, res, ctx) => {
   json(res, 200, ctx.db.accounts().map((a) => ({ name: a.name, role: a.role, team: ctx.db.teamOf(a.id) })));
 });
 
-// Device images: an operator declares the apps and settings; every host builds the image once
-// and keeps clones of it ready. Lease one with { "class": { "image": "<name>" } }.
 route('GET', '/v1/images', (req, res, ctx) => {
   me(req, ctx);
   json(res, 200, ctx.db.images().map((spec) => ({ ...spec, id: imageId(spec) })));
@@ -336,8 +329,6 @@ route('DELETE', '/v1/images/:name', (req, res, ctx) => {
   res.writeHead(204).end();
 });
 
-// Teams: each has members and a quota, the most leases it holds at once. A request over the
-// quota waits in the queue; it is never refused.
 route('GET', '/v1/teams', (req, res, ctx) => {
   operator(req, ctx);
   const live = ctx.db.leasesIn(['preparing', 'active']);
@@ -418,7 +409,6 @@ route('POST', '/v1/tokens', async (req, res, ctx) => {
   json(res, 201, { token, mcp: `claude mcp add --transport http hangar ${ctx.publicUrl()}/mcp --header "Authorization: Bearer ${token}"` });
 });
 
-// Devices and leases
 
 route('GET', '/v1/devices', (_req, res, ctx) => {
   const held = new Map(ctx.db.leasesIn(['preparing', 'active']).map((l) => [l.deviceId, l]));
@@ -599,7 +589,6 @@ route('POST', '/v1/leases/:id/open-url', async (req, res, ctx) => {
   json(res, 200, (await op(req, ctx, { op: 'openUrl', url })).result ?? {});
 });
 
-// Points a React Native debug build at the lease's Metro tunnel. `hangar run ios` opens the tunnel.
 route('POST', '/v1/leases/:id/metro', async (req, res, ctx) => {
   const { bundleId } = await body<{ bundleId?: string }>(req);
   if (!bundleId) {
@@ -608,7 +597,6 @@ route('POST', '/v1/leases/:id/metro', async (req, res, ctx) => {
   json(res, 200, (await op(req, ctx, { op: 'useMetro', bundleId })).result ?? {});
 });
 
-// Device presets. The agent checks the values; the broker only picks the fields it forwards.
 route('POST', '/v1/leases/:id/push', async (req, res, ctx) => {
   const b = await body<{ bundleId?: string; payload?: Record<string, unknown> }>(req);
   json(res, 200, (await op(req, ctx, { op: 'push', bundleId: String(b.bundleId ?? ''), payload: b.payload ?? {} })).result ?? {});
@@ -638,7 +626,6 @@ route('POST', '/v1/leases/:id/locale', async (req, res, ctx) => {
   json(res, 200, (await op(req, ctx, { op: 'locale', bundleId: String(b.bundleId ?? ''), language: String(b.language ?? '') })).result ?? {});
 });
 
-// Maestro flows on the leased device. The flows folder comes as a base64 tar, up to 10 MB.
 route('POST', '/v1/leases/:id/maestro', async (req, res, ctx) => {
   const b = await body<{ archive?: string; flows?: string[]; env?: Record<string, string> }>(req, 15_000_000);
   if (!b.archive || !Array.isArray(b.flows)) {
@@ -647,8 +634,6 @@ route('POST', '/v1/leases/:id/maestro', async (req, res, ctx) => {
   json(res, 200, (await op(req, ctx, { op: 'maestro', archive: b.archive, flows: b.flows.map(String), env: b.env ?? {} })).result ?? {});
 });
 
-// Runs and recordings belong to the team of the person who made them. Members see their team's;
-// operators see all. Another team's looks the same as one that does not exist.
 function sameTeam(ctx: Ctx, p: auth.Principal, accountId: string): boolean {
   return p.role === 'operator' || ctx.db.teamOf(accountId) === ctx.db.teamOf(p.accountId);
 }
@@ -669,7 +654,6 @@ function teamRecording(req: Req, ctx: Ctx): RecordingRow {
   return recording;
 }
 
-// Runs: a suite sharded over fresh devices, coordinated by the broker.
 route('POST', '/v1/runs', async (req, res, ctx) => {
   const b = await body<RunRequest>(req, 15_000_000);
   json(res, 201, ctx.runs.view(ctx.runs.start(me(req, ctx), b)));
@@ -680,7 +664,6 @@ route('GET', '/v1/runs', (req, res, ctx) => {
   json(res, 200, ctx.runs.list().filter((r) => sameTeam(ctx, p, r.accountId)).map((r) => ctx.runs.view(r)));
 });
 
-// Per test over the team's last 200 runs: passes, failures and flaky passes.
 route('GET', '/v1/tests', (req, res, ctx) => {
   const p = me(req, ctx);
   json(res, 200, testHistory(ctx.db.recentRuns(200).filter((r) => sameTeam(ctx, p, r.accountId))));
@@ -690,7 +673,6 @@ route('GET', '/v1/runs/:id', (req, res, ctx) => {
   json(res, 200, ctx.runs.view(teamRun(req, ctx)));
 });
 
-// One event per change, until the run ends.
 route('GET', '/v1/runs/:id/events', (req, res, ctx) => {
   const run = teamRun(req, ctx);
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -730,7 +712,6 @@ route(
   { auth: false },
 );
 
-// Recordings
 
 function recordingView(ctx: Ctx, r: RecordingRow): unknown {
   const files = `/v1/recordings/${r.id}`;
@@ -757,7 +738,6 @@ route('POST', '/v1/leases/:id/recording/stop', async (req, res, ctx) => {
   json(res, 200, recordingView(ctx, await ctx.recordings.stop(me(req, ctx), req.params.id ?? '')));
 });
 
-// Everyone signed in can watch the team's recordings: a bug link is for the whole team.
 route('GET', '/v1/recordings', (req, res, ctx) => {
   const p = me(req, ctx);
   const all = query(req).get('all') === '1';
@@ -792,7 +772,6 @@ route('GET', '/v1/recordings/:id/:file', async (req, res, ctx) => {
     throw new ApiError(404, 'NOT_FOUND', `This recording has no ${req.params.file}.`);
   }
   const type = part === 'timeline' ? 'application/json' : PART_FILES[part].type;
-  // Browsers seek in a video with range requests.
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
   if (range && size > 0) {
     const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
@@ -831,7 +810,6 @@ route(
   { auth: false },
 );
 
-// Builds and artifacts
 
 route('POST', '/v1/builds', async (req, res, ctx) => {
   const p = me(req, ctx);
@@ -907,7 +885,6 @@ async function saveUpload(req: IncomingMessage, ctx: Ctx, name: string): Promise
   return { sha256, name, size };
 }
 
-// Console
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

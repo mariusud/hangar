@@ -1,7 +1,3 @@
-// Test suites as broker runs: Maestro flows, or XCUITest from build-for-testing. Uploads what
-// the run needs, starts it and follows it until it ends. The broker leases one fresh device per
-// shard, retries failures once recorded, and merges JUnit; see packages/broker/src/runs.ts.
-
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
@@ -12,6 +8,7 @@ import { Hangar, HangarError } from './index.ts';
 
 const run = promisify(execFile);
 
+/** The result of one flow or test. */
 export type FlowResult = {
   flow: string;
   status: 'queued' | 'running' | 'passed' | 'failed' | 'flaky';
@@ -21,6 +18,7 @@ export type FlowResult = {
   recording?: string;
 };
 
+/** The broker's record of a run. */
 export type RunInfo = {
   id: string;
   state: 'running' | 'passed' | 'failed' | 'cancelled';
@@ -30,12 +28,12 @@ export type RunInfo = {
   url: string;
 };
 
+/** The outcome of a finished run. */
 export type MaestroRun = { passed: boolean; flows: FlowResult[]; junit: string; durationMs: number; url: string };
 
+/** Options for a Maestro run. */
 export type MaestroOptions = {
-  // A built simulator .app, an archive of one, or a registered build name.
   app: string;
-  // The folder with the flow files. config.yaml in it is Maestro's own settings, not a flow.
   flowsDir: string;
   shards?: number;
   retries?: number;
@@ -46,7 +44,7 @@ export type MaestroOptions = {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-// A path uploads the app as a build and returns its hash; anything else is a build name already.
+/** Uploads a path as a build and returns its hash; anything else is already a build name. */
 export async function buildRef(hangar: Hangar, app: string): Promise<string> {
   const s = await stat(app).catch(() => null);
   if (!s) {
@@ -58,6 +56,7 @@ export async function buildRef(hangar: Hangar, app: string): Promise<string> {
   return ((await res.json()) as { sha256: string }).sha256;
 }
 
+/** Runs Maestro flows on leased devices and follows the run until it ends. */
 export async function runMaestro(hangar: Hangar, opts: MaestroOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
   const flows = (await readdir(opts.flowsDir)).filter((f) => /\.ya?ml$/.test(f) && !/^config\.ya?ml$/.test(f)).sort();
@@ -76,10 +75,9 @@ export async function runMaestro(hangar: Hangar, opts: MaestroOptions): Promise<
   });
 }
 
+/** Options for an XCUITest run. */
 export type XcuitestOptions = {
-  // The Build/Products folder of `xcodebuild build-for-testing`, or a zip of it.
   products: string;
-  // -only-testing names to shard over. Defaults to every test target in the .xctestrun.
   tests?: string[];
   shards?: number;
   retries?: number;
@@ -87,8 +85,7 @@ export type XcuitestOptions = {
   log?: (line: string) => void;
 };
 
-// The test targets an .xctestrun names. Format 2 lists them per test plan configuration; format 1
-// uses them as top-level keys.
+/** Lists the test targets an .xctestrun names. */
 export async function testTargets(xctestrun: string): Promise<string[]> {
   const { stdout } = await run('plutil', ['-convert', 'json', '-o', '-', xctestrun]);
   const plist: Record<string, unknown> & { TestConfigurations?: { TestTargets?: { BlueprintName?: string }[] }[] } = JSON.parse(stdout);
@@ -98,6 +95,7 @@ export async function testTargets(xctestrun: string): Promise<string[]> {
   return [...new Set(names.filter(Boolean))].sort();
 }
 
+/** Runs XCUITest from build-for-testing on leased devices. */
 export async function runXcuitest(hangar: Hangar, opts: XcuitestOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
   let tests = opts.tests ?? [];
@@ -114,17 +112,17 @@ export async function runXcuitest(hangar: Hangar, opts: XcuitestOptions): Promis
   return follow(hangar, log, { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
 }
 
+/** Options for an Espresso run. */
 export type EspressoOptions = {
-  // The app's .apk and its test .apk from ./gradlew assembleDebug assembleDebugAndroidTest.
   app: string;
   testApp: string;
-  // Classes to shard over. Without them the whole suite runs on one device.
   tests?: string[];
   shards?: number;
   retries?: number;
   log?: (line: string) => void;
 };
 
+/** Runs an Espresso suite on leased emulators. */
 export async function runEspresso(hangar: Hangar, opts: EspressoOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
   const build = await buildRef(hangar, opts.app);
@@ -137,7 +135,6 @@ async function follow(hangar: Hangar, log: (line: string) => void, request: unkn
   let info = await hangar.json<RunInfo>('POST', '/v1/runs', request);
   log(`run ${info.url}`);
 
-  // Ctrl-C cancels the run, which releases its devices.
   const cancel = (): void => void hangar.request('DELETE', `/v1/runs/${info.id}`).finally(() => process.exit(130));
   process.once('SIGINT', cancel);
   try {

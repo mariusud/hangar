@@ -1,10 +1,5 @@
-// `hangar join`: this Mac's agent dials out to a broker elsewhere and keeps one WebSocket open
-// (decision 0005). Hosts open no port. When the socket drops, the agent keeps its devices and
-// leases, reconnects with a growing pause, and says hello again so the broker can match leases.
-
 import { WebSocket } from 'ws';
 import { decodeMessage, encodeMessage, type AgentMessage, type BrokerMessage } from '@hangar/protocol';
-// What the socket needs from an agent: the iOS Agent and the AndroidAgent both fit.
 export type HostAgent = { hello(): Promise<void>; receive(m: BrokerMessage): void; start(): Promise<void>; stop(): Promise<void> };
 
 export type JoinOptions<A extends HostAgent> = {
@@ -21,15 +16,12 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
   let stopped = false;
   let pause = 1000;
 
-  // Messages sent while the socket is down are dropped; the hello on reconnect resyncs state.
   const agent = opts.make((m) => {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(encodeMessage(m));
     }
   }, base);
 
-  // Resolves on the first open. Rejects only when the broker refuses the token, which retrying
-  // cannot fix; anything else (broker down, network gone) is retried.
   const connect = (): Promise<void> =>
     new Promise((resolve, reject) => {
       const retry = (): void => {
@@ -66,7 +58,6 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
       });
     });
 
-  // The first connection is made before the pool starts, so a wrong URL or token shows at once.
   await connect();
   await agent.start();
   return {

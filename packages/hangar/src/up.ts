@@ -1,5 +1,3 @@
-// `hangar up`: broker and agent in one process on this Mac.
-
 import { execFile, spawn } from 'node:child_process';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
@@ -56,7 +54,6 @@ export async function doctor(): Promise<Check[]> {
       ? { name: 'idb client', ok: true, detail: 'installed' }
       : { name: 'idb client', ok: false, detail: 'not found', fix: 'pipx install fb-idb   (or: pip3 install --user fb-idb)' },
   );
-  // Advice, not a requirement: apps on the simulators run as this user and can read its files.
   const user = userInfo().username;
   checks.push({
     name: 'User',
@@ -85,7 +82,6 @@ async function lanName(): Promise<string> {
   }
 }
 
-// Settings that only bigger setups need come from the environment, so a single Mac needs none.
 function fromEnv(): { oidc?: OidcConfig; s3?: S3Config } {
   const oidc = oidcFromEnv();
   const s3 = s3FromEnv();
@@ -109,7 +105,6 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
   }
 
   const port = opts.port ?? DEFAULT_PORT;
-  // --url when people reach this Mac by another name, such as a Tailscale HTTPS address.
   const publicUrl = opts.url?.replace(/\/$/, '') ?? `http://${await lanName()}:${port}`;
   const broker = await startBroker({ dataDir: dataDir(), port, publicUrl, ...fromEnv() }).catch((err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
@@ -119,7 +114,6 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
     throw err;
   });
 
-  // Broker and agent talk through the same messages they would send over a WebSocket.
   let toAgent: (m: BrokerMessage) => void = () => {};
   const handlers = broker.attach({ send: (m) => setImmediate(() => toAgent(m)), close: () => {} });
   const agent = new Agent({
@@ -134,7 +128,6 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
   console.log(`\nStarting devices (up to ${agent.maxDevices}, ${agent.warm} kept ready)...`);
   await agent.start();
 
-  // --android <avd>: emulators from that AVD, as a second host on the same broker.
   let androidAgent: AndroidAgent | null = null;
   if (opts.android) {
     let toAndroid: (m: BrokerMessage) => void = () => {};
@@ -147,7 +140,6 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
 
   const bonjour = spawn('dns-sd', ['-R', 'Hangar', '_hangar._tcp', 'local', String(port)], { stdio: 'ignore' });
 
-  // The hangar commands on this Mac sign in as the admin, unless they already point somewhere.
   const signedIn = await access(CONFIG_FILE).then(() => false, async () => {
     await mkdir(dirname(CONFIG_FILE), { recursive: true });
     await writeFile(CONFIG_FILE, JSON.stringify({ url: publicUrl, token: broker.adminToken(`hangar up on ${hostname()}`) }, null, 2), { mode: 0o600 });
@@ -182,8 +174,6 @@ ${publicUrl.startsWith('https:') ? '' : '  Traffic is plain HTTP on your network
   process.on('SIGTERM', () => void stop());
 }
 
-// `hangar broker`: the broker alone, for a container or a Linux box. Macs join it with
-// `hangar join`; it runs no devices itself.
 export async function brokerOnly(opts: { port?: number; url?: string; host?: string }): Promise<void> {
   const port = opts.port ?? DEFAULT_PORT;
   const broker = await startBroker({ dataDir: dataDir(), port, ...fromEnv(), ...(opts.host ? { host: opts.host } : {}), ...(opts.url ? { publicUrl: opts.url.replace(/\/$/, '') } : {}) });
@@ -200,7 +190,6 @@ export async function brokerOnly(opts: { port?: number; url?: string; host?: str
   process.on('SIGTERM', () => void stop());
 }
 
-// `hangar join-token`, on the broker's machine (or `docker exec` into its container).
 export function joinToken(): string {
   const db = new Db(join(dataDir(), 'hangar.db'));
   try {
@@ -210,7 +199,6 @@ export function joinToken(): string {
   }
 }
 
-// `hangar join`: this Mac's devices, offered through a broker elsewhere.
 export async function joinBroker(opts: { url: string; token: string; warm?: number; max?: number; android?: string }): Promise<void> {
   console.log('Checking this Mac...');
   const checks = await doctor();
@@ -231,7 +219,6 @@ export async function joinBroker(opts: { url: string; token: string; warm?: numb
     log,
     make: (send, brokerUrl) => new Agent({ send, brokerUrl, log, ...(opts.warm !== undefined ? { warm: opts.warm } : {}), ...(opts.max !== undefined ? { maxDevices: opts.max } : {}) }),
   }).catch(fail);
-  // Android emulators join as a second host over their own socket.
   const avd = opts.android;
   const droid = avd ? await joinFleet({ url: opts.url, token: opts.token, log, make: (send, brokerUrl) => new AndroidAgent({ send, brokerUrl, avd, log }) }).catch(fail) : null;
   console.log(`\nThis Mac offers up to ${ios.agent.maxDevices} simulators${droid ? ` and ${droid.agent.maxDevices} Android emulators` : ''} to ${opts.url}. Press Ctrl-C to stop; leased devices are deleted.`);

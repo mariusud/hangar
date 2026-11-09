@@ -1,7 +1,3 @@
-// Where builds and recordings live. Files are always written to the data folder first. With an
-// S3-compatible bucket set (AWS S3, MinIO, R2, Ceph), a finished file is uploaded and the local
-// copy removed, so the broker's disk only holds what is in flight. Reads go through the broker
-// either way, so agents and browsers never need bucket credentials.
 
 import { createHash, createHmac } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -12,8 +8,6 @@ import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
 export type S3Config = { endpoint: string; bucket: string; region: string; accessKey: string; secretKey: string };
 
-// HANGAR_S3_ENDPOINT (such as https://s3.eu-north-1.amazonaws.com or http://minio:9000),
-// HANGAR_S3_BUCKET, HANGAR_S3_ACCESS_KEY, HANGAR_S3_SECRET_KEY and HANGAR_S3_REGION.
 export function s3FromEnv(env: NodeJS.ProcessEnv = process.env): S3Config | undefined {
   if (!env.HANGAR_S3_BUCKET) {
     return undefined;
@@ -35,7 +29,6 @@ const hex = (data: string | Buffer): string => createHash('sha256').update(data)
 const hmac = (key: string | Buffer, data: string): Buffer => createHmac('sha256', key).update(data).digest();
 const encodeKey = (key: string): string => key.split('/').map((p) => encodeURIComponent(p).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)).join('/');
 
-// AWS Signature Version 4 for one request. Returns the headers to send, Authorization included.
 export function signV4(opts: { method: string; url: URL; headers: Record<string, string>; payloadHash: string; region: string; accessKey: string; secretKey: string; now?: Date }): Record<string, string> {
   const amzDate = (opts.now ?? new Date()).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const day = amzDate.slice(0, 8);
@@ -62,12 +55,10 @@ export class Store {
     this.s3 = s3 ?? null;
   }
 
-  // Where to write a file under `key` (such as builds/<sha> or recordings/<id>/video.mp4).
   local(key: string): string {
     return join(this.dataDir, key);
   }
 
-  // Call once the file at local(key) is complete.
   async saved(key: string): Promise<void> {
     if (!this.s3) {
       return;
@@ -90,7 +81,6 @@ export class Store {
     return head.ok ? Number(head.headers.get('content-length') ?? 0) : null;
   }
 
-  // The file, or a byte range of it, from disk if it is still there, else from the bucket.
   async open(key: string, range?: { start?: number; end?: number }): Promise<Opened | null> {
     const path = this.local(key);
     const size = await stat(path).then((s) => s.size, () => null);

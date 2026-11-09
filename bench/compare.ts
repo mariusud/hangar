@@ -1,20 +1,3 @@
-// bench/compare: Hangar next to other open-source simulator tools, on one Mac, with the same
-// simulator model and the same test for each.
-//
-// Stream: Settings is open, a 300 ms swipe scrolls the list, and the bench times the first video
-// frame that reaches the client after the swipe starts, then the frame rate and bandwidth while
-// the list moves. None of the other tools stamp frames with a capture time, so only the end to
-// end number is compared. Lease: from asking for a device to holding one, from a warm pool.
-//
-// The bench downloads nothing. Install the other tools yourself, in a directory of their own,
-// and point the bench at them; a tool that is not set is skipped.
-//
-//   SERVE_SIM=<dir>/node_modules/serve-sim  SIMLOCK=<dir>/node_modules/simlock  pnpm bench:compare
-//
-// serve-sim attaches to one booted simulator, so the bench creates one (and deletes it after).
-// Simlock runs its own daemon in a temporary SIMLOCK_HOME, with its stream set to the device's
-// full resolution at 60 fps like the others, and a warm pool of one.
-
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -51,8 +34,6 @@ async function measureStream(tool: Tool) {
   const fps: number[] = [];
   const bytesPerSecond: number[] = [];
   let missed = 0;
-  // Settings opens once. Relaunching it per trial measured app launch under load, not the
-  // stream; each trial scrolls the list back afterwards instead.
   await tool.openSettings();
   await sleep(3000);
   for (let i = 0; i < TRIALS; i++) {
@@ -72,8 +53,6 @@ async function measureStream(tool: Tool) {
     }
     await sleep(600);
     const motion = tool.frames.filter((f) => f.at >= first.at && f.at < first.at + 500);
-    // A scroll is a run of frames. One or two frames are a repaint (the clock, a touch
-    // highlight, an idle refresh), so the swipe did not land and the trial does not count.
     tool.swipe(TO, FROM);
     if (motion.length < 10) {
       missed += 1;
@@ -92,15 +71,12 @@ async function measureStream(tool: Tool) {
   };
 }
 
-// Waits until no frame has arrived for half a second, so the next swipe starts from a still screen.
 async function quiet(frames: Frame[]): Promise<void> {
   for (let i = 0; i < 100 && performance.now() - (frames.at(-1)?.at ?? 0) < 500; i++) {
     await sleep(50);
   }
 }
 
-// serve-sim and Simlock share one framing: [u32 length][tag][payload], where the length covers
-// the tag. Tags 2 and 3 are H.264 key and delta frames; the rest are config, seed and keep-alive.
 async function readEnvelopes(body: ReadableStream<Uint8Array>, frames: Frame[]): Promise<void> {
   let buf = Buffer.alloc(0);
   const reader = body.getReader();
@@ -119,8 +95,6 @@ async function readEnvelopes(body: ReadableStream<Uint8Array>, frames: Frame[]):
   }
 }
 
-// Both also take serve-sim's touch messages: tag 0x03 and {type, x, y} with x and y from 0 to 1.
-// The swipe is sent the way their browser clients send a drag: a move every 16 ms.
 function drag(ws: WebSocket, from: Point, to: Point): void {
   const send = (type: string, [x, y]: Point): void => ws.send(Buffer.concat([Buffer.from([0x03]), Buffer.from(JSON.stringify({ type, x, y }))]));
   const steps = 18;
@@ -288,7 +262,7 @@ async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<
       const times: number[] = [];
       for (let i = 0; i < Math.min(TRIALS, 5); i++) {
         process.stderr.write(`Simlock lease ${i + 1}\r`);
-        // Simlock has no ready count to wait on; give a released device time to settle.
+        // Simlock has no ready count, so give a released device time to settle.
         await sleep(15_000);
         const t0 = performance.now();
         const l = await lease();

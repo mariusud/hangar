@@ -1,11 +1,4 @@
-// The tool names and arguments of mobile-mcp (github.com/mobile-next/mobile-mcp), so an agent
-// written for it works against Hangar unchanged. A `device` is a lease id: allocate one with
-// mobile_allocate_remote_device, which leases a fresh device from the pool, and release it with
-// mobile_release_remote_device. A lease nobody uses ends after its TTL, 10 minutes by default.
-//
-// Coordinates are in the units mobile_list_elements_on_screen and mobile_get_screen_size report:
-// points on iOS, pixels on Android. Tools that need the host's files (logs, crash reports,
-// recordings to a path) are left out; Hangar has its own `record` tool for those.
+// Coordinates are points on iOS and pixels on Android.
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -29,7 +22,6 @@ export type MobileDeps = {
 
 const device = z.string().describe('The device id from mobile_allocate_remote_device (a Hangar lease id)');
 
-// The elements an agent can act on, numbered @e1, @e2, ... in screen order.
 function actionable(nodes: UiNode[]): UiNode[] {
   return nodes.filter((n) => n.role !== 'application' && (n.label || n.identifier));
 }
@@ -37,7 +29,6 @@ function actionable(nodes: UiNode[]): UiNode[] {
 export function registerMobileTools({ server, p, db, leases, safe, text, install }: MobileDeps): void {
   const screenOf = async (id: string): Promise<{ screen: Frame; nodes: UiNode[] }> => (await leases.op(p, id, { op: 'describe' })).result as { screen: Frame; nodes: UiNode[] };
 
-  // A point in screen units, or the center of an element ref, as the fractions actions take.
   const target = async (id: string, x?: number, y?: number, ref?: string): Promise<Point> => {
     const { screen, nodes } = await screenOf(id);
     if (ref) {

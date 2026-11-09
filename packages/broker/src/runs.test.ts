@@ -16,14 +16,11 @@ test('failed flows are read from Maestro JUnit, passing ones are not', () => {
 
 test('shards are balanced by past seconds, longest first, and unknown tests count as the average', () => {
   const past = new Map([['slow.yaml', 60], ['a.yaml', 10], ['b.yaml', 10], ['c.yaml', 10], ['d.yaml', 30]]);
-  // Round robin would put slow and c on shard 0 (70 s) next to 50 s on shard 1.
   const shards = assignShards(['slow.yaml', 'a.yaml', 'b.yaml', 'c.yaml', 'd.yaml'], 2, past);
   const load = [0, 0];
   shards.forEach((s, i) => (load[s] = (load[s] ?? 0) + [60, 10, 10, 10, 30][i]!));
   assert.deepEqual(load, [60, 60]);
-  // No history at all: every item costs the same, and they spread evenly.
   assert.deepEqual(assignShards(['x', 'y', 'z', 'w'], 2, new Map()), [0, 1, 0, 1]);
-  // A new test is placed as an average one.
   assert.equal(assignShards(['new', 'slow.yaml', 'a.yaml'], 2, past).filter((s) => s === 1).length, 2);
 });
 

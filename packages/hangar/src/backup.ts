@@ -1,7 +1,3 @@
-// `hangar export` and `hangar import`: move a broker's state to another place, such as from the
-// first Mac into a container. One tar file holds a consistent copy of the database (accounts,
-// tokens, leases history, runs, settings), the builds and the recordings.
-
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -21,7 +17,6 @@ export async function exportData(file: string): Promise<void> {
   }
   const tmp = await mkdtemp(join(tmpdir(), 'hangar-export-'));
   try {
-    // VACUUM INTO copies the database consistently while Hangar keeps running.
     const db = new Db(join(dir, 'hangar.db'));
     db.sql.prepare('vacuum into ?').run(join(tmp, 'hangar.db'));
     db.sql.close();
@@ -40,7 +35,6 @@ export async function importData(file: string): Promise<void> {
   }
   await mkdir(dir, { recursive: true });
   await run('tar', ['-xf', resolve(file), '-C', dir]);
-  // Builds are found by their path on disk, which was the old machine's.
   const db = new Db(join(dir, 'hangar.db'));
   db.sql.prepare("update builds set path = ? || '/' || sha256").run(join(dir, 'builds'));
   db.sql.close();

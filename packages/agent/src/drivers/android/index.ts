@@ -1,10 +1,3 @@
-// Android emulator driver: the SDK's emulator and adb. Every call goes through execFile with an
-// argument array. Text that reaches the device's own shell (`adb shell` joins its arguments) is
-// escaped here first, and package names are checked.
-//
-// A device is a read-only instance of one AVD booted from its snapshot. Nothing it does is saved,
-// so killing it is the wipe, and the next instance starts clean.
-
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -57,7 +50,6 @@ async function adbBuffer(serial: string, ...args: string[]): Promise<Buffer> {
   }
 }
 
-// For the device shell: one argument, quoted so the shell passes it through as written.
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -76,8 +68,6 @@ export async function avds(): Promise<string[]> {
 
 export type Emulator = { serial: string; proc: ChildProcess };
 
-// Boots a read-only instance of the AVD on an even console port (5554, 5556, ...) and waits
-// until Android has finished starting.
 export async function boot(avd: string, port: number, timeoutMs = 180_000): Promise<Emulator> {
   const proc = spawn(
     tool('emulator', 'emulator'),
@@ -92,7 +82,6 @@ export async function boot(avd: string, port: number, timeoutMs = 180_000): Prom
     }
     const booted = await adb(serial, 'shell', 'getprop', 'sys.boot_completed').catch(() => '');
     if (booted.trim() === '1') {
-      // Animations off: they slow every test and make screenshots flaky.
       for (const key of ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale']) {
         await adb(serial, 'shell', 'settings', 'put', 'global', key, '0').catch(() => {});
       }
@@ -134,7 +123,6 @@ export async function screenshot(serial: string): Promise<Buffer> {
   return adbBuffer(serial, 'exec-out', 'screencap', '-p');
 }
 
-// uiautomator's XML: one <node> per view, bounds as "[x1,y1][x2,y2]" in pixels.
 export function toNodes(xml: string, screen: { width: number; height: number }): { screen: Frame; nodes: UiNode[] } {
   const attr = (tag: string, name: string): string => new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1] ?? '';
   const unescape = (s: string): string => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#10;/g, '\n').replace(/&amp;/g, '&');
@@ -149,7 +137,6 @@ export function toNodes(xml: string, screen: { width: number; height: number }):
     const text = unescape(attr(tag, 'text'));
     const desc = unescape(attr(tag, 'content-desc'));
     const id = attr(tag, 'resource-id');
-    // Layout containers with nothing to read or press are left out, like the iOS tree does.
     if (!text && !desc && !id && attr(tag, 'clickable') !== 'true') {
       continue;
     }
@@ -157,7 +144,6 @@ export function toNodes(xml: string, screen: { width: number; height: number }):
       role: attr(tag, 'class').split('.').pop() ?? '',
       label: desc || text || null,
       value: desc && text ? text : null,
-      // "com.example:id/login" is matched as "login", like testID in React Native.
       identifier: id ? id.replace(/^.*:id\//, '') : null,
       enabled: attr(tag, 'enabled') !== 'false',
       frame,
@@ -182,8 +168,7 @@ export async function swipe(serial: string, from: [number, number], to: [number,
   await adb(serial, 'shell', 'input', 'swipe', ...[...from, ...to].map((n) => String(Math.round(n))), String(Math.round(durationMs)));
 }
 
-// `input text` reads %s as a space and goes through the device shell, so every other character
-// that is not a letter or digit is backslash-escaped. It types ASCII only.
+// `input text` reads %s as a space and goes through the device shell, so everything else non-alphanumeric is escaped.
 export function inputText(text: string): string {
   if (/[^\x20-\x7e]/.test(text)) {
     throw new DriverError('TEXT_NOT_SUPPORTED', 'Android emulators type printable ASCII only through adb; use a paste or set the field from the app.');
@@ -222,7 +207,6 @@ async function packages(serial: string): Promise<Set<string>> {
   return new Set(out.split('\n').map((l) => l.replace(/^package:/, '').trim()).filter(Boolean));
 }
 
-// Installs an .apk and returns its package name, found by comparing the installed packages.
 export async function install(serial: string, apk: string): Promise<string> {
   const before = await packages(serial);
   await adb(serial, 'install', '-r', '-g', apk);
@@ -267,7 +251,6 @@ export async function location(serial: string, lat: number, lon: number): Promis
   await adb(serial, 'emu', 'geo', 'fix', String(lon), String(lat));
 }
 
-// Lets a React Native debug build reach Metro on the Mac as localhost:<port> on the device.
 export async function reverse(serial: string, port: number): Promise<void> {
   await adb(serial, 'reverse', `tcp:${port}`, `tcp:${port}`);
 }
@@ -283,8 +266,6 @@ export async function versions(): Promise<Record<string, string>> {
 
 export type ScreenStream = { keyframe: () => void; stop: () => Promise<void> };
 
-// Splits an Annex B byte stream into access units: parameter sets and SEI are kept with the
-// next picture, and each picture (one slice per frame from screenrecord) ends a unit.
 export function accessUnits(onUnit: (au: Buffer, isKey: boolean) => void): (chunk: Buffer) => void {
   let pending: Buffer = Buffer.alloc(0);
   let unit: Buffer[] = [];
@@ -310,7 +291,6 @@ export function accessUnits(onUnit: (au: Buffer, isKey: boolean) => void): (chun
         i += 2;
       }
     }
-    // The last NAL may still be arriving; keep it until the next start code.
     for (let k = 0; k + 1 < starts.length; k++) {
       flushNal(pending.subarray(starts[k], starts[k + 1]));
     }
@@ -318,13 +298,10 @@ export function accessUnits(onUnit: (au: Buffer, isKey: boolean) => void): (chun
   };
 }
 
-// Streams the display as H.264 frame records in the iOS helper's format: u8 flags (1 =
-// keyframe), f64 capture time in ms, u16 width, u16 height, then Annex B. screenrecord cannot be
-// asked for a keyframe and stops after three minutes, so it is restarted for either.
+// screenrecord cannot be asked for a keyframe and stops after three minutes, so it is restarted for either.
 export async function screenStream(serial: string, onFrame: (record: Buffer) => void, opts: { bitrate?: number; maxSize?: number } = {}): Promise<ScreenStream> {
   const real = await screenSize(serial);
   const scale = opts.maxSize && Math.max(real.width, real.height) > opts.maxSize ? opts.maxSize / Math.max(real.width, real.height) : 1;
-  // The encoder wants even sizes.
   const width = Math.round((real.width * scale) / 2) * 2;
   const height = Math.round((real.height * scale) / 2) * 2;
   let proc: ChildProcess | null = null;
@@ -362,13 +339,10 @@ export async function screenStream(serial: string, onFrame: (record: Buffer) => 
   };
 }
 
-// Espresso and other instrumentation tests.
-
 export async function installTestApk(serial: string, apk: string): Promise<void> {
   await adb(serial, 'install', '-r', '-t', '-g', apk);
 }
 
-// The instrumentation that tests `target`, as `am instrument` names it: package/runner.
 export async function instrumentationFor(serial: string, target: string): Promise<string> {
   const out = await adb(serial, 'shell', 'pm', 'list', 'instrumentation');
   for (const m of out.matchAll(/^instrumentation:(\S+) \(target=([^)]+)\)/gm)) {
@@ -385,8 +359,7 @@ export function checkTestNames(tests: string[]): void {
   }
 }
 
-// `am instrument -r` prints a block per test start and end; the end's status code is 0 for a
-// pass, -2 for a failed assertion, -1 for an error and -3 or -4 for a skipped test.
+// am instrument status codes: 0 pass, -2 failed assertion, -1 error, -3 or -4 skipped.
 export function parseInstrumentation(out: string, target: string): { cases: TestCase[]; ok: boolean } {
   const cases: TestCase[] = [];
   let fields: Record<string, string> = {};
@@ -410,7 +383,6 @@ export function parseInstrumentation(out: string, target: string): { cases: Test
       stack = '';
     }
   }
-  // The runner ends a clean run with "OK (n tests)".
   return { cases, ok: /^OK \(\d+ tests?\)/m.test(out) };
 }
 

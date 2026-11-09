@@ -1,5 +1,3 @@
-// Live screen over WebSocket: the agent sends frames once per device, the broker fans them out
-// to every viewer of that lease. The lease holder's input comes back over the same socket.
 
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -11,18 +9,13 @@ import type { Hosts } from './hosts.ts';
 import type { Leases } from './leases/service.ts';
 import type { Metrics } from './metrics.ts';
 
-// To the browser, each binary message starts with one byte: 1 is a JPEG image, 2 is an H.264
-// frame record from the agent (flags, capture time, size, Annex B).
 const TYPE = { jpeg: 1, h264: 2 } as const;
-// Above this many unsent bytes a viewer skips frames; for H.264 it then waits for a keyframe.
 const BACKLOG = 1024 * 1024;
 
 type Viewer = { ws: WebSocket; codec: StreamCodec; needsKey: boolean };
 
 export type Upgrades = {
-  // Handles the upgrade and returns true if the path is this module's.
   upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
-  // Closes every socket, which server.close() does not track once upgraded.
   close: () => void;
 };
 
@@ -58,7 +51,6 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
       }
       if (v.ws.bufferedAmount > BACKLOG) {
         metrics.framesDropped.inc({ codec });
-        // Never queue video: skip, and for H.264 restart from the next keyframe.
         if (codec === 'h264' && !v.needsKey) {
           v.needsKey = true;
           askKeyframe(leaseId);
@@ -76,7 +68,6 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
     }
   };
 
-  // The native helper could not run on that Mac: move its viewers to JPEG.
   hosts.onStreamFailed = (leaseId, codec, message) => {
     const device = devices.get(leaseId);
     if (codec !== 'h264' || !device) {

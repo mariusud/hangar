@@ -1,6 +1,3 @@
-// Agents on other machines connect here over one WebSocket (decision 0005), with a host token
-// from `hangar join-token`. The socket carries the same messages as the in-process link that
-// `hangar up` uses, in the format of `encodeMessage`.
 
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -12,7 +9,6 @@ import type { Hosts } from './hosts.ts';
 import type { Upgrades } from './stream.ts';
 
 export function attachAgents(db: Db, hosts: Hosts): Upgrades {
-  // An install or Maestro archive can be large; video frames are small.
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 });
 
   const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): boolean => {
@@ -38,7 +34,6 @@ export function attachAgents(db: Db, hosts: Hosts): Upgrades {
         handlers.message(m);
       });
       ws.on('close', () => handlers.closed());
-      // A dead connection shows as a missed pong; the agent reconnects on its own.
       let alive = true;
       ws.on('pong', () => (alive = true));
       const ping = setInterval(() => {

@@ -44,7 +44,7 @@ runs:
       env:
         HANGAR_URL: ${{ inputs.url }}
         HANGAR_TOKEN: ${{ inputs.token }}
-        # Inputs go through the environment, never into the script text, so a value cannot run as shell.
+        # Inputs go through the environment, not the script text, so a value cannot run as shell.
         INPUT_FLOWS: ${{ inputs.flows }}
         INPUT_APP: ${{ inputs.app }}
         INPUT_SHARDS: ${{ inputs.shards }}

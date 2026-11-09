@@ -1,10 +1,3 @@
-// Maestro runs: a suite sharded over fresh devices, coordinated here so a run outlives the client
-// that started it and shows in the console.
-//
-// Each shard leases a device, installs the build and runs its flows in one Maestro call. A failed
-// flow is retried on its own on the same device, recorded, so failed and flaky flows have a video
-// and flows that pass the first time cost no recording. A run holds its leases like any client,
-// so the queue and quotas apply.
 
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
@@ -14,17 +7,13 @@ import type { Db } from './db.ts';
 import { ApiError, type Leases } from './leases/service.ts';
 import type { Recordings } from './recordings.ts';
 
-// One shardable unit of a suite: a Maestro flow file, or an XCUITest target, class or method.
 export type FlowResult = {
   flow: string;
   status: 'queued' | 'running' | 'passed' | 'failed' | 'flaky';
   shard: number;
   attempts: number;
-  // How long its first attempt took, when the runner reports it. Used to balance later runs.
   seconds?: number;
   message?: string;
-  // The recording of the retry. For a flaky flow it shows the run that passed; the first,
-  // failed run is in the Maestro log.
   recording?: string;
 };
 
@@ -33,7 +22,6 @@ export type Run = {
   accountId: string;
   state: 'running' | 'passed' | 'failed' | 'cancelled';
   build: string;
-  // Runs saved before XCUITest have none; they were Maestro.
   kind?: 'maestro' | 'xcuitest' | 'espresso';
   shards: number;
   retries: number;
@@ -47,11 +35,6 @@ export type Run = {
 
 export type RunRequest = {
   build?: string;
-  // maestro: `archive` (a base64 tar of the flows folder) and `flows` in it; the app is `build`.
-  // xcuitest: `build` is the archived products of build-for-testing, which hold the app too,
-  // and `tests` are -only-testing names (Target, Target/Class).
-  // espresso: `build` is the app's .apk, `testBuild` its test .apk, and `tests` are class names,
-  // or ["all"] for the whole suite on one device.
   suite?: { kind?: string; archive?: string; flows?: string[]; tests?: string[]; testBuild?: string };
   class?: DeviceClass;
   shards?: number;
@@ -59,7 +42,6 @@ export type RunRequest = {
   env?: Record<string, string>;
 };
 
-// Maestro names a test case after the flow's `name:` or its file name; JUnit marks failures.
 export function failedCases(junit: string): Set<string> {
   const failed = new Set<string>();
   for (const m of junit.matchAll(/<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g)) {
@@ -71,7 +53,6 @@ export function failedCases(junit: string): Set<string> {
   return failed;
 }
 
-// Seconds per Maestro test case, by name, from the JUnit report.
 export function caseSeconds(junit: string): Map<string, number> {
   const out = new Map<string, number>();
   for (const m of junit.matchAll(/<testcase\b([^>]*?)\/?>/g)) {
@@ -84,8 +65,6 @@ export function caseSeconds(junit: string): Map<string, number> {
   return out;
 }
 
-// Longest first, each to the shard with the least work so far. An item never timed counts as
-// the average of those that were, so a new test does not all land on one shard.
 export function assignShards(items: string[], shards: number, past: Map<string, number>): number[] {
   const known = items.map((i) => past.get(i)).filter((t): t is number => t !== undefined);
   const guess = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
@@ -103,8 +82,6 @@ export function assignShards(items: string[], shards: number, past: Map<string, 
 
 export type TestHistory = { test: string; kind: string; runs: number; passed: number; flaky: number; failed: number; lastStatus: string; lastRunAt: number };
 
-// Per test, over the runs given (newest first): how often it passed, failed, or passed only when
-// retried. Sorted by flaky plus failed, most first, so the tests to look at come first.
 export function testHistory(runs: Run[]): TestHistory[] {
   const rows = new Map<string, TestHistory>();
   for (const run of runs) {
@@ -126,7 +103,6 @@ export function testHistory(runs: Run[]): TestHistory[] {
   return [...rows.values()].sort((a, b) => b.flaky + b.failed - (a.flaky + a.failed) || a.test.localeCompare(b.test));
 }
 
-// Seconds per item, adding up the cases each item covers.
 function sumSeconds(items: string[], cases: TestCase[], of: (item: string, c: TestCase) => boolean): Map<string, number> {
   return new Map(items.flatMap((item) => {
     const mine = cases.filter((c) => of(item, c));
@@ -157,7 +133,6 @@ export function junit(run: Run): string {
 type Suite = { sha256: string; testSha256: string; archive: string; env: Record<string, string> };
 
 export class Runs {
-  // Emits the run id with the run after every change.
   readonly events = new EventEmitter();
   private db: Db;
   private leases: Leases;
@@ -172,8 +147,6 @@ export class Runs {
     this.internalUrl = internalUrl;
     this.publicUrl = publicUrl;
     this.events.setMaxListeners(0);
-    // A run's coordinator lives in this process, so a run that was going when Hangar stopped
-    // cannot finish. Its leases end on their own when they expire.
     for (const run of db.recentRuns(1000).filter((r) => r.state === 'running')) {
       this.save({ ...run, state: 'failed', error: 'Hangar restarted during the run.', endedAt: Date.now() });
     }
@@ -226,7 +199,6 @@ export class Runs {
     return run;
   }
 
-  // Runs are the team's, like recordings: a failing run is for everyone to look at.
   get(id: string): Run {
     const run = this.db.getRun(id);
     if (!run) {
@@ -239,7 +211,6 @@ export class Runs {
     return this.db.recentRuns();
   }
 
-  // The latest timing of each test in the last 50 runs of this kind.
   private pastSeconds(kind: Run['kind']): Map<string, number> {
     const out = new Map<string, number>();
     for (const run of this.db.recentRuns(50)) {
@@ -268,7 +239,6 @@ export class Runs {
       try {
         this.leases.release(p.role === 'operator' ? p : this.owner(run), leaseId);
       } catch {
-        // Already ended.
       }
     }
     return cancelled;
@@ -297,8 +267,7 @@ export class Runs {
     return run;
   }
 
-  // Changes one run in place. The coordinator's shards update the same run concurrently, so each
-  // change reads the latest copy first.
+  // The shards update the same run concurrently, so each change reads the latest copy first.
   private update(id: string, change: (run: Run) => Partial<Run>): Run {
     const run = this.db.getRun(id)!;
     return this.save({ ...run, ...change(run) });
@@ -329,12 +298,10 @@ export class Runs {
     const run = this.db.getRun(id)!;
     const lease = this.leases.create(p, run.class, { via: `${{ maestro: 'Maestro', xcuitest: 'XCUITest', espresso: 'Espresso' }[run.kind ?? 'maestro']}, shard ${shard + 1} of ${run.shards}` });
     this.update(id, (r) => ({ leaseIds: [...r.leaseIds, lease.id] }));
-    // Maestro calls can take minutes; the run renews its leases like a client would.
     const renew = setInterval(() => {
       try {
         this.leases.renew(p, lease.id);
       } catch {
-        // Ended; the next op fails and says why.
       }
     }, 60_000);
     try {
@@ -345,7 +312,6 @@ export class Runs {
       const artifactUrl = (sha = sha256): string => `${this.internalUrl()}/v1/artifacts/${sha}?t=${auth.mintToken(this.db, 'artifact', { expiresAt: Date.now() + 10 * 60_000 })}`;
       const kind = this.db.getRun(id)!.kind ?? 'maestro';
       const lastLines = (log: string): string => log.split('\n').filter(Boolean).slice(-3).join(' ');
-      // Runs some of the shard's items and says which failed, with a line to show for them.
       let exec: (only: string[]) => Promise<{ failed: string[]; message: string; seconds: Map<string, number> }>;
       if (kind === 'maestro') {
         await this.leases.op(p, lease.id, { op: 'install', artifactUrl: artifactUrl(), sha256 });
@@ -358,7 +324,6 @@ export class Runs {
           return { failed: only.filter((f) => (r.junit ? failed.has(flowName(f)) : !r.passed)), message: lastLines(r.log), seconds };
         };
       } else if (kind === 'espresso') {
-        // Installed with every call: a fresh device per shard, and the retry reuses it.
         exec = async (only) => {
           const tests = only.includes('all') ? [] : only;
           const r = (await this.leases.op(p, lease.id, { op: 'espresso', app: { url: artifactUrl(), sha256 }, testApp: { url: artifactUrl(suite.testSha256), sha256: suite.testSha256 }, tests })).result as TestResult;
@@ -368,7 +333,6 @@ export class Runs {
           return { failed, message: bad.map((c) => `${c.className.split('.').pop()}.${c.name}: ${c.message ?? 'failed'}`).join(' ') || lastLines(r.log), seconds: sumSeconds(only, r.cases, of) };
         };
       } else {
-        // xcodebuild installs the app from the products itself.
         exec = async (only) => {
           const r = (await this.leases.op(p, lease.id, { op: 'xcuitest', artifactUrl: artifactUrl(), sha256, tests: only })).result as TestResult;
           const bad = r.cases.filter((c) => c.status === 'failed');
@@ -420,12 +384,10 @@ export class Runs {
       try {
         this.leases.release(p, lease.id);
       } catch {
-        // Already ended.
       }
     }
   }
 
-  // Resolves when the lease is active, throws when it ends first.
   private active(leaseId: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const check = (l: { state: string; reason?: string | null }): boolean => {

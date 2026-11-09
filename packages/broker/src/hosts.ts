@@ -1,9 +1,7 @@
-// Connected agents, their devices, and request/response over each agent's link.
 
 import { randomUUID } from 'node:crypto';
 import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type Platform, type StreamCodec } from '@hangar/protocol';
 
-// One link per agent: a WebSocket, or an in-memory pair when broker and agent share a process.
 export type HostLink = {
   send(message: BrokerMessage): void;
   close(): void;
@@ -36,13 +34,11 @@ export class Hosts {
   private pending = new Map<number, Pending>();
   private nextId = 1;
   onChange: () => void = () => {};
-  // The leases an agent says it holds, on every (re)connect.
   onHello: (held: string[], link: HostLink) => void = () => {};
   onFrame: (leaseId: string, codec: StreamCodec, data: Uint8Array) => void = () => {};
   onStreamFailed: (leaseId: string, codec: StreamCodec, message: string) => void = () => {};
   onTunnel: (m: AgentMessage & { type: 'tunnel.open' | 'tunnel.data' | 'tunnel.close' }) => void = () => {};
 
-  // Returns the handlers the transport calls for this link.
   attach(link: HostLink): { message(m: AgentMessage): void; closed(): void } {
     let host: Host | null = null;
     return {
@@ -135,7 +131,6 @@ export class Hosts {
     }
   }
 
-  // Sends a message that carries an `id` and waits for the agent's response.
   request(
     deviceId: string,
     build: (id: number) => BrokerMessage,

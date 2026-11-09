@@ -1,15 +1,4 @@
-// Streams one simulator's main display as H.264 on stdout.
-//
-// It reads the display's IOSurface through Xcode's private SimulatorKit API (loaded at runtime,
-// so a missing symbol is an error message, not a crash at launch) and encodes only when the
-// display reports damage, with VideoToolbox in low-latency mode.
-//
-// Usage: hangar-screen <udid> [--fps 60] [--bitrate 8000000] [--max-size 0]
-//        hangar-screen --images   (screenshots as JPEG, from a simulator or a PNG; see serveImages)
-// Stdin: "k" asks for a keyframe. "r <path>" starts writing the same frames to an MP4, and "s"
-// finishes it and prints "recorded <path>" on stderr. EOF finishes any recording and exits.
-// Stdout, per frame: u32 length of the rest (big endian), u8 flags (1 = keyframe),
-// f64 capture time in ms since the epoch, u16 width, u16 height, then Annex B NAL units.
+// Frame record on stdout: u32 length, u8 flags (1 = keyframe), f64 capture ms since epoch, u16 width, u16 height, Annex B NALs.
 
 import AVFoundation
 import CoreImage
@@ -40,8 +29,6 @@ func option(_ name: String, _ fallback: Int) -> Int {
 let fps = option("--fps", 60)
 let bitrate = option("--bitrate", 8_000_000)
 let maxSize = option("--max-size", 0)
-
-// MARK: SimulatorKit
 
 let developerDir: String = {
   if let d = ProcessInfo.processInfo.environment["DEVELOPER_DIR"] {
@@ -88,7 +75,6 @@ struct Failure: Error {
   let message: String
 }
 
-// The main display of a booted simulator: an object whose framebufferSurface is its IOSurface.
 func mainDisplay(_ udid: String) throws -> AnyObject {
   guard let contextClass = NSClassFromString("SimServiceContext") as? NSObject.Type,
     let context = contextClass.perform(NSSelectorFromString("sharedServiceContextForDeveloperDir:error:"), with: developerDir, with: nil)?.takeUnretainedValue(),
@@ -129,11 +115,7 @@ func jpeg(_ image: CGImage, maxSize: Int, quality: Double) -> Data {
   return CGImageDestinationFinalize(dest) ? data as Data : Data()
 }
 
-// One long-lived process for screenshots, so a JPEG costs no process spawn. Stdin, per request:
-// u32 length of the rest (big endian), u8 kind, u16 longest side (0 keeps the size), u8 JPEG
-// quality (1 to 100), then for kind 0 an image to convert, for kind 1 a simulator's UDID to read
-// straight from its display. Stdout, in the same order: u32 length, then the JPEG; length 0 when
-// it failed.
+// Image request on stdin: u32 length, u8 kind (0 image, 1 UDID), u16 longest side, u8 JPEG quality. Reply: u32 length then JPEG, 0 on failure.
 func serveImages() -> Never {
   let input = FileHandle.standardInput
   let context = CIContext(options: [.useSoftwareRenderer: false])
@@ -160,7 +142,6 @@ func serveImages() -> Never {
     let payload = body.dropFirst(4)
     var out = Data()
     if bytes[0] == 1, let id = String(data: payload, encoding: .utf8) {
-      // The display is looked up once per device and again if its surface is gone.
       var surface = displays[id].flatMap { send($0, "framebufferSurface") }
       if surface == nil, let display = try? mainDisplay(id) {
         displays[id] = display
@@ -194,8 +175,6 @@ do {
 } catch {
   fail("UNKNOWN", "\(error)")
 }
-
-// MARK: Encoder
 
 let out = DispatchQueue(label: "out")
 let work = DispatchQueue(label: "work")
@@ -244,7 +223,7 @@ func writeFrame(_ sample: CMSampleBuffer, captureMs: Double) {
   guard let base else {
     return
   }
-  // VideoToolbox gives 4-byte length prefixes; browsers and ffmpeg take Annex B start codes.
+  // VideoToolbox emits 4-byte length prefixes; browsers and ffmpeg need Annex B start codes.
   var offset = 0
   while offset + 4 <= total {
     let len = base.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: 4) { p in
@@ -269,17 +248,11 @@ func writeFrame(_ sample: CMSampleBuffer, captureMs: Double) {
   }
 }
 
-// MARK: Recording
-
-// Writes the encoder's own samples into an MP4, so a recording costs no second encode. Frames
-// come only when the screen changes, and an MP4 keeps each one on screen until the next.
 final class Recorder {
   let path: String
   let writer: AVAssetWriter
   var input: AVAssetWriterInput?
   var dims: CMVideoDimensions?
-  // Set by a stop: the file ends with a keyframe of the screen as it is now, so a still screen
-  // at the end still lasts until the stop.
   var stopping: (() -> Void)?
 
   init?(path: String) {
@@ -297,7 +270,6 @@ final class Recorder {
       return
     }
     if input == nil {
-      // The file starts at a keyframe, and its format comes from that frame.
       guard keyframe else {
         return
       }
@@ -309,7 +281,7 @@ final class Recorder {
       self.input = input
       dims = CMVideoFormatDescriptionGetDimensions(format)
     }
-    // A rotation changes the frame size, which one MP4 track cannot hold. Later frames are left out.
+    // A rotation changes the frame size, which one MP4 track cannot hold.
     let d = CMVideoFormatDescriptionGetDimensions(format)
     guard let input, d.width == dims?.width, d.height == dims?.height, input.isReadyForMoreMediaData else {
       return
@@ -351,7 +323,7 @@ func startRecording(_ path: String) {
 
 func stopRecording(then: @escaping () -> Void = {}) {
   out.async {
-    // The agent waits for this line, so a stop always gets one, recording or not.
+    // The agent waits for this line, so a stop always prints one.
     guard let r = recorder, r.stopping == nil else {
       FileHandle.standardError.write("recorded none\n".data(using: .utf8)!)
       then()
@@ -367,7 +339,6 @@ func stopRecording(then: @escaping () -> Void = {}) {
       }
     }
     r.stopping = done
-    // If no frame comes within a second (the display went away), finish without it.
     out.asyncAfter(deadline: .now() + 1) {
       if let pending = r.stopping {
         r.stopping = nil
@@ -407,7 +378,6 @@ func setUp(width: Int, height: Int) {
     kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_ConstrainedHigh_AutoLevel,
     kVTCompressionPropertyKey_AverageBitRate: bitrate,
     kVTCompressionPropertyKey_ExpectedFrameRate: fps,
-    // Keyframes only when a viewer joins or asks; the screen is idle most of the time.
     kVTCompressionPropertyKey_MaxKeyFrameInterval: Int32.max,
     kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 0,
   ]
@@ -451,7 +421,6 @@ func encode(captureMs: Double) {
   var h = IOSurfaceGetHeight(surface)
   if maxSize > 0, max(w, h) > maxSize {
     let s = Double(maxSize) / Double(max(w, h))
-    // Even sizes, which every H.264 decoder accepts.
     w = Int(Double(w) * s) & ~1
     h = Int(Double(h) * s) & ~1
     guard let small = scaled(src, w, h) else {
@@ -477,8 +446,6 @@ func encode(captureMs: Double) {
   VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: pts)
 }
 
-// Encodes now if a frame interval has passed, else once at the end of the interval. After the
-// screen settles, two more frames let the encoder sharpen what it blurred during motion.
 func tick(_ token: Int) {
   guard timer?.token == token else {
     return
@@ -506,7 +473,6 @@ func tick(_ token: Int) {
   }
 }
 
-// Keeps only the earliest pending tick, so new damage never waits behind a refresh.
 func schedule(after ms: Double) {
   let at = now() + ms
   if let timer, timer.at <= at {
@@ -538,7 +504,6 @@ register(display, "registerCallbackWithUUID:damageRectanglesCallback:", onDamage
 register(display, "registerCallbackWithUUID:ioSurfacesChangeCallback:", onSurface as AnyObject)
 damaged()
 
-// Stdin: "k" asks for a keyframe (a new viewer joined). EOF means the agent went away.
 Thread.detachNewThread {
   while let line = readLine() {
     if line == "k" {

@@ -1,13 +1,3 @@
-// bench/metro: Fast Refresh on a leased simulator, from saving a file to the change on screen.
-//
-// It starts Metro for examples/hello on this machine, leases a device through the real broker
-// and agent, installs the Debug build (HELLO_APP, or the one in Xcode's DerivedData), connects it
-// through the Metro tunnel, then edits App.tsx TRIALS times. The time is from the write to the
-// first H.264 frame captured after it; the app is otherwise still, so that frame is the refresh.
-// Each trial also checks the new text in the accessibility tree.
-//
-//   pnpm bench:metro
-
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -1,4 +1,3 @@
-// Lease state machine and scheduler. Pure: no clock, no I/O. Callers pass `now`.
 
 import type { DeviceClass, LeaseEndReason, LeaseState, Platform } from '@hangar/protocol';
 
@@ -74,7 +73,6 @@ export function newLease(
   };
 }
 
-// The moment an active lease ends unless renewed or used, and which reason applies.
 export function deadline(lease: Lease): { at: number; reason: LeaseEndReason } | null {
   if (lease.state !== 'active' || lease.activatedAt === null) {
     return null;
@@ -128,7 +126,6 @@ export function activate(lease: Lease, now: number): Lease {
   return { ...lease, state: 'active', activatedAt: now, lastRenewAt: now, lastActivityAt: now };
 }
 
-// A preparation failure puts the lease back at the head of the queue, until it runs out of attempts.
 export function prepareFailed(lease: Lease, now: number): Lease {
   if (lease.state !== 'preparing') {
     return lease;
@@ -160,7 +157,6 @@ export function end(lease: Lease, reason: LeaseEndReason, now: number): Lease {
   return { ...lease, state: 'ended', reason, endedAt: now };
 }
 
-// Which leases must end at `now`, and why.
 export function due(leases: Lease[], now: number): { id: string; reason: LeaseEndReason }[] {
   const out: { id: string; reason: LeaseEndReason }[] = [];
   for (const lease of leases) {
@@ -186,8 +182,6 @@ export type ScheduleInput = {
   quotaByTeam: Map<string, number>;
 };
 
-// Match queued leases to ready devices. Team furthest under its quota first, then the principal
-// with the fewest active leases, then the oldest request.
 export function schedule(input: ScheduleInput): { leaseId: string; deviceId: string }[] {
   const byTeam = new Map(input.activeByTeam);
   const byPrincipal = new Map(input.activeByPrincipal);

@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { signV4 } from './store.ts';
 
-// The GET Object example from AWS's Signature Version 4 documentation for S3.
 test('SigV4 matches the AWS documentation example', () => {
   const headers = signV4({
     method: 'GET',

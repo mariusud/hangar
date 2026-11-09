@@ -1,10 +1,3 @@
-// The Android side of a host: a pool of read-only emulators from one AVD. It speaks the same
-// messages as the iOS agent and joins the broker as its own host, so leases pick a platform by
-// device class.
-//
-// Each device is a fresh instance booted from the AVD's snapshot. Nothing it does is saved, so
-// ending a lease kills the instance and the pool boots another: the wipe cannot leave data behind.
-
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir, totalmem } from 'node:os';
@@ -28,7 +21,7 @@ export type AndroidAgentOptions = {
 
 type Device = AgentDevice & { emulator: android.Emulator; port: number; leaseId: string | null; screen: { width: number; height: number } };
 
-// Console ports from 5600 up, away from the 5554 that Android Studio's own emulator takes.
+// Console ports start at 5600, away from the 5554 that Android Studio uses.
 const FIRST_PORT = 5600;
 
 export class AndroidAgent {
@@ -58,7 +51,6 @@ export class AndroidAgent {
     if (!(await android.avds()).includes(this.opts.avd)) {
       throw new OpError('NO_AVD', `There is no Android virtual device called ${this.opts.avd}. Known: ${(await android.avds()).join(', ') || 'none'}. Make one in Android Studio's Device Manager.`);
     }
-    // The first device tells which model and Android version this AVD is.
     await this.boot();
     await this.hello();
     void this.fill();
@@ -110,7 +102,6 @@ export class AndroidAgent {
       const emulator = await android.boot(this.opts.avd, port);
       const info = await android.info(emulator.serial);
       this.model = info;
-      // A new id every boot: the broker never hands out a device id twice.
       const deviceId = `android-${process.pid}-${++this.next}`;
       this.devices.set(deviceId, { deviceId, ...info, state: 'ready', emulator, port, leaseId: null, screen: await android.screenSize(emulator.serial) });
       this.log(`${info.model} (Android ${info.os}) ready on port ${port}`);
@@ -165,8 +156,6 @@ export class AndroidAgent {
         this.opts.send({ type: 'response', id: m.id, ok: false, error: { code: 'LEASE_NOT_HELD', message: 'This host holds no device for that lease.' } });
         return;
       }
-      // React Native debug builds load from localhost:8081 on the device; adb reverse carries
-      // that to the tunnel's port on this Mac.
       this.tunnels.start(m.id, m.leaseId, async (port) => {
         await run(join(android.sdkRoot() ?? '', 'platform-tools', 'adb'), ['-s', d.emulator.serial, 'reverse', 'tcp:8081', `tcp:${port}`]);
       });
@@ -292,7 +281,6 @@ export class AndroidAgent {
     }
   }
 
-  // Installs the app and its test APK on the fresh device, then runs the instrumentation.
   private async espresso(serial: string, app: { url: string; sha256: string }, testApp: { url: string; sha256: string }, tests: string[]): Promise<TestResult> {
     android.checkTestNames(tests);
     const dir = await mkdtemp(join(tmpdir(), 'hangar-espresso-'));
@@ -316,7 +304,6 @@ export class AndroidAgent {
     if (format === 'png' && !maxSize) {
       return png;
     }
-    // sips ships with macOS, where the emulators run.
     const dir = await mkdtemp(join(tmpdir(), 'hangar-shot-'));
     try {
       await writeFile(join(dir, 'in.png'), png);

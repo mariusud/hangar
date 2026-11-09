@@ -19,7 +19,6 @@ test('toNodes normalizes frames against the application frame', () => {
   });
 });
 
-// Runs the real lifecycle on this Mac: HANGAR_REAL=1 pnpm test
 test('real simulator: golden, clone, boot, drive, delete', { skip: !process.env.HANGAR_REAL && 'set HANGAR_REAL=1', timeout: 300_000 }, async () => {
   const rt = (await sim.runtimes()).at(-1);
   assert.ok(rt, 'no iOS runtime installed');

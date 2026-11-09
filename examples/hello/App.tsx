@@ -1,5 +1,3 @@
-// The smallest app that shows `hangar run ios` working: edit the text, save, and the leased
-// simulator updates through Fast Refresh while the count stays.
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 

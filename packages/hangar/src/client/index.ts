@@ -1,5 +1,3 @@
-// TypeScript client for Hangar's REST API.
-
 import { execFile, spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { connect as connectSocket, type Socket } from 'node:net';
@@ -11,6 +9,7 @@ import type { Action, DeviceClass, ElementSelector, Frame, LeaseEndReason, Lease
 
 const run = promisify(execFile);
 
+/** The server's view of a lease. */
 export type LeaseInfo = {
   id: string;
   state: LeaseState;
@@ -20,6 +19,7 @@ export type LeaseInfo = {
   expiresAt: number | null;
 };
 
+/** A recording and the links to its files. */
 export type RecordingInfo = {
   id: string;
   leaseId: string;
@@ -30,11 +30,11 @@ export type RecordingInfo = {
   durationMs: number | null;
   bytes: number;
   error: string | null;
-  // The page to paste into a bug report: video, timeline of actions, app log, last screenshot.
   url: string;
   files: { video: string; log: string; screenshot: string; timeline: string };
 };
 
+/** An error returned by the Hangar API. */
 export class HangarError extends Error {
   readonly code: string;
   readonly status: number;
@@ -49,6 +49,7 @@ export class HangarError extends Error {
 
 export const CONFIG_FILE = join(process.env.HANGAR_HOME ?? join(homedir(), '.hangar'), 'client.json');
 
+/** Reads the URL and token that `hangar login` saved. */
 export async function savedConfig(): Promise<{ url?: string; token?: string }> {
   try {
     return JSON.parse(await readFile(CONFIG_FILE, 'utf8')) as { url?: string; token?: string };
@@ -57,6 +58,7 @@ export async function savedConfig(): Promise<{ url?: string; token?: string }> {
   }
 }
 
+/** Client for the Hangar REST API. */
 export class Hangar {
   readonly url: string;
   readonly token: string;
@@ -66,7 +68,6 @@ export class Hangar {
     this.token = opts.token;
   }
 
-  // From HANGAR_URL and HANGAR_TOKEN, or what `hangar login` saved.
   static async fromEnv(): Promise<Hangar> {
     const saved = await savedConfig();
     const url = process.env.HANGAR_URL ?? saved.url;
@@ -122,8 +123,6 @@ export class Hangar {
     return this.json('GET', `/v1/recordings/${encodeURIComponent(id)}`);
   }
 
-  // Leases a device and waits until it is active. The returned lease renews itself until released.
-  // `record: true` records the whole lease; the link is in `recordings()` once it is released.
   async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean; via?: string } = {}): Promise<Lease> {
     let info = await this.json<LeaseInfo>('POST', `/v1/leases?wait=${opts.waitSeconds ?? 120}`, {
       class: cls,
@@ -145,6 +144,7 @@ export class Hangar {
   }
 }
 
+/** A leased device, driven through the API. */
 export class Lease {
   readonly id: string;
   info: LeaseInfo;
@@ -206,7 +206,6 @@ export class Lease {
     await this.act([{ type: 'type', text }]);
   }
 
-  // A React Native debug build: command-D opens the dev menu, command-R reloads the bundle.
   async devMenu(): Promise<void> {
     await this.act([{ type: 'key', key: 'd', modifiers: ['command'] }]);
   }
@@ -219,7 +218,6 @@ export class Lease {
     await this.act([{ type: 'waitFor', element, timeoutMs }]);
   }
 
-  // A path to a .app folder or an archive uploads it; anything else is a registered build name.
   async install(appOrBuild: string, name?: string): Promise<{ bundleId: string; name: string }> {
     const isPath = await stat(appOrBuild).then(() => true, () => false);
     if (!isPath) {
@@ -231,7 +229,6 @@ export class Lease {
       const { createReadStream } = await import('node:fs');
       return (await this.client.request('POST', this.path(`/apps?name=${label}`), createReadStream(appOrBuild), { 'content-type': 'application/octet-stream' })).json() as Promise<{ bundleId: string; name: string }>;
     }
-    // A folder: stream it as a tar archive, which every Mac and Linux box can make.
     const tar = spawn('tar', ['-cf', '-', '-C', dirname(appOrBuild), basename(appOrBuild)], { stdio: ['ignore', 'pipe', 'inherit'] });
     return (await this.client.request('POST', this.path(`/apps?name=${label}`), tar.stdout, { 'content-type': 'application/x-tar' })).json() as Promise<{ bundleId: string; name: string }>;
   }
@@ -256,7 +253,6 @@ export class Lease {
     await this.client.json('POST', this.path('/permissions'), { bundleId, service, action });
   }
 
-  // Pass null to stop simulating a location.
   async location(point: { lat: number; lon: number } | null): Promise<void> {
     await this.client.json(point ? 'POST' : 'DELETE', this.path('/location'), point ?? undefined);
   }
@@ -265,18 +261,14 @@ export class Lease {
     await this.client.json('POST', this.path('/appearance'), { mode });
   }
 
-  // Takes effect from the app's next launch.
   async language(bundleId: string, language: string): Promise<void> {
     await this.client.json('POST', this.path('/locale'), { bundleId, language });
   }
 
-  // Points a React Native debug build at the Metro tunnel. Call after metroTunnel().
-  // Starts recording the screen, the app log and the actions taken.
   async record(): Promise<RecordingInfo> {
     return this.client.json('POST', this.path('/recording'));
   }
 
-  // Stops the recording and returns it once the files are saved.
   async stopRecording(): Promise<RecordingInfo> {
     return this.client.json('POST', this.path('/recording/stop'));
   }
@@ -285,8 +277,6 @@ export class Lease {
     return this.client.json('POST', this.path('/metro'), { bundleId });
   }
 
-  // Carries the leased simulator's connections to localhost:<localPort> on this machine (your
-  // Metro). Resolves with the port the simulator uses for it, on the Mac's loopback.
   metroTunnel(localPort: number): Promise<{ port: number; close: () => void }> {
     const ws = new WebSocket(`${this.client.url.replace(/^http/, 'ws')}${this.path('/tunnel')}?token=${encodeURIComponent(this.client.token)}`);
     ws.binaryType = 'arraybuffer';
@@ -344,7 +334,7 @@ export class Lease {
   }
 }
 
-// Opens a URL in the default browser, on macOS and Linux.
+/** Opens a URL in the default browser, on macOS and Linux. */
 export async function openInBrowser(url: string): Promise<void> {
   if (process.env.HANGAR_NO_OPEN) {
     return;

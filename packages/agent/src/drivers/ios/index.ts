@@ -1,6 +1,3 @@
-// iOS simulator driver: simctl for lifecycle, idb for input and the accessibility tree.
-// Every call goes through execFile with an argument array. Never a shell.
-
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
@@ -33,8 +30,7 @@ async function simctl(...args: string[]): Promise<string> {
   }
 }
 
-// One idb companion per booted device, owned by Hangar. idb's own auto-spawned companions go
-// stale across reboots and then return an empty accessibility tree (seen on iOS 26.5).
+// idb's own auto-spawned companions go stale across reboots and return an empty accessibility tree.
 const companions = new Map<string, { proc: ChildProcess; socket: string }>();
 const SOCKET_DIR = join(tmpdir(), 'hangar-idb');
 
@@ -50,7 +46,6 @@ export async function startCompanion(udid: string): Promise<void> {
   });
   companions.set(udid, { proc, socket });
   proc.once('exit', () => companions.delete(udid));
-  // The companion answers once its socket is up and the device is attached.
   for (let i = 0; i < 50; i++) {
     try {
       await run('idb', ['--companion', socket, 'describe', '--json'], { maxBuffer: MAX_BUFFER });
@@ -63,8 +58,6 @@ export async function startCompanion(udid: string): Promise<void> {
   throw new DriverError('IDB_COMPANION_TIMEOUT', `The idb companion for ${udid} did not start within 10 s.`);
 }
 
-// Companions an earlier Hangar started outlive it when it is killed hard. They serve sockets in
-// Hangar's own folder, so this never stops anyone else's.
 export async function stopLeftoverCompanions(): Promise<void> {
   await run('pkill', ['-f', `idb_companion .*--grpc-domain-sock ${SOCKET_DIR}/`]).catch(() => {});
 }
@@ -148,7 +141,6 @@ export async function remove(udid: string): Promise<void> {
   await simctl('delete', udid);
 }
 
-// Devices Hangar created carry this prefix, so it never touches anyone else's simulators.
 export const NAME_PREFIX = 'hangar-';
 
 export async function listOwned(): Promise<{ udid: string; name: string; state: string }[]> {
@@ -161,13 +153,11 @@ export async function listOwned(): Promise<{ udid: string; name: string; state: 
     .map(({ udid, name, state }) => ({ udid, name, state }));
 }
 
-// The device-wide language and region, such as nb_NO. Takes effect for apps launched after it.
 export async function setLocale(udid: string, locale: string): Promise<void> {
   await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLanguages', '-array', locale.split('_')[0] ?? locale);
   await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLocale', locale);
 }
 
-// Settle a fresh device: English locale, so labels match what tests and agents expect.
 export async function prepareGolden(udid: string): Promise<void> {
   await simctl('bootstatus', udid, '-b');
   await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLanguages', '-array', 'en');
@@ -175,8 +165,6 @@ export async function prepareGolden(udid: string): Promise<void> {
   await shutdown(udid);
 }
 
-// A JPEG comes straight from the simulator's display through the helper's long-lived image
-// process. A PNG comes from the companion over gRPC. simctl is the fallback for both.
 export async function screenshot(udid: string, format: 'png' | 'jpeg' = 'png', maxSize?: number, quality = 70): Promise<Buffer> {
   if (format === 'jpeg') {
     const shot = await images(1, Buffer.from(udid), maxSize ?? 0, quality).catch(() => null);
@@ -202,7 +190,6 @@ export async function screenshot(udid: string, format: 'png' | 'jpeg' = 'png', m
   return images(0, image, maxSize ?? 0, quality);
 }
 
-// A full-resolution JPEG is about 270 KB; at 800 px it is about 33 KB.
 async function screenshotWithSimctl(udid: string, format: 'png' | 'jpeg', maxSize: number | undefined, quality: number): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), 'hangar-shot-'));
   const file = join(dir, `shot.${format}`);
@@ -224,7 +211,6 @@ async function screenshotWithSimctl(udid: string, format: 'png' | 'jpeg', maxSiz
 type Waiting = { resolve: (b: Buffer) => void; reject: (e: Error) => void };
 let imageHelper: Promise<{ proc: ChildProcess; waiting: Waiting[] }> | null = null;
 
-// The helper answers in request order, so replies match the oldest waiting request.
 function imageProcess(): Promise<{ proc: ChildProcess; waiting: Waiting[] }> {
   imageHelper ??= (async () => {
     const proc = spawn(await screenBinary(), ['--images'], { stdio: ['pipe', 'pipe', 'ignore'] });
@@ -250,7 +236,6 @@ function imageProcess(): Promise<{ proc: ChildProcess; waiting: Waiting[] }> {
         w.reject(new DriverError('SCREENSHOT_FAILED', 'The image helper exited.'));
       }
     });
-    // Idle, the helper keeps nothing running.
     proc.unref();
     for (const stream of [proc.stdin, proc.stdout]) {
       if (stream instanceof Socket) {
@@ -265,7 +250,6 @@ function imageProcess(): Promise<{ proc: ChildProcess; waiting: Waiting[] }> {
   return imageHelper;
 }
 
-// kind 0 converts `payload`, an image; kind 1 reads the display of the simulator whose UDID it is.
 async function images(kind: 0 | 1, payload: Buffer, maxSize: number, quality: number): Promise<Buffer> {
   const { proc, waiting } = await imageProcess();
   return new Promise((resolve, reject) => {
@@ -289,7 +273,6 @@ type IdbElement = {
   frame: Frame;
 };
 
-// CompanionService/accessibility_info with an empty request: the flat list, as JSON in field 1.
 export async function describe(udid: string): Promise<{ screen: Frame; nodes: UiNode[] }> {
   const companion = companions.get(udid);
   if (!companion) {
@@ -326,7 +309,6 @@ function round(n: number): number {
   return Math.round(n * 10_000) / 10_000;
 }
 
-// Input goes over the companion's gRPC session; see hid.ts.
 async function sendHid(udid: string, events: hid.HidEvent[]): Promise<void> {
   const companion = companions.get(udid);
   if (!companion) {
@@ -360,7 +342,6 @@ export async function typeText(udid: string, text: string): Promise<void> {
   await idb(udid, 'ui', 'text', '--', text);
 }
 
-// USB HID usage codes for the keys people ask for by name.
 const KEYS: Record<string, number> = {
   return: 40,
   enter: 40,
@@ -373,7 +354,6 @@ const KEYS: Record<string, number> = {
   left: 80,
   down: 81,
   up: 82,
-  // Letters, for shortcuts such as command-D (the React Native dev menu).
   ...Object.fromEntries([...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [c, 4 + i])),
 };
 
@@ -430,7 +410,6 @@ function checkBundleId(bundleId: string): void {
   }
 }
 
-// A simulated remote notification. The payload is APNs JSON with an "aps" key.
 export async function push(udid: string, bundleId: string, payload: Record<string, unknown>): Promise<void> {
   checkBundleId(bundleId);
   if (typeof payload !== 'object' || payload === null || !('aps' in payload)) {
@@ -472,7 +451,6 @@ export async function appearance(udid: string, mode: 'light' | 'dark'): Promise<
   await simctl('ui', udid, 'appearance', mode);
 }
 
-// Language and region for one app, from its next launch: "nb-NO", "en-US", "de".
 export async function appLocale(udid: string, bundleId: string, language: string): Promise<void> {
   checkBundleId(bundleId);
   if (!/^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$/.test(language)) {
@@ -482,24 +460,19 @@ export async function appLocale(udid: string, bundleId: string, language: string
   await simctl('spawn', udid, 'defaults', 'write', bundleId, 'AppleLocale', '-string', language.replace('-', '_'));
 }
 
-// Writes a string to an app's user defaults inside the simulator.
 export async function setDefault(udid: string, domain: string, key: string, value: string): Promise<void> {
   await simctl('spawn', udid, 'defaults', 'write', domain, key, '-string', value);
 }
 
 export async function info(udid: string, model: string, os: string): Promise<DeviceInfo> {
   const [{ screen }, png] = await Promise.all([describe(udid), screenshot(udid, 'png')]);
-  // PNG width sits in the IHDR chunk at byte 16.
   const scale = Math.round(png.readUInt32BE(16) / screen.width);
   return { platform: 'ios-simulator', model, os, screen: { width: screen.width, height: screen.height, scale } };
 }
 
-// Annex-B H.264 on stdout. The caller owns the process and kills it when the last viewer leaves.
 const SCREEN_SOURCE = fileURLToPath(new URL('../../../native/screen.swift', import.meta.url));
 let screenBuild: Promise<string> | null = null;
 
-// Builds hangar-screen from source with the installed Swift toolchain, once per source version,
-// so the repo ships no binaries and the helper matches the installed Xcode.
 export function screenBinary(): Promise<string> {
   screenBuild ??= (async () => {
     const hash = createHash('sha256').update(await readFile(SCREEN_SOURCE)).digest('hex').slice(0, 12);
@@ -526,17 +499,12 @@ export function screenBinary(): Promise<string> {
 
 export type ScreenStream = {
   keyframe: () => void;
-  // Writes the same frames to an MP4 at path, until stopRecording resolves with the finished file.
   record: (path: string) => void;
   stopRecording: () => Promise<void>;
-  // Finishes any recording, then ends the helper.
   stop: () => Promise<void>;
-  // Resolves when the helper exits, with its last error line if it failed.
   exited: Promise<string | null>;
 };
 
-// Streams the display as H.264. Each frame record is passed on unchanged: u8 flags (1 = keyframe),
-// f64 capture time in ms since the epoch, u16 width, u16 height, then Annex B NAL units.
 export async function screenStream(udid: string, onFrame: (record: Buffer) => void, opts: { fps?: number; bitrate?: number; maxSize?: number } = {}): Promise<ScreenStream> {
   const bin = await screenBinary();
   const args = [udid, '--fps', String(opts.fps ?? 60), '--bitrate', String(opts.bitrate ?? 8_000_000), '--max-size', String(opts.maxSize ?? 0)];
@@ -572,7 +540,6 @@ export async function screenStream(udid: string, onFrame: (record: Buffer) => vo
     record: (path) => {
       proc.stdin.write(`r ${path}\n`);
     },
-    // Also resolves if the helper has died, so a stop never hangs.
     stopRecording: () =>
       Promise.race([
         new Promise<void>((resolve) => {
@@ -593,8 +560,6 @@ export async function screenStream(udid: string, onFrame: (record: Buffer) => vo
 
 export type AppLog = { stop: () => Promise<void> };
 
-// The log of the apps installed on the device (not the system's), as NDJSON, into path. React
-// Native release builds log console output here too. Stops writing at maxBytes.
 export function appLog(udid: string, path: string, maxBytes = 16 * 1024 * 1024): AppLog {
   const proc = spawn('xcrun', ['simctl', 'spawn', udid, 'log', 'stream', '--style', 'ndjson', '--level', 'info', '--predicate', 'processImagePath CONTAINS "/Containers/Bundle/Application/"'], {
     stdio: ['ignore', 'pipe', 'ignore'],

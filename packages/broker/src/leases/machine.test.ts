@@ -128,8 +128,6 @@ test('schedule never exceeds a team quota', () => {
   assert.equal(out.length, 1);
 });
 
-// Random sequences of requests, scheduling, releases, device loss and clock jumps. After every
-// step: a device has at most one lease in preparing or active, and every lease ends in bounded time.
 test('property: no device is double-leased and every lease ends', () => {
   let seed = 42;
   const rand = (n: number): number => {
@@ -175,7 +173,6 @@ test('property: no device is double-leased and every lease ends', () => {
       const holding = leases.filter((l) => l.state === 'preparing' || l.state === 'active').map((l) => l.deviceId);
       assert.equal(new Set(holding).size, holding.length, 'a device is held by two leases');
     }
-    // Let time run out: everything must end.
     leases = leases.map((l) => (l.state === 'preparing' ? activate(l, now) : l));
     now += 1_000_000;
     const ending = due(leases, now);

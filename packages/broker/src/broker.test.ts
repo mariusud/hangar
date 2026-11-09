@@ -12,20 +12,17 @@ import { mintHostToken } from './index.ts';
 import * as auth from './auth.ts';
 import { startBroker, type Broker } from './index.ts';
 
-// A fake agent with one device. It answers ops and replaces a device after its lease ends.
 function fakeAgent(broker: Broker, platform: Platform = 'ios-simulator'): { messages: BrokerMessage[]; ended: string[]; handlers: ReturnType<Broker['attach']> } {
   const messages: BrokerMessage[] = [];
   const ended: string[] = [];
   let devices: AgentDevice[] = [{ deviceId: 'dev-1', model: 'iPhone 17', os: '26.5', state: 'ready', platform }];
   let n = 1;
   const leaseOf = new Map<string, string>();
-  // Like the real agent: a recording's files go up when it stops or the lease ends, video last.
   const recording = new Map<string, Record<'video' | 'log' | 'screenshot', string>>();
   const uploadRecording = async (leaseId: string): Promise<void> => {
     const uploads = recording.get(leaseId);
     recording.delete(leaseId);
     if (uploads) {
-      // The broker sends paths; an agent resolves them against the broker's address.
       await fetch(broker.url + uploads.screenshot, { method: 'PUT', body: 'png' });
       await fetch(broker.url + uploads.log, { method: 'PUT', body: '{"eventMessage":"hello from the app"}\n' });
       await fetch(broker.url + uploads.video, { method: 'PUT', body: '0123456789' });
@@ -50,7 +47,6 @@ function fakeAgent(broker: Broker, platform: Platform = 'ios-simulator'): { mess
           } else if (m.body.op === 'recordStop') {
             void uploadRecording(m.leaseId).then(() => handlers.message({ type: 'response', id: m.id, ok: true }));
           } else if (m.body.op === 'maestro') {
-            // `broken` fails on its first run and passes when retried alone.
             const flows = m.body.flows;
             const failing = flows.length > 1 && flows.includes('broken.yaml');
             const cases = flows.map((f) => `<testcase name="${f.replace('.yaml', '')}">${failing && f === 'broken.yaml' ? '<failure>no</failure>' : ''}</testcase>`).join('');
@@ -59,7 +55,6 @@ function fakeAgent(broker: Broker, platform: Platform = 'ios-simulator'): { mess
             const cases = [{ target: 'com.example.test', className: 'com.example.LoginTest', name: 'signIn', status: 'passed', seconds: 1 }];
             handlers.message({ type: 'response', id: m.id, ok: true, result: { passed: true, cases, log: 'OK (1 test)', durationMs: 1 } });
           } else if (m.body.op === 'xcuitest') {
-            // LoginTests fails when run with others and passes alone.
             const failing = m.body.tests.length > 1;
             const cases = m.body.tests.map((t) => ({ target: 'AppUITests', className: t.split('/')[1] ?? '', name: 'testIt', status: failing && t.endsWith('LoginTests') ? 'failed' : 'passed', seconds: 1 }));
             handlers.message({ type: 'response', id: m.id, ok: true, result: { passed: !failing, cases, log: '', durationMs: 1 } });
@@ -133,7 +128,6 @@ test('two clients race for the last device: one gets it, the other waits for a f
       la.json.state === 'active' ? [la.json, alice, lb.json, bob] : [lb.json, bob, la.json, alice];
     assert.equal(loser.queuePosition, 1);
 
-    // Someone else's lease looks missing.
     const peek = await call(broker, loserToken, 'GET', `/v1/leases/${winner.id}`);
     assert.equal(peek.status, 404);
 
@@ -219,7 +213,6 @@ test('welcome link signs in once; invites create accounts', async () => {
 
 test('the Metro tunnel carries a device connection to the lease holder, and only to them', async () => {
   const { broker, dir, token } = await setup();
-  // Stands in for Metro on the developer's machine: answers what it receives.
   const metro = createServer((socket) => socket.on('data', (d) => socket.write(`metro got ${d}`)));
   await new Promise<void>((r) => metro.listen(0, '127.0.0.1', r));
   try {
@@ -230,7 +223,6 @@ test('the Metro tunnel carries a device connection to the lease holder, and only
     const tunnel = await lease.metroTunnel(typeof address === 'object' && address ? address.port : 0);
     assert.equal(tunnel.port, 41000);
 
-    // The simulator opens a connection on the Mac and sends a request.
     agent.handlers.message({ type: 'tunnel.open', leaseId: lease.id, conn: 7 });
     agent.handlers.message({ type: 'tunnel.data', leaseId: lease.id, conn: 7, data: Buffer.from('GET /status') });
     let reply: string | null = null;
@@ -241,7 +233,6 @@ test('the Metro tunnel carries a device connection to the lease holder, and only
     }
     assert.equal(reply, 'metro got GET /status');
 
-    // Someone else cannot attach a tunnel to Alice's lease.
     const bob = new Hangar({ url: broker.url, token: token('bob') }).attach(lease.id);
     await assert.rejects(bob.metroTunnel(1));
     tunnel.close();
@@ -269,7 +260,6 @@ test('a recording keeps the video, log and screenshot, and a timeline of the act
     await call(broker, alice, 'POST', `/v1/leases/${lease.json.id}/actions`, { actions: [{ type: 'tap', element: { label: 'Sign in' } }, { type: 'type', text: 'hi' }] });
     await call(broker, alice, 'POST', `/v1/leases/${lease.json.id}/open-url`, { url: 'myapp://home' });
 
-    // Someone else cannot stop it, and trying does not spoil it.
     assert.equal((await call(broker, bob, 'POST', `/v1/leases/${lease.json.id}/recording/stop`)).status, 404);
 
     const stopped = await call(broker, alice, 'POST', `/v1/leases/${lease.json.id}/recording/stop`);
@@ -277,21 +267,17 @@ test('a recording keeps the video, log and screenshot, and a timeline of the act
     assert.equal(stopped.json.device, 'iPhone 17, iOS 26.5');
     assert.match(stopped.json.url, new RegExp(`/recordings/${stopped.json.id}$`));
 
-    // Anyone on the team can open the bug link.
     const timeline = await call(broker, bob, 'GET', stopped.json.files.timeline);
     assert.deepEqual(timeline.json.map((e: { what: string }) => e.what), ['Tap "Sign in", Type 2 characters', 'Open myapp://home']);
     assert.deepEqual((await call(broker, bob, 'GET', stopped.json.files.log)).json, { eventMessage: 'hello from the app' });
 
-    // The video player seeks with range requests.
     const part = await fetch(`${broker.url}${stopped.json.files.video}`, { headers: { authorization: `Bearer ${bob}`, range: 'bytes=2-5' } });
     assert.equal(part.status, 206);
     assert.equal(part.headers.get('content-range'), 'bytes 2-5/10');
     assert.equal(await part.text(), '2345');
 
-    // Upload links work once.
     assert.equal((await fetch(`${broker.url}/v1/uploads/recordings/${stopped.json.id}/video?t=nope`, { method: 'PUT', body: 'x' })).status, 403);
 
-    // Only the person who recorded it, or an operator, deletes it.
     assert.equal((await call(broker, bob, 'DELETE', `/v1/recordings/${stopped.json.id}`)).status, 403);
     assert.equal((await call(broker, alice, 'DELETE', `/v1/recordings/${stopped.json.id}`)).status, 204);
     assert.equal((await call(broker, bob, 'GET', `/v1/recordings/${stopped.json.id}`)).status, 404);
@@ -514,11 +500,9 @@ test('a device image goes to every host, and only a request for it gets its devi
     assert.equal(sent.images[0]?.apps[0]?.sha256, 'abc123');
     assert.match(sent.images[0]?.apps[0]?.url ?? '', /^\/v1\/artifacts\/abc123\?t=/);
 
-    // Leasing it right away queues while the host builds it.
     const early = await call(broker, qa, 'POST', '/v1/leases?wait=1', { class: { image: 'signed-in' } });
     assert.equal(early.json.state, 'queued');
 
-    // The host offers the image and has one device cloned from it.
     const devices: AgentDevice[] = [
       { deviceId: 'dev-1', model: 'iPhone 17', os: '26.5', state: 'ready' },
       { deviceId: 'img-1', model: 'iPhone 17', os: '26.5', state: 'ready', image: 'signed-in' },
@@ -688,7 +672,6 @@ test('single sign-on: code flow with PKCE, a checked ID token, groups to team an
     const account = broker.db.accountByName('kim@example.com');
     assert.equal(broker.db.teams().find((t) => t.id === broker.db.teamOf(account?.id ?? ''))?.name, 'QA');
 
-    // A state is good for one sign-in only.
     const again = await fetch(`${broker.url}/v1/oidc/callback?code=c1&state=${authorize.searchParams.get('state')}`, { redirect: 'manual' });
     assert.equal(again.status, 400);
   } finally {

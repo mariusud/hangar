@@ -30,7 +30,6 @@ test('an Annex B stream is cut into access units, keyframes marked', () => {
   const pps = [0, 0, 0, 1, 0x68, 3];
   const idr = [0, 0, 0, 1, 0x65, 9, 9, 9];
   const p = [0, 0, 0, 1, 0x41, 7, 7];
-  // Split mid-NAL to check that partial input waits for the next start code.
   const all = Buffer.from([...sps, ...pps, ...idr, ...p, ...p]);
   push(all.subarray(0, 10));
   push(all.subarray(10));

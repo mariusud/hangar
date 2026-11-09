@@ -1,7 +1,3 @@
-// `hangar up --install`: a LaunchAgent that starts Hangar at login and restarts it if it stops.
-// Simulators need the user's GUI session, so it is an agent in gui/<uid>, not a LaunchDaemon;
-// after a reboot it starts once the user is logged in, which automatic login makes unattended.
-
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
@@ -46,7 +42,6 @@ ${Object.entries(env).map(([k, v]) => `    <key>${k}</key><string>${xml(v)}</str
 export async function installService(upArgs: string[]): Promise<void> {
   const log = join(dataDir(), 'hangar.log');
   const program = [process.execPath, '--disable-warning=ExperimentalWarning', fileURLToPath(new URL('./main.ts', import.meta.url)), 'up', ...upArgs];
-  // The PATH of this shell, so the service finds idb, Maestro and Xcode's tools the same way.
   const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: 'en_US.UTF-8', HANGAR_NO_OPEN: '1' };
   if (process.env.HANGAR_HOME) {
     env.HANGAR_HOME = process.env.HANGAR_HOME;
@@ -60,7 +55,6 @@ export async function installService(upArgs: string[]): Promise<void> {
   await run('launchctl', ['bootstrap', domain(), PLIST]);
   console.log(`Installed ${PLIST}. Hangar now starts at login and restarts if it stops.\nLog: ${log}\n`);
 
-  // Show the sign-in link the service prints once its devices are up.
   for (let i = 0; i < 600; i++) {
     const text = (await readFile(log, 'utf8').catch(() => '')).slice(since);
     const link = /Sign in as admin:\s+(\S+)/.exec(text);

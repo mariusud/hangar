@@ -1,6 +1,3 @@
-// Milestone 1 done list, on real simulators on this Mac. Run with `pnpm e2e`.
-// Set HANGAR_E2E_APP to a simulator .app to also check install and the wipe.
-
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -35,9 +32,7 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
     step('leased');
     assert.equal(lease.info.state, 'active');
 
-    // With one device, a second client queues instead of getting the same device.
     const bobLease = bob.lease({ model: 'iPhone 17' }, { autoRenew: false });
-    // Awaited below; this keeps a teardown after an earlier failure from hiding that failure.
     bobLease.catch(() => {});
     await new Promise((r) => setTimeout(r, 1500));
     const bobs = await bob.leases();
@@ -47,7 +42,6 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
     const png = await lease.screenshot();
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
 
-    // Settings in Norwegian checks the language preset; it applies from the next launch.
     await lease.language('com.apple.Preferences', 'nb-NO');
     await lease.launch('com.apple.Preferences');
     await lease.waitFor({ label: 'Generelt', role: 'button' }, 10_000);
@@ -57,7 +51,6 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
     await lease.tap({ label: 'Generelt', role: 'button' });
     await lease.waitFor({ label: 'Om' }, 5000);
 
-    // Device presets. Language takes effect on the app's next launch.
     step('appearance');
     await lease.appearance('dark');
     await lease.appearance('light');
@@ -80,7 +73,6 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
     await lease.release();
     step('released; waiting for bob');
 
-    // Bob gets a fresh device once Alice's is wiped and replaced.
     const second = await bobLease;
     step('bob active');
     assert.equal(second.info.state, 'active');

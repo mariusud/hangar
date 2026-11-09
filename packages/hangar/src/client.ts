@@ -1,5 +1,3 @@
-// Client commands: login, lease, screenshot, ui, tap, type, install, launch, open-url, release, watch.
-
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -92,7 +90,6 @@ async function currentLease(client: Hangar, explicit: string | undefined): Promi
   );
 }
 
-// One command per thing that needs a device: it makes a token for it and puts it where it goes.
 export async function connect(target: string | undefined): Promise<void> {
   const targets = ['claude', 'cursor', 'ci'];
   if (!target || !targets.includes(target)) {

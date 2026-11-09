@@ -83,7 +83,7 @@ is useless. Taps, keys and text go on a reliable channel, so a lost key-up canno
 Metro traffic stays on the broker's tunnel. It is a few MB per reload and is not latency bound
 like video.
 
-Measured first, per AGENTS.md. `bench/stream.baseline.json` (M4 Pro, 2026-11-06) splits a scroll
+Measured first. `bench/stream.baseline.json` (M4 Pro, 2026-11-06) splits a scroll
 into its parts:
 
 | Part | p50 | p95 |

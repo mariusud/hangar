@@ -1,5 +1,3 @@
-// Hangar console. Plain JavaScript, no build step.
-
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
 const who = document.getElementById('who');
@@ -199,9 +197,6 @@ async function devicesView() {
   cleanup = () => clearInterval(t);
 }
 
-// Decodes the agent's H.264 frame records (u8 flags, f64 capture ms, u16 width, u16 height,
-// Annex B) with WebCodecs and draws each frame as soon as it is decoded. Timings per frame go to
-// window.hangarStats for bench/stream.
 function h264View(canvas, askKeyframe) {
   const ctx = canvas.getContext('2d');
   const received = new Map();
@@ -254,7 +249,6 @@ function h264View(canvas, askKeyframe) {
   };
 }
 
-// The codec string (avc1.PPCCLL) from the first SPS in an Annex B keyframe.
 function avcCodec(data) {
   for (let i = 0; i + 7 < data.length; i++) {
     if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1 && (data[i + 3] & 0x1f) === 7) {
@@ -321,7 +315,6 @@ async function leaseView(id) {
   };
   const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
 
-  // Pointer: a short press is a tap, a drag is a swipe. Coordinates are 0 to 1.
   let down = null;
   const norm = (e) => {
     const r = screen.getBoundingClientRect();
@@ -361,7 +354,6 @@ async function leaseView(id) {
     }
   });
 
-  // Keep the lease alive while this page is open and visible.
   const renew = setInterval(() => {
     if (document.visibilityState === 'visible') api('POST', `/v1/leases/${id}/renew`).catch(() => {});
   }, 60_000);
@@ -436,7 +428,6 @@ async function leaseView(id) {
   screen.focus();
 }
 
-// Every device at once, for operators: what each holder is doing, with a live picture.
 async function fleetView() {
   const grid = h('div', { class: 'fleet' });
   const count = h('p', { class: 'muted' });
@@ -530,8 +521,6 @@ async function connectView() {
   );
 }
 
-// Approves `hangar login` on another computer. The token only goes to a loopback address, so a
-// crafted link cannot send it anywhere else.
 function cliLoginView() {
   const q = new URLSearchParams(location.search);
   let callback = null;
@@ -566,7 +555,6 @@ async function peopleView() {
   const status = h('p', { class: 'muted' });
   const role = h('select', {}, h('option', { value: 'member' }, 'Member: uses devices'), h('option', { value: 'operator' }, 'Operator: runs Hangar, can upload apps'));
   const save = (fn) => fn().then(() => peopleView(), (x) => (status.textContent = x.message));
-  // Only shown once there is a second team: one-team setups never see the concept.
   const teamPicker = (p) => h('select', { onchange: (e) => save(() => api('PUT', `/v1/people/${encodeURIComponent(p.name)}/team`, { team: e.target.value })) },
     ...teams.map((t) => h('option', { value: t.id, selected: t.id === p.team }, t.name)));
   const manyTeams = teams.length > 1;
@@ -607,8 +595,6 @@ async function peopleView() {
 }
 
 render();
-
-// Recordings: start one while testing, stop it, and paste the link into the bug report.
 
 function recordButton(leaseId, out) {
   let recording = false;
@@ -689,7 +675,6 @@ async function recordingView(id) {
     }
   });
 
-  // Highlights the step that was last done at the video's current time.
   const steps = timeline.map((e) => h('button', { class: e.failed ? 'step error' : 'step', title: e.failed ?? '', onclick: () => seek(e.at) }, h('span', { class: 'muted' }, seconds(e.at)), ' ', e.what, e.failed ? ` (failed: ${e.failed})` : ''));
   video.addEventListener('timeupdate', () => {
     const now = video.currentTime * 1000;

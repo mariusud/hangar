@@ -1,7 +1,3 @@
-// hangar run ios: like `expo run:ios`, on a leased simulator. Builds the app here (or takes --app),
-// starts or reuses Metro here, leases a device, carries the device's Metro connections back to
-// this machine, installs, launches and opens the live screen. Ctrl-C releases the device.
-
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,9 +7,7 @@ import { parseArgs, promisify } from 'node:util';
 import { Hangar, HangarError, openInBrowser, runEspresso, runMaestro, runXcuitest, type Lease, type MaestroRun } from './client/index.ts';
 
 const run = promisify(execFile);
-// Everything this command started, stopped on Ctrl-C: xcodebuild, Metro.
 const children: ChildProcess[] = [];
-// Set once the command is stopping, so nothing starts after the others were stopped.
 let stopped = false;
 
 export const RUN_HELP = `  hangar run ios [--app App.app] [--port 8081] [--scheme S] [--model M]
@@ -105,7 +99,6 @@ async function report(result: MaestroRun, junit: string | undefined, suite: stri
   if (junit) {
     await writeFile(junit, result.junit);
   }
-  // On GitHub Actions, the job's summary page gets the counts and the failing tests.
   if (process.env.GITHUB_STEP_SUMMARY) {
     const failing = result.flows.filter((f) => f.status !== 'passed').map((f) => `| ${f.flow} | ${f.status} | ${f.recording ? `[recording](${f.recording})` : ''} |`);
     const table = failing.length ? `\n| Test | Result | |\n|---|---|---|\n${failing.join('\n')}\n` : '';
@@ -125,8 +118,6 @@ async function project(root: string): Promise<Project> {
   return { root, isExpo: Boolean(deps.expo), hasDevClient: Boolean(deps['expo-dev-client']) };
 }
 
-// Builds the Debug simulator app with xcodebuild in Xcode's usual DerivedData, so builds stay
-// incremental across runs and with Xcode itself.
 async function build(p: Project, scheme: string | undefined): Promise<string> {
   const ios = join(p.root, 'ios');
   if (!existsSync(ios)) {
@@ -169,7 +160,6 @@ async function metroRunning(port: number): Promise<boolean> {
   }
 }
 
-// Starts Metro on this machine's loopback only, unless one is already running on the port.
 async function metro(p: Project, port: number): Promise<ChildProcess | null> {
   if (await metroRunning(port)) {
     process.stderr.write(`Using the Metro already running on port ${port}.\n`);
@@ -208,8 +198,6 @@ function stopChildren(): void {
   }
 }
 
-// Build and Metro start side by side; when one fails, the other is stopped, or Metro would keep
-// the command running after it printed the error.
 async function buildWithMetro(build: Promise<string> | string, metroStarted: Promise<unknown>): Promise<string> {
   try {
     const [app] = await Promise.all([build, metroStarted]);
@@ -220,7 +208,6 @@ async function buildWithMetro(build: Promise<string> | string, metroStarted: Pro
   }
 }
 
-// Ctrl-C stops what this command started and releases the lease it took (not one passed in).
 function stopOnCtrlC(lease: () => Lease | null): void {
   let stopping = false;
   process.on('SIGINT', () => {
@@ -240,8 +227,6 @@ function stopOnCtrlC(lease: () => Lease | null): void {
   });
 }
 
-// Builds the debug APK with the project's Gradle wrapper. Gradle keeps its own build cache, so
-// later runs are incremental.
 async function buildApk(p: Project): Promise<string> {
   const dir = join(p.root, 'android');
   if (!existsSync(join(dir, 'gradlew'))) {
@@ -270,8 +255,6 @@ async function buildApk(p: Project): Promise<string> {
   return join(out, apk);
 }
 
-// hangar run android: the same as run ios, on a leased emulator. A debug build loads from
-// localhost:8081 on the device, which the agent forwards with adb reverse to the tunnel.
 export async function runAndroid(args: string[]): Promise<void> {
   const { values } = parseArgs({ args, options: { app: { type: 'string' }, port: { type: 'string' }, lease: { type: 'string' } } });
   const p = await project(process.cwd());
@@ -286,7 +269,6 @@ export async function runAndroid(args: string[]): Promise<void> {
   process.stderr.write(`Installing ${basename(apk)}...\n`);
   const { bundleId } = await lease.install(apk);
   await lease.useMetro(bundleId);
-  // An Expo dev client starts in its launcher; its deep link opens the bundle directly.
   const slug = p.hasDevClient ? await expoSlug(p.root) : null;
   if (slug) {
     await lease.openUrl(`exp+${slug}://expo-development-client/?url=${encodeURIComponent('http://localhost:8081')}`);
@@ -300,13 +282,11 @@ export async function runAndroid(args: string[]): Promise<void> {
   await new Promise(() => {});
 }
 
-// The dev client's URL scheme is exp+<slug>, from app.json. A dynamic app.config.js is not read.
 async function expoSlug(root: string): Promise<string | null> {
   const app = JSON.parse(await readFile(join(root, 'app.json'), 'utf8').catch(() => '{}')) as { expo?: { slug?: string } };
   return app.expo?.slug ?? null;
 }
 
-// `raw` for a string value, `json` for arrays and dictionaries.
 async function plist(app: string, key: string, format: 'raw' | 'json'): Promise<string | null> {
   try {
     return (await run('plutil', ['-extract', key, format, '-o', '-', join(app, 'Info.plist')])).stdout.trim();
@@ -326,8 +306,7 @@ export async function runIos(args: string[]): Promise<void> {
   let lease: Lease | null = null;
   stopOnCtrlC(() => (values.lease ? null : lease));
 
-  // Build and Metro run side by side. The lease comes after: a long build would outlast the
-  // lease's idle timeout, and a warm device takes seconds.
+  // The lease comes after the build: a long build would outlast the lease's idle timeout.
   const app = await buildWithMetro(values.app ?? build(p, values.scheme), metro(p, port));
   lease = values.lease ? client.attach(values.lease) : await client.lease(values.model ? { model: values.model } : {}, { via: 'hangar run ios' });
   const bundleId = await plist(app, 'CFBundleIdentifier', 'raw');
@@ -339,7 +318,6 @@ export async function runIos(args: string[]): Promise<void> {
   process.stderr.write(`Installing ${basename(app)}...\n`);
   await lease.install(app);
   await lease.useMetro(bundleId);
-  // An Expo dev client starts in its launcher; its deep link opens the bundle directly.
   const schemes = (JSON.parse((await plist(app, 'CFBundleURLTypes', 'json')) ?? '[]') as { CFBundleURLSchemes?: string[] }[]).flatMap((t) => t.CFBundleURLSchemes ?? []);
   const devClient = p.hasDevClient ? schemes.find((s) => s.startsWith('exp+')) : undefined;
   if (devClient) {
@@ -355,9 +333,7 @@ export async function runIos(args: string[]): Promise<void> {
   await new Promise(() => {});
 }
 
-// The app registers with Metro's inspector over the tunnel once its JavaScript runs. The link
-// uses 127.0.0.1: Expo's dev server drops debugger sockets whose Origin host is not its own
-// (it serves on 127.0.0.1), and the usual localhost link fails without a message.
+// 127.0.0.1, not localhost: Expo's dev server drops debugger sockets whose Origin host is not its own.
 export async function devtoolsUrl(port: number, bundleId: string, waitMs = 60_000): Promise<string | null> {
   const base = `http://127.0.0.1:${port}`;
   const until = Date.now() + waitMs;

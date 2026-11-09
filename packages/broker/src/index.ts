@@ -23,7 +23,6 @@ export { Db } from './db.ts';
 export { oidcFromEnv, type OidcConfig } from './oidc.ts';
 export { s3FromEnv, type S3Config } from './store.ts';
 
-// A token for `hangar join` on another Mac. It does not expire.
 export function mintHostToken(db: Db): string {
   return auth.mintToken(db, 'host', { label: 'join' });
 }
@@ -45,7 +44,6 @@ export type Broker = {
   url: string;
   attach(link: HostLink): { message(m: AgentMessage): void; closed(): void };
   welcomeLink(): string;
-  // An API token for the first operator, for the CLI on the Mac that runs the broker.
   adminToken(label: string): string;
   joinToken(): string;
   close(): Promise<void>;
@@ -57,7 +55,6 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   const hosts = new Hosts();
   const leases = new Leases(db, hosts);
   hosts.onChange = () => void leases.tick();
-  // A lease that ended while its agent was away (or before a broker restart) is ended there too.
   hosts.onHello = (held, link) => {
     for (const leaseId of held) {
       const lease = db.getLease(leaseId);
@@ -70,8 +67,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
 
   let url = '';
   let port = opts.port;
-  // Paths agents fetch from (artifacts, recording uploads) go out without a host. Each agent
-  // resolves them against the address it reached the broker at, local or across the network.
+  // Paths agents fetch from go out without a host; each agent resolves them against the address it reached the broker at.
   const internalUrl = (): string => '';
   const store = new Store(opts.dataDir, opts.s3);
   const recordings = new Recordings(db, leases, store, internalUrl);
@@ -120,7 +116,6 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     leases,
     url,
     attach: (link) => hosts.attach(link),
-    // A one-use sign-in link for the first operator. Creates the account on first use of `up`.
     joinToken: () => mintHostToken(db),
     adminToken: (label) => {
       const admin = db.accounts().find((a) => a.role === 'operator') ?? auth.createAccount(db, 'admin', 'operator');

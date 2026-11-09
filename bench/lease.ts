@@ -1,13 +1,3 @@
-// bench/lease: from asking for a device to using it, through the real broker and agent: the
-// lease is active, then a screenshot, then the accessibility tree. The target is a p95 under 2 s
-// from the warm pool (milestone 1).
-//
-// Each trial waits until the pool has a ready device again, so it measures a warm lease. It also
-// reports how long the pool takes to replace a released device (delete, clone, boot), which is
-// the time a second lease right after the first would wait.
-//
-//   pnpm bench:lease
-
 import { start } from '../e2e/harness.ts';
 
 const TRIALS = Number(process.env.TRIALS ?? 10);

@@ -4,11 +4,10 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-# The address people and Macs reach Hangar at. Links in the console and the CLI use it.
+# The address people and Macs reach Hangar at.
 url: https://hangar.example.com
 
-# SQLite, builds and recordings live on this volume. One replica only: the broker keeps leases
-# and runs in its own process.
+# SQLite, builds and recordings live on this volume. One replica only.
 storage:
   size: 50Gi
   storageClassName: ""
@@ -18,7 +17,7 @@ ingress:
   className: ""
   host: hangar.example.com
   tlsSecretName: ""
-  # Agents, live screens and the Metro tunnel hold WebSockets open for hours. For ingress-nginx:
+  # WebSockets stay open for hours. For ingress-nginx:
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"

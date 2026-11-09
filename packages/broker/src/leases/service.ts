@@ -1,4 +1,3 @@
-// Ties the lease machine, the database and the hosts together. All clock reads happen here.
 
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -32,8 +31,6 @@ export type LeaseView = {
   expiresAt: number | null;
   createdAt: number;
   owner: string;
-  // How the lease was taken ("Claude Code over MCP", "Run 3f2a, shard 2 of 3") and the last thing
-  // its holder did. Kept in memory only, for the Fleet page.
   via: string | null;
   activity: string | null;
   activityAt: number | null;
@@ -41,7 +38,6 @@ export type LeaseView = {
 
 type Status = { via: string | null; activity: string | null; activityAt: number | null };
 
-// A short line for the Fleet page, or null for ops that only look at the screen.
 export function describeOp(o: Op): string | null {
   switch (o.op) {
     case 'actions': {
@@ -92,7 +88,6 @@ export class Leases {
 
   create(p: Principal, cls: DeviceClass, opts: { ttlSeconds?: number; maxSeconds?: number; via?: string } = {}): m.Lease {
     const offers = this.hosts.offers();
-    // A declared image is on offer from every iOS host at once; the lease queues while it builds.
     const declared = this.db.images().find((i) => i.name.toLowerCase() === cls.image?.toLowerCase());
     if (declared) {
       for (const o of this.hosts.offers()) {
@@ -165,9 +160,7 @@ export class Leases {
     return this.end(this.get(p, id), 'released', p.accountId);
   }
 
-  // Runs one device op for the lease holder. The agent maps the lease to a device itself.
   async op(p: Principal, id: string, body: Op): Promise<{ result?: unknown; binary?: Buffer }> {
-    // An operator watching someone else's device neither keeps it alive nor shows in its timeline.
     const found = this.get(p, id);
     const isHolder = found.principalId === p.accountId;
     const lease = isHolder ? wrap(() => m.touch(found, this.now())) : found;
@@ -179,14 +172,12 @@ export class Leases {
       throw new ApiError(409, 'LEASE_NOT_ACTIVE', 'This lease has no device yet.');
     }
     const startedAt = this.now();
-    // The Fleet page shows what is happening now, so the activity is set when the op starts.
     const activity = isHolder ? describeOp(body) : null;
     const status = this.status.get(lease.id);
     if (activity && status) {
       status.activity = activity;
       status.activityAt = startedAt;
     }
-    // A recording's stop waits for the host to upload the video.
     const timeout = body.op === 'maestro' ? 31 * 60_000 : body.op === 'install' || body.op === 'recordStop' ? 300_000 : 60_000;
     const res = await this.hosts
       .request(deviceId, (rid) => ({ type: 'op', id: rid, leaseId: lease.id, body }), timeout)
@@ -197,7 +188,6 @@ export class Leases {
       throw new ApiError(422, res.error.code, res.error.message);
     }
     if (isHolder) {
-      // Recordings keep a timeline of what was done.
       this.events.emit('op', lease.id, body, startedAt, res.result);
     }
     return { result: res.result, ...(res.binary ? { binary: Buffer.from(res.binary, 'base64') } : {}) };
@@ -234,7 +224,6 @@ export class Leases {
     this.events.emit('any', lease);
   }
 
-  // Ends what is due, then hands ready devices to queued leases. Safe to call often.
   async tick(): Promise<void> {
     if (this.ticking || this.stopped) {
       return;
@@ -285,7 +274,6 @@ export class Leases {
     try {
       this.db.updateLease(lease);
     } catch {
-      // The unique index refused it: the device is already held. Leave the lease queued.
       return;
     }
     this.emit(lease);

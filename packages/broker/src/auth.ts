@@ -1,4 +1,3 @@
-// Tokens, built-in accounts and sessions. Tokens are opaque, shown once, and stored as SHA-256.
 
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -97,7 +96,6 @@ export function readCookie(header: string | undefined, name: string): string | n
   return null;
 }
 
-// Resolves the caller from a bearer token or the console session cookie.
 export function authenticate(
   db: Db,
   headers: { authorization?: string; cookie?: string },

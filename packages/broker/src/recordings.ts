@@ -1,9 +1,3 @@
-// Recordings: the video of a lease, the device's app log, a last screenshot, and the actions that
-// were taken, with when. A recording becomes a link a tester pastes into a bug report.
-//
-// The host writes the video (the stream's own H.264, in an MP4) and uploads the files when the
-// recording stops, with one-use URLs. The broker keeps the action timeline itself, because every
-// action passes through it. Files live in <dataDir>/recordings/<id>/ and expire after 14 days.
 
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
@@ -30,8 +24,6 @@ export const PART_FILES: Record<RecordingPart, { file: string; type: string; lim
 const RETENTION_MS = 14 * 24 * 3600_000;
 const SAVE_TIMEOUT_MS = 30 * 60_000;
 
-// One step on the timeline, at ms since the recording started. Typed text is left out, since
-// tests type passwords; screenshots and tree reads are left out as noise.
 export type TimelineEvent = { at: number; what: string; failed?: string };
 
 export class Recordings {
@@ -59,7 +51,6 @@ export class Recordings {
     });
   }
 
-  // `record: true` on a new lease: the recording starts as soon as the device is ready.
   want(p: Principal, leaseId: string): void {
     this.db.insertRecording({ id: randomUUID(), leaseId, accountId: p.accountId, state: 'waiting', startedAt: null, endedAt: null, bytes: 0, error: null, device: null });
   }
@@ -82,12 +73,10 @@ export class Recordings {
       throw new ApiError(409, 'NOT_RECORDING', 'This lease is not being recorded.');
     }
     this.db.updateRecording(rec.id, { state: 'saving', endedAt: Date.now() });
-    // The host uploads the files before it answers.
     try {
       await this.saveTimeline(leaseId);
       await this.leases.op(p, leaseId, { op: 'recordStop' });
     } catch (err) {
-      // If the lease ended meanwhile, the host is saving the files on its way out.
       if (this.db.getLease(leaseId)?.state !== 'ended') {
         this.db.updateRecording(rec.id, { state: 'failed', error: (err as Error).message });
       }
@@ -104,7 +93,6 @@ export class Recordings {
     return rec;
   }
 
-  // The store key of one part, such as recordings/<id>/video.mp4.
   key(id: string, part: RecordingPart | 'timeline'): string {
     return `recordings/${id}/${part === 'timeline' ? 'timeline.json' : PART_FILES[part].file}`;
   }
@@ -126,7 +114,6 @@ export class Recordings {
     this.db.updateRecording(id, { state: 'deleted' });
   }
 
-  // PUT from the host, with the one-use token the broker gave it for this part.
   async upload(req: IncomingMessage, id: string, part: string, token: string): Promise<void> {
     const row = auth.lookupToken(this.db, token, Date.now());
     if (!row || row.kind !== 'upload' || row.label !== `${id}:${part}` || !this.db.useToken(row.hash, Date.now())) {
@@ -164,8 +151,6 @@ export class Recordings {
     }
   }
 
-  // Deletes what is past its retention, and fails recordings whose host never sent the files
-  // (it went offline, or its upload failed). Runs at start and every hour.
   async sweep(now = Date.now()): Promise<void> {
     for (const rec of this.db.stuckRecordings(now - SAVE_TIMEOUT_MS)) {
       this.db.updateRecording(rec.id, { state: 'failed', error: 'The Mac did not send the files.' });
@@ -183,7 +168,6 @@ export class Recordings {
       throw new ApiError(404, 'LEASE_NOT_FOUND', `No lease ${leaseId}.`);
     }
     if (lease.state !== 'active') {
-      // It starts when the lease becomes active.
       return rec;
     }
     const account = this.db.getAccount(lease.principalId);
@@ -209,7 +193,6 @@ export class Recordings {
     return this.get(rec.id);
   }
 
-  // Releasing the lease ends its recording. The host uploads the files before it wipes the device.
   private async leaseEnded(leaseId: string): Promise<void> {
     const waiting = this.db.recordingOf(leaseId, ['waiting']);
     if (waiting) {
@@ -229,7 +212,6 @@ export class Recordings {
     if (!t || !what) {
       return;
     }
-    // A list of actions stops at the first that fails; the timeline says which and why.
     const failed = body.op === 'actions' && Array.isArray(result) ? (result as { ok: boolean; error?: { message: string } }[]).find((r) => !r.ok) : undefined;
     t.events.push({ at: Math.max(0, at - t.startedAt), what, ...(failed ? { failed: failed.error?.message ?? 'failed' } : {}) });
   }
@@ -246,7 +228,6 @@ export class Recordings {
   }
 }
 
-// Points are fractions of the screen; the timeline shows them as percentages from the top left.
 function point(p: [number, number]): string {
   return `(${Math.round(p[0] * 100)}%, ${Math.round(p[1] * 100)}%)`;
 }

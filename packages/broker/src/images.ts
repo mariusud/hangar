@@ -1,5 +1,3 @@
-// Device images (milestone 4): a declared state each host builds once and keeps clones of warm.
-// The broker stores only the declaration; the builds it names are already in the build store.
 
 import { createHash } from 'node:crypto';
 import type { BrokerMessage, DeviceImage } from '@hangar/protocol';
@@ -11,8 +9,7 @@ export function imageId(spec: ImageSpec): string {
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
-// Download links are minted per message: each is good for one download within an hour, which
-// covers a host building every image right after it connects.
+// Each link is good for one download within an hour, enough for a host building every image after it connects.
 export function imagesMessage(db: Db, internalUrl: string): BrokerMessage {
   const images: DeviceImage[] = db.images().map((spec) => {
     const image: DeviceImage = {

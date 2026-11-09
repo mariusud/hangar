@@ -773,7 +773,7 @@ merged the driver packages into the agent and the client into the CLI.
 
 ```
 hangar/
-  AGENTS.md  README.md  ROADMAP.md  CONTRIBUTING.md  SECURITY.md  LICENSE  NOTICE
+  README.md  ROADMAP.md  CONTRIBUTING.md  SECURITY.md  LICENSE  NOTICE
   Dockerfile  action.yml
   packages/
     protocol/             types and the wire format, shared by every package

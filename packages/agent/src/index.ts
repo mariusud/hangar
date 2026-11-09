@@ -1,5 +1,3 @@
-// The host agent: owns the simulators on this Mac, keeps a warm pool, and serves only leased devices.
-
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -33,12 +31,9 @@ const run = promisify(execFile);
 export type AgentOptions = {
   send: (m: AgentMessage) => void;
   log?: (line: string) => void;
-  // Most devices this Mac runs at once. Defaults to what its memory allows.
   maxDevices?: number;
-  // Booted devices kept ready and unleased.
   warm?: number;
   model?: string;
-  // Where the broker is, for the paths it sends to download builds and upload recordings.
   brokerUrl: string;
 };
 
@@ -46,15 +41,12 @@ type Device = AgentDevice & { leaseId: string | null; screen: Frame | null };
 
 type Golden = { udid: string; model: string; os: string };
 
-// A declared image and the golden device built from it on this Mac. `failed` keeps a broken
-// declaration from being rebuilt on every message; declaring it again with a change retries.
 type ImageEntry = { image: DeviceImage; golden: Golden | null; failed: boolean };
 
 type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> | null; wantH264: boolean };
 
 type Recording = { dir: string; uploads: { video: string; log: string; screenshot: string }; log: sim.AppLog; finished: Promise<void> | null };
 
-// Action points are fractions of the screen, so [0.5, 0.5] is the middle.
 export function onScreen(p: [number, number]): void {
   if (!p.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
     throw new OpError('POINT_OFF_SCREEN', `The point [${p.join(', ')}] is off the screen. Points are fractions of the screen from 0 to 1, such as [0.5, 0.8].`);
@@ -69,7 +61,7 @@ export class OpError extends Error {
   }
 }
 
-// About 2.5 GB per booted simulator, keeping 8 GB for macOS and everything else.
+// About 2.5 GB per booted simulator, keeping 8 GB for macOS.
 export function defaultMaxDevices(memoryBytes = totalmem(), cores = cpus().length): number {
   const byMemory = Math.floor((memoryBytes / 2 ** 30 - 8) / 2.5);
   return Math.max(1, Math.min(byMemory, Math.floor(cores / 2)));
@@ -102,9 +94,7 @@ export class Agent {
   }
 
   async start(): Promise<void> {
-    // Build the screen helper now, so the first viewer does not wait for the compiler.
     sim.screenBinary().catch((err: Error) => this.log(`${err.message} Streams will use JPEG.`));
-    // Devices left from an earlier run may hold someone's data. They are deleted, never reused.
     await sim.stopLeftoverCompanions();
     for (const d of await sim.listOwned()) {
       if (!d.name.startsWith(`${sim.NAME_PREFIX}golden-`)) {
@@ -118,8 +108,6 @@ export class Agent {
     void this.fill();
   }
 
-  // The first message on every connection, again after a reconnect, so the broker can match
-  // its leases to the devices that still hold them.
   async hello(): Promise<void> {
     if (!this.golden) {
       return;
@@ -158,7 +146,6 @@ export class Agent {
     return g ? [...this.images.values()].filter((e) => !e.failed).map((e) => ({ model: g.model, os: g.os, image: e.image.name })) : [];
   }
 
-  // Images are offered as soon as they are declared, so leases for them queue while they build.
   private async setImages(images: DeviceImage[]): Promise<void> {
     const offered = JSON.stringify(this.imageOffers());
     const wanted = new Map(images.map((i) => [i.name, i]));
@@ -191,8 +178,6 @@ export class Agent {
       return;
     }
     const owned = await sim.listOwned();
-    // The base golden's model and runtime are part of the name: after an Xcode or runtime update
-    // the image is built again, not reused from the old runtime.
     const goldenName = (e: ImageEntry): string => `${sim.NAME_PREFIX}golden-image-${e.image.id}-${base.model.replace(/\s+/g, '-')}-${base.os}`;
     const names = new Set([...this.images.values()].map(goldenName));
     for (const d of owned) {
@@ -270,8 +255,6 @@ export class Agent {
     this.opts.send({ type: 'inventory', devices: this.inventory() });
   }
 
-  // Keeps `warm` plain devices ready, and `warm` of each built image, without going over
-  // `maxDevices`. Plain devices come first.
   private async fill(): Promise<void> {
     if (this.filling || this.stopped || !this.golden) {
       return;
@@ -298,8 +281,6 @@ export class Agent {
         this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, image, state: 'wiping', leaseId: null, screen: null });
         try {
           await sim.boot(udid);
-          // The first tree read and screenshot on a new device take seconds; pay that here, so
-          // a lease's first call is as fast as its later ones.
           await sim.describe(udid).catch(() => {});
           await sim.screenshot(udid, 'jpeg', 800).catch(() => {});
           if (this.stopped) {
@@ -379,7 +360,6 @@ export class Agent {
     }
     if (codec === 'h264') {
       st.wantH264 = false;
-      // A recording keeps the helper running with nobody watching.
       if (!this.recordings.has(leaseId)) {
         void st.h264?.then((h) => h.stop()).catch(() => {});
         st.h264 = null;
@@ -390,7 +370,6 @@ export class Agent {
     }
   }
 
-  // Finishes any recording, then stops the screen helper and the JPEG loop.
   private async endStreams(leaseId: string): Promise<void> {
     await this.finishRecording(leaseId).catch((err: Error) => this.log(`Could not save the recording of lease ${leaseId}: ${err.message}`));
     const st = this.streams.get(leaseId);
@@ -404,8 +383,6 @@ export class Agent {
     }
   }
 
-  // The native helper: H.264 frames only when the screen changes, sent on only while a viewer
-  // wants them. One helper per lease serves both viewers and the recording.
   private helper(leaseId: string): Promise<sim.ScreenStream> {
     const st = this.streamOf(leaseId);
     if (st.h264) {
@@ -440,8 +417,6 @@ export class Agent {
     return started;
   }
 
-  // If the helper cannot run (a new Xcode changed the private API, no Swift toolchain), the
-  // broker moves viewers to JPEG.
   private h264Failed(leaseId: string, message: string): void {
     this.log(`H.264 stream failed, falling back to JPEG: ${message}`);
     this.streamOf(leaseId).wantH264 = false;
@@ -461,7 +436,6 @@ export class Agent {
     }
   }
 
-  // Recording: the helper writes its frames to an MP4 while the app log streams to a file.
   private async startRecording(d: Device, leaseId: string, uploads: Recording['uploads']): Promise<void> {
     if (this.recordings.has(leaseId)) {
       throw new OpError('ALREADY_RECORDING', 'This lease is already being recorded.');
@@ -477,9 +451,6 @@ export class Agent {
     this.recordings.set(leaseId, { dir, uploads, log: sim.appLog(d.deviceId, join(dir, 'log.ndjson')), finished: null });
   }
 
-  // Finishes the files and uploads them, the video last. The device is still there, so the last
-  // screenshot is current.
-  // A stop and the end of the lease can race; both wait for the same save.
   private finishRecording(leaseId: string): Promise<void> {
     const rec = this.recordings.get(leaseId);
     if (!rec) {
@@ -519,7 +490,6 @@ export class Agent {
     }
   }
 
-  // JPEG frames as fast as the simulator can take screenshots, for browsers without WebCodecs.
   private async streamJpeg(leaseId: string): Promise<void> {
     const st = this.streamOf(leaseId);
     if (st.jpeg) {
@@ -543,7 +513,6 @@ export class Agent {
     }
   }
 
-  // A device that was leased is deleted, and a fresh clone of the golden device replaces it.
   private async wipe(d: Device): Promise<void> {
     d.leaseId = null;
     d.state = 'wiping';
@@ -657,7 +626,6 @@ export class Agent {
     }
   }
 
-  // Maestro runs here, next to the simulator, on this lease's device only.
   private async screen(d: Device): Promise<Frame> {
     if (!d.screen) {
       d.screen = (await sim.describe(d.deviceId)).screen;
@@ -745,10 +713,6 @@ export class Agent {
   }
 }
 
-// PUTs a file to a one-use URL from the broker. A missing log or screenshot is left out; a
-// missing video means the recording failed.
-// Runs Maestro flows from a base64 tar against one device, named the way Maestro's --device
-// takes it: a simulator UDID or an adb serial.
 export async function maestro(device: string, archive: string, flows: string[], env: Record<string, string>): Promise<MaestroResult> {
   if (!flows.length || flows.some((f) => isAbsolute(f) || f.split(/[\\/]/).includes('..'))) {
     throw new OpError('BAD_FLOWS', 'Name one or more flows by their path inside the flows folder.');
@@ -762,7 +726,6 @@ export async function maestro(device: string, archive: string, flows: string[], 
     const root = join(dir, 'flows');
     await mkdir(root);
     await writeFile(join(dir, 'flows.tar'), Buffer.from(archive, 'base64'));
-    // bsdtar refuses absolute paths and .. by default.
     await run('tar', ['-xf', join(dir, 'flows.tar'), '-C', root]);
     const report = join(dir, 'report.xml');
     const args = ['--no-ansi', '--device', device, 'test', ...flows.map((f) => join(root, f)), '--format', 'junit', '--output', report, '--test-output-dir', join(dir, 'debug'), '--flatten-debug-output'];
@@ -786,7 +749,6 @@ export async function maestro(device: string, archive: string, flows: string[], 
   }
 }
 
-// Downloads a build to `path` and checks it against the hash the broker gave.
 export async function download(url: string, sha256: string, path: string): Promise<void> {
   const res = await fetch(url);
   if (!res.ok || !res.body) {
@@ -816,7 +778,6 @@ export async function upload(part: 'video' | 'log' | 'screenshot', url: string, 
     }
     return;
   }
-  // A broker that stops answering must not hold up the wipe that follows.
   const init: RequestInit & { duplex: 'half' } = {
     method: 'PUT',
     headers: { 'content-length': String(size) },

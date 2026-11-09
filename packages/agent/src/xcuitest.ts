@@ -1,7 +1,3 @@
-// XCUITest on a leased simulator: the products of `xcodebuild build-for-testing` (the
-// .xctestrun file, the app and the test runner), run with `test-without-building` against the
-// lease's device only. Results are read from xcodebuild's own output.
-
 import { execFile } from 'node:child_process';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,8 +8,6 @@ import { download, OpError } from './index.ts';
 
 const run = promisify(execFile);
 
-// "Test Case '-[LoginUITests.LoginTests testSignIn]' failed (2.345 seconds)." and, on the lines
-// before it, "/path/File.swift:42: error: -[LoginUITests.LoginTests testSignIn] : XCTAssertTrue failed".
 export function parseXcodebuild(out: string): TestCase[] {
   const cases: TestCase[] = [];
   const errors = new Map<string, string>();
@@ -33,7 +27,6 @@ export function parseXcodebuild(out: string): TestCase[] {
   return cases;
 }
 
-// Items are "Target", "Target/Class" or "Target/Class/testMethod", as -only-testing takes them.
 export function checkItems(items: string[]): void {
   if (!items.length || items.some((t) => !/^\w+(\/\w+){0,2}$/.test(t))) {
     throw new OpError('BAD_TESTS', 'Name tests as Target, Target/Class or Target/Class/testMethod.');

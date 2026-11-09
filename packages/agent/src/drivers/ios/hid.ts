@@ -1,8 +1,3 @@
-// Input, the element tree and screenshots straight from the idb companion over gRPC, on one
-// HTTP/2 session per device. Spawning the idb CLI costs 100 to 300 ms per call; this costs a few
-// milliseconds. Only the few messages Hangar uses are encoded here, by hand, so there is no
-// dependency.
-
 import { connect, type ClientHttp2Session } from 'node:http2';
 import { connect as connectSocket } from 'node:net';
 
@@ -70,8 +65,6 @@ function session(socket: string): ClientHttp2Session {
   return s;
 }
 
-// Sends the events as one call to CompanionService/hid and resolves when the companion has
-// performed them.
 export function send(socket: string, events: HidEvent[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = session(socket).request({ ':method': 'POST', ':path': '/idb.CompanionService/hid', 'content-type': 'application/grpc', te: 'trailers' });
@@ -97,7 +90,6 @@ export function send(socket: string, events: HidEvent[]): Promise<void> {
   });
 }
 
-// One request, one response. Returns the response message's bytes.
 export function unary(socket: string, method: string, body: Buffer = Buffer.alloc(0)): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const req = session(socket).request({ ':method': 'POST', ':path': `/idb.CompanionService/${method}`, 'content-type': 'application/grpc', te: 'trailers' });
@@ -118,7 +110,6 @@ export function unary(socket: string, method: string, body: Buffer = Buffer.allo
         reject(new Error(message || `grpc-status ${status ?? 'missing'}`));
         return;
       }
-      // A gRPC message: u8 compressed flag, u32 length, then the protobuf.
       const all = Buffer.concat(chunks);
       resolve(all.subarray(5, 5 + all.readUInt32BE(1)));
     });
@@ -128,7 +119,6 @@ export function unary(socket: string, method: string, body: Buffer = Buffer.allo
   });
 }
 
-// The bytes of the first length-delimited field `n` in a protobuf message.
 export function bytesField(msg: Buffer, n: number): Buffer {
   let i = 0;
   const readVarint = (): number => {

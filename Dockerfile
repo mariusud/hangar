@@ -1,9 +1,3 @@
-# The Hangar broker alone, for Kubernetes or Docker. Macs join it with `hangar join`.
-#
-#   docker build -t hangar .
-#   docker run -p 7420:7420 -v hangar:/data -e HANGAR_URL=https://hangar.example.com hangar
-#   docker exec <container> hangar join-token
-
 FROM node:22-slim
 ENV HANGAR_HOME=/data NODE_ENV=production
 WORKDIR /hangar

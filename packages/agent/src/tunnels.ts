@@ -1,7 +1,3 @@
-// Metro tunnels: one loopback listener per lease on this Mac, where the leased device reaches it
-// as localhost:<port>. Each connection is carried to the lease holder's machine (their Metro)
-// through the broker.
-
 import { createServer, type Server, type Socket } from 'node:net';
 import type { AgentMessage } from '@hangar/protocol';
 
@@ -19,7 +15,6 @@ export class Tunnels {
     return this.tunnels.get(leaseId)?.port;
   }
 
-  // Answers request `id` with the port, opening the listener on first use.
   start(id: number, leaseId: string, onOpen?: (port: number) => Promise<void>): void {
     const existing = this.tunnels.get(leaseId);
     if (existing) {

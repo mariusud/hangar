@@ -1,5 +1,3 @@
-// Remote MCP over streamable HTTP. Stateless: each request authenticates and gets a server bound
-// to the caller. Tools are thin wrappers over the same lease service the REST API uses.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -54,7 +52,6 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, db: D
 function buildServer(p: auth.Principal, db: Db, leases: Leases, recordings: Recordings, internalUrl: string, publicUrl: string): McpServer {
   const server = new McpServer({ name: 'hangar', version: '0.0.0' });
 
-  // Tools that act on a device accept leaseId, and fall back to the caller's only active lease.
   const pick = (leaseId?: string): string => {
     if (leaseId) {
       return leaseId;

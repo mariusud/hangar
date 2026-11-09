@@ -1,5 +1,3 @@
-// SQLite storage. The partial unique index on leases is what makes double-leasing impossible:
-// a scheduler bug fails the write instead of handing one device to two leases.
 
 import { DatabaseSync } from 'node:sqlite';
 import type { Lease } from './leases/machine.ts';
@@ -97,7 +95,6 @@ create table if not exists audit (
 
 export const DEFAULT_TEAM = 'default';
 export type Team = { id: string; name: string; quota: number | null };
-// `apps` are build hashes, installed in this order.
 export type ImageSpec = { name: string; apps: string[]; locale?: string; appearance?: 'light' | 'dark' };
 
 export type Account = { id: string; name: string; role: 'member' | 'operator'; passwordHash: string | null };
@@ -116,7 +113,6 @@ export type RecordingRow = {
   id: string;
   leaseId: string;
   accountId: string;
-  // saving: the host is uploading the files.
   state: 'waiting' | 'recording' | 'saving' | 'ready' | 'failed' | 'deleted';
   startedAt: number | null;
   endedAt: number | null;
@@ -134,7 +130,6 @@ export class Db {
     this.sql.exec(SCHEMA);
   }
 
-  // Leases
 
   insertLease(lease: Lease): void {
     this.sql
@@ -165,8 +160,7 @@ export class Db {
       .map(parseLease);
   }
 
-  // Every device a lease ever held. Agents replace a used device with a fresh clone under a new
-  // id, so an id in this set is never handed out again.
+  // Replaced devices get a new id, so an id a lease ever held is never handed out again.
   usedDeviceIds(): Set<string> {
     const rows = this.sql.prepare('select distinct device_id from leases where device_id is not null').all();
     return new Set(rows.map((r) => String(r.device_id)));
@@ -176,7 +170,6 @@ export class Db {
     return this.sql.prepare('select data from leases order by rowid desc limit ?').all(limit).map(parseLease);
   }
 
-  // Accounts
 
   insertAccount(a: Account): void {
     this.sql
@@ -215,7 +208,6 @@ export class Db {
     this.sql.prepare('update accounts set password_hash = ? where id = ?').run(hash, id);
   }
 
-  // Tokens and sessions
 
   insertToken(t: TokenRow): void {
     this.sql
@@ -242,8 +234,7 @@ export class Db {
     };
   }
 
-  // Marks a one-use token used. Returns false if it was already used, so two racing requests
-  // cannot both spend it.
+  // Returns false if the token was already used, so racing requests cannot both spend it.
   useToken(hash: string, now: number): boolean {
     const r = this.sql.prepare('update tokens set used_at = ? where hash = ? and used_at is null').run(now, hash);
     return r.changes === 1;
@@ -274,7 +265,6 @@ export class Db {
     this.sql.prepare('delete from sessions where hash = ?').run(hash);
   }
 
-  // Builds
 
   insertBuild(sha256: string, name: string, path: string, size: number): void {
     this.sql
@@ -296,7 +286,6 @@ export class Db {
       .map((r) => ({ sha256: String(r.sha256), name: String(r.name), size: Number(r.size) }));
   }
 
-  // Recordings
 
   insertRecording(r: RecordingRow): void {
     this.sql
@@ -342,7 +331,6 @@ export class Db {
     return this.sql.prepare("select * from recordings where created_at < ? and state != 'deleted'").all(before).map(toRecording);
   }
 
-  // Teams. Every installation has the default team, so one-team setups never see the concept.
 
   teams(): Team[] {
     const rows = this.sql.prepare('select id, name, quota from teams order by name').all().map(toTeam);
@@ -362,7 +350,6 @@ export class Db {
     this.sql.prepare('insert into memberships (account_id, team_id) values (?, ?) on conflict(account_id) do update set team_id = excluded.team_id').run(accountId, teamId);
   }
 
-  // Runs
 
   images(): ImageSpec[] {
     return this.sql.prepare('select data from images order by name').all().map((r) => JSON.parse(String(r.data)));

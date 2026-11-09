@@ -1,13 +1,3 @@
-// bench/stream: what a viewer of the live screen gets, through the real broker and agent.
-//
-// For H.264 and the JPEG fallback it measures input to first changed frame (a scroll), capture to client (H.264
-// frames carry their capture time), frame rate during motion and bandwidth. Decode time is
-// measured in the browser (the console keeps per-frame timings in window.hangarStats).
-//
-//   pnpm bench:stream            print results
-//   pnpm bench:stream --save     also write bench/stream.baseline.json
-//   pnpm bench:stream --check    exit 1 if a p95 is more than 10% worse than the baseline
-
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { Lease } from 'hangar';
@@ -49,8 +39,6 @@ async function viewer(url: string, leaseId: string, token: string, codec: 'h264'
   return { frames, send: (m) => ws.send(JSON.stringify(m)), close: () => ws.close() };
 }
 
-// Waits until no frame has arrived for `ms`. The H.264 helper sends nothing while the screen is
-// still; the JPEG loop never stops, so for JPEG this only waits.
 async function quiet(frames: Frame[], ms: number, codec: 'h264' | 'jpeg'): Promise<void> {
   if (codec === 'jpeg') {
     await sleep(ms);
@@ -77,12 +65,9 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
     process.stderr.write(`${codec} trial ${i + 1}/${TRIALS}\r`);
     const target = await settingsHome(lease);
     await quiet(v.frames, 500, codec);
-    // A JPEG frame of the unchanged home screen; the first one that differs is the change.
     const before = v.frames.at(-1)?.bytes;
     const t0 = Date.now();
     const seen = v.frames.length;
-    // A scroll moves the list on the first finger movement, so the first changed frame measures
-    // Hangar and the simulator, not how long an app takes to load its next screen.
     v.send({ type: 'swipe', from: target, to: [target[0], target[1] - 0.25], durationMs: 300 });
     let first: Frame | undefined;
     for (let k = 0; k < 400 && !first; k++) {
@@ -96,7 +81,7 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
     if (first.capture !== null) {
       toCapture.push(first.capture - t0);
     }
-    // The scroll and its deceleration run for about half a second.
+    // Motion lasts about half a second, hence the doubling below.
     await sleep(600);
     const motion = v.frames.filter((f) => f.at >= first.at && f.at < first.at + 500);
     fps.push(motion.length * 2);
@@ -114,7 +99,6 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
   };
 }
 
-// Opens Settings at its first page and returns the centre of the General row, the tap target.
 async function settingsHome(lease: Lease): Promise<[number, number]> {
   await lease.terminate('com.apple.Preferences').catch(() => {});
   await lease.launch('com.apple.Preferences');

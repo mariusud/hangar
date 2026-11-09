@@ -1,7 +1,3 @@
-// Prometheus metrics at GET /metrics, in the text exposition format, with no client library.
-//
-// Counts and timings only: no names, lease ids or device ids, so the endpoint is safe to leave
-// open to the network's scraper. Gauges are read from the database and the hosts at scrape time.
 
 import type { Op } from '@hangar/protocol';
 import type { Db } from './db.ts';
@@ -79,7 +75,6 @@ export class Metrics {
   constructor(db: Db, hosts: Hosts, leases: Leases) {
     this.db = db;
     this.hosts = hosts;
-    // Renewals emit the lease again; each lease counts once.
     const active = new Set<string>();
     leases.events.on('any', (lease: Lease) => {
       if (lease.state === 'active' && lease.activatedAt && !active.has(lease.id)) {

@@ -1,8 +1,3 @@
-// Sign-in through the team's own identity provider (decision 0004): OpenID Connect with the
-// authorization code flow and PKCE. The broker talks only to the issuer it is configured with.
-//
-// A person who signs in for the first time gets a member account named after their email. With
-// a groups mapping, their team (and operator role) follows the groups claim on every sign-in.
 
 import { createHash, createPublicKey, randomBytes, randomUUID, verify, type JsonWebKey } from 'node:crypto';
 import type { Db } from './db.ts';
@@ -12,14 +7,10 @@ export type OidcConfig = {
   issuer: string;
   clientId: string;
   clientSecret?: string;
-  // Group name to team name. A group mapped to "operator" makes its members operators.
   groups?: Record<string, string>;
-  // Turns off name-and-password sign-in once everyone signs in through the provider.
   disablePasswords?: boolean;
 };
 
-// Reads HANGAR_OIDC_ISSUER, HANGAR_OIDC_CLIENT_ID, HANGAR_OIDC_CLIENT_SECRET, HANGAR_OIDC_GROUPS
-// (JSON, such as {"mobile-qa":"QA","platform":"operator"}) and HANGAR_OIDC_ONLY=1.
 export function oidcFromEnv(env: NodeJS.ProcessEnv = process.env): OidcConfig | undefined {
   if (!env.HANGAR_OIDC_ISSUER || !env.HANGAR_OIDC_CLIENT_ID) {
     return undefined;
@@ -74,7 +65,7 @@ export class Oidc {
     return this.discovery;
   }
 
-  // The URL to send the browser to. `next` is a path on this console, never another site.
+  // `next` is a path on this console, never another site.
   async start(redirectUri: string, next: string): Promise<string> {
     const d = await this.discover();
     const state = b64url(randomBytes(24));
@@ -101,7 +92,6 @@ export class Oidc {
     return url.toString();
   }
 
-  // Exchanges the code and checks the ID token. Returns its claims and where to go next.
   async finish(redirectUri: string, code: string, state: string): Promise<{ claims: Claims; next: string }> {
     const p = this.pending.get(state);
     this.pending.delete(state);
@@ -155,8 +145,6 @@ export class Oidc {
   }
 }
 
-// The account for these claims: found by issuer and subject, else created. Groups, when mapped,
-// set the team and role each time, so a change at the provider shows on the next sign-in.
 export function accountFor(db: Db, config: OidcConfig, claims: Claims): string {
   const name = claims.email ?? claims.preferred_username ?? claims.name ?? claims.sub;
   let accountId = db.identity(config.issuer, claims.sub);

@@ -1,5 +1,3 @@
-// Starts a real broker and agent in this process, on this Mac's simulators, for tests and benchmarks.
-
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
