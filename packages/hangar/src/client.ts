@@ -1,5 +1,6 @@
 // Client commands: login, lease, screenshot, ui, tap, type, install, launch, open-url, release, watch.
 
+import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
@@ -10,6 +11,7 @@ import type { ElementSelector, Point, PrivacyService } from '@hangar/protocol';
 
 export const CLIENT_HELP = `Client
   hangar login <url>                       sign in from this computer (opens the browser)
+  hangar connect claude | cursor | ci       give an agent or a CI job its own token, ready to use
   hangar devices                           list devices
   hangar lease [--android] [--model M] [--os V] [--image NAME] [--hold] [--record] [--purpose TEXT]
                                            lease a device; --hold keeps it until Ctrl-C;
@@ -90,11 +92,56 @@ async function currentLease(client: Hangar, explicit: string | undefined): Promi
   );
 }
 
+// One command per thing that needs a device: it makes a token for it and puts it where it goes.
+export async function connect(target: string | undefined): Promise<void> {
+  const targets = ['claude', 'cursor', 'ci'];
+  if (!target || !targets.includes(target)) {
+    throw new HangarError(0, 'USAGE', `Usage: hangar connect ${targets.join(' | ')}`);
+  }
+  const client = await Hangar.fromEnv();
+  const label = `${target} on ${hostname()}`;
+  const { token } = await client.json<{ token: string }>('POST', '/v1/tokens', { label, ...(target === 'ci' ? { scopes: ['install:upload'] } : {}) });
+  const mcp = `${client.url}/mcp`;
+  if (target === 'claude') {
+    const args = ['mcp', 'add', '--transport', 'http', 'hangar', mcp, '--header', `Authorization: Bearer ${token}`];
+    const added = await new Promise<boolean>((resolve) => execFile('claude', args, (err) => resolve(!err)));
+    if (added) {
+      console.log('Added Hangar to Claude Code. Ask it to "lease an iPhone from hangar".');
+      return;
+    }
+    console.log(`Claude Code is not on this machine. Run this where it is:\n\n  claude ${args.slice(0, -1).join(' ')} "${args.at(-1)}"`);
+    return;
+  }
+  if (target === 'cursor') {
+    console.log(`Put this in .cursor/mcp.json (or ~/.cursor/mcp.json for every project):\n\n${JSON.stringify({ mcpServers: { hangar: { url: mcp, headers: { Authorization: `Bearer ${token}` } } } }, null, 2)}`);
+    return;
+  }
+  console.log(`Add these two secrets to your CI (GitHub: Settings, Secrets and variables, Actions):
+
+  HANGAR_URL    ${client.url}
+  HANGAR_TOKEN  ${token}
+
+Then add this step after your Release simulator build:
+
+  - uses: mariusud/hangar@main
+    with:
+      url: \${{ secrets.HANGAR_URL }}
+      token: \${{ secrets.HANGAR_TOKEN }}
+      app: build/Build/Products/Release-iphonesimulator/MyApp.app
+      flows: .maestro
+      shards: 3
+
+The runner must reach ${client.url}, on the same network or through a VPN.`);
+}
+
 export async function clientCommand(command: string, args: string[]): Promise<boolean> {
   const common = { lease: { type: 'string' as const } };
   switch (command) {
     case 'login':
       await login(args[0]);
+      return true;
+    case 'connect':
+      await connect(args[0]);
       return true;
     case 'devices': {
       const client = await Hangar.fromEnv();

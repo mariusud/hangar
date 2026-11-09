@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Source of how-it-works.gif. Render with: node docs/assets/render.mjs -->
+<!-- Source of how-it-works.gif, recorded from headless Chrome with ffmpeg. -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -39,7 +39,8 @@
   .dev.wiping { background: repeating-linear-gradient(135deg, #2a3038 0 10px, #1b2027 10px 20px); background-size: 200% 200%; animation: wipe 1s linear infinite; }
   @keyframes wipe { to { background-position: 100% 100%; } }
 
-  svg.wires { position: absolute; inset: 0; pointer-events: none; }
+  svg.wires { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+  .mac, .broker, .client { z-index: 1; }
   svg.wires path { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: var(--len); stroke-dashoffset: var(--len); transition: stroke-dashoffset .7s ease-out, opacity .5s; }
   svg.wires path.drawn { stroke-dashoffset: 0; }
   svg.wires path.gone { opacity: 0; }
@@ -51,18 +52,18 @@
 </head>
 <body>
   <div class="col-title" style="left:40px">Who needs a device</div>
-  <div class="col-title" style="left:470px">The broker</div>
-  <div class="col-title" style="left:800px">The Macs you own</div>
+  <div class="col-title" style="left:470px">Device broker</div>
+  <div class="col-title" style="left:800px">Devices</div>
 
   <div class="client" id="agent" style="top:70px; --c: var(--mint)">
     <div class="who"><span class="dot" style="background:var(--mint)"></span>AI agent</div>
     <div class="how">Claude Code, Cursor, any MCP client</div>
-    <div class="cmd mono">mobile_allocate_remote_device</div>
+    <div class="cmd mono">hangar connect claude</div>
   </div>
   <div class="client" id="ci" style="top:256px; --c: var(--sky)">
     <div class="who"><span class="dot" style="background:var(--sky)"></span>CI pipeline</div>
     <div class="how">Maestro or XCUITest on every pull request</div>
-    <div class="cmd mono">hangar run maestro .maestro --shards 3</div>
+    <div class="cmd mono">hangar connect ci</div>
   </div>
   <div class="client" id="dev" style="top:442px; --c: var(--amber)">
     <div class="who"><span class="dot" style="background:var(--amber)"></span>Developer</div>
@@ -71,7 +72,7 @@
   </div>
 
   <div class="broker">
-    <div class="name"><img src="mark.svg" width="40" height="40" alt="" />Hangar</div>
+    <div class="name"><img src="mark-dark.svg" width="40" height="40" alt="" />Hangar</div>
     <div class="rows">
       <div class="row" id="r-queue"><i></i>queue requests fairly</div>
       <div class="row" id="r-lease"><i></i>lease a free device</div>
@@ -171,7 +172,7 @@ const plan = [
 ];
 window.start = () => { for (const [t, f] of plan) setTimeout(f, t); };
 window.duration = 13600;
-if (!navigator.webdriver && !location.hash.includes('manual')) start();
+start();
 </script>
 </body>
 </html>

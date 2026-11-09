@@ -127,8 +127,11 @@ Done:
 - A device image's golden device is named after the runtime too, so an Xcode update rebuilds it.
 - `GET /v1/tests` and `hangar tests`: passes, flaky passes and failures per test.
 - The console's Fleet page: every device with a live picture, its holder, how it was leased and
-  what was last done on it. Checked with a real Claude agent over MCP, a Maestro run and a
-  scripted tester at once.
+  what was last done on it. A real Claude agent leased a device over MCP and worked it while the
+  page showed it. A Maestro run and a scripted tester at the same time timed out on the install
+  step, twice, on a Mac with a load average over 600; that still needs a run on a quiet Mac.
+- `hangar connect claude | cursor | ci` makes a token for the target and adds it (Claude Code)
+  or prints exactly what to paste. `hangar up` signs in the CLI on its own Mac as the admin.
 - Fixes found on the way: action points outside the screen are refused instead of swiping
   off-screen for 31 s, and companions left by a Hangar that was killed hard are stopped when
   the next one starts.

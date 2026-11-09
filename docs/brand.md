@@ -44,6 +44,26 @@ there use a darker amber, `#9A5800`. The console's tokens are in
 The system UI font (SF Pro on a Mac), and the system monospace font (SF Mono) for commands,
 tokens and logs. Hangar loads no web fonts, because it makes no calls to the internet.
 
+## Message
+
+| | Wording |
+|---|---|
+| Headline | The open source device broker for React Native teams. |
+| Second line | A free alternative to Expo Simulators and EAS Maestro jobs, on your own Macs. |
+| One sentence | Hangar hands out iOS simulators and Android emulators from your own Macs to your developers, your CI and your AI agents, and wipes each device when it comes back. |
+| Uses | Develop on a device you don't have. Test every pull request. Let AI agents check their own work. Try a build by hand. |
+
+Hangar is a broker for devices. Simulators and emulators work today. Physical phones are on the
+roadmap, so say "next", never "supported", until they ship.
+
+Name Expo only to compare: "an alternative to Expo Simulators". Never put Expo in a product name,
+domain or logo, and never suggest that Hangar comes from Expo. Expo's brand page forbids both. The
+README ends with "Hangar is not affiliated with Expo."
+
+Lead with free, open source and the four uses. Avoid cost sums: a price comparison invites
+arguments about hardware and upkeep, and Hangar wins on other grounds. Hosted prices stay in
+[comparison.md](comparison.md) for readers who want them.
+
 ## Voice
 
 Plain sentences that say what happens. Numbers instead of adjectives: "52 fps", not "blazing
@@ -53,5 +73,6 @@ fast". Errors say what happened and what to do next. No exclamation marks, no em
 
 - [assets/header.svg](assets/header.svg): the README header, rendered to `header.png` with
   headless Chrome at 2x so the fonts look the same everywhere.
-- [assets/fleet.gif](assets/fleet.gif): the console's Fleet page during a real run: an agent, a
-  Maestro run and a tester holding devices at once. The host's name is replaced in the picture.
+- [assets/how-it-works.gif](assets/how-it-works.gif): an agent, CI and a developer leasing from
+  the pool. Its source is [assets/how-it-works.html](assets/how-it-works.html), recorded from
+  headless Chrome and turned into a GIF with ffmpeg.

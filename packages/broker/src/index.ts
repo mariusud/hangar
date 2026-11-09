@@ -45,6 +45,8 @@ export type Broker = {
   url: string;
   attach(link: HostLink): { message(m: AgentMessage): void; closed(): void };
   welcomeLink(): string;
+  // An API token for the first operator, for the CLI on the Mac that runs the broker.
+  adminToken(label: string): string;
   joinToken(): string;
   close(): Promise<void>;
 };
@@ -120,6 +122,10 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     attach: (link) => hosts.attach(link),
     // A one-use sign-in link for the first operator. Creates the account on first use of `up`.
     joinToken: () => mintHostToken(db),
+    adminToken: (label) => {
+      const admin = db.accounts().find((a) => a.role === 'operator') ?? auth.createAccount(db, 'admin', 'operator');
+      return auth.mintToken(db, 'member', { accountId: admin.id, label });
+    },
     welcomeLink: () => {
       const admin = db.accounts().find((a) => a.role === 'operator') ?? auth.createAccount(db, 'admin', 'operator');
       const code = auth.mintToken(db, 'welcome', { accountId: admin.id, expiresAt: Date.now() + 30 * 60_000 });

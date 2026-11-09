@@ -1,14 +1,25 @@
-<p align="center"><img src="docs/assets/header.png" alt="Hangar: shared simulators for people, CI and AI agents. Self-hosted, and every device is wiped after use." width="100%" /></p>
+<p align="center"><img src="docs/assets/header.png" alt="Hangar: the open source device broker for React Native teams. A free alternative to Expo Simulators and EAS Maestro jobs, for developers, CI and AI agents." width="100%" /></p>
 
-A React Native team needs clean iOS simulators all day: on each developer's laptop, in every CI
-job, and now for every AI agent. Today each laptop boots its own, CI runners boot theirs from
-scratch, and parallel agents fight over whichever simulator is open. Hosted device farms fix
-that for a fee per minute.
+Hangar is a free, open source device broker. It hands out iOS simulators and Android emulators
+from your own Macs to your developers, your CI and your AI agents, and wipes each device when it
+comes back. Use it in place of Expo Simulators and EAS Maestro jobs, next to the rest of EAS or
+without it. Physical phones are next on the [roadmap](ROADMAP.md).
 
-Hangar turns one or more Macs you already have, such as a Mac mini in the office, into a pool of
-simulators and emulators that everyone shares. Each person, CI job or agent asks for a device,
-gets one nobody else touches, and gives it back. Hangar wipes it and hands out a fresh one next
-time.
+## What you can use it for
+
+- **Develop on a device you don't have.** Run your app on a leased simulator with
+  `hangar run ios`. Fast Refresh, React DevTools and the debugger work as if it were local.
+- **Test every pull request.** Maestro flows split over fresh devices, a failed flow retries
+  once, and the run writes one JUnit report with a video of each failure. XCUITest and Espresso
+  run the same way.
+- **Let AI agents check their own work.** Claude Code, Cursor and other MCP clients lease a
+  device, tap through the app and read the screen.
+- **Try a build by hand.** Open any device in the browser, use it with mouse and keyboard, and
+  record a bug as a link to send.
+
+## Start
+
+On the Mac that will hold the devices, such as a Mac mini in the office:
 
 ```bash
 git clone https://github.com/mariusud/hangar && cd hangar
@@ -16,128 +27,67 @@ pnpm install && npm install -g ./packages/hangar
 hangar up
 ```
 
-`hangar up` checks the Mac, boots a few simulators and prints a sign-in link. Open it, and the
-console shows the devices. Invite your team from the People page.
+Open the link it prints to see the devices. Invite your team from the console's People page.
 
-<p align="center"><img src="docs/assets/fleet.gif" alt="Hangar's Fleet page: devices leased at the same time by an AI agent, a Maestro run in CI and a tester, each with a live screen and what it is doing" width="100%" /></p>
+<p align="center"><img src="docs/assets/how-it-works.gif" alt="An AI agent, a CI pipeline and a developer each lease devices from Hangar on two Macs at once; each device is wiped when it comes back" width="100%" /></p>
 
-## Connect what needs a device
+## Connect
 
-Everything below talks to the same Hangar. Make a token for each one on the console's Connect
-page, so you can revoke one without breaking the others.
-
-### Maestro tests in CI
-
-Your pipeline uploads the app, Hangar splits the flows over fresh devices, retries a failed flow
-once, and returns one JUnit report with a video of every failure.
-
-1. On the Connect page, make a token with **Can upload apps** ticked. Save it as the
-   `HANGAR_TOKEN` secret, and the Mac's address as `HANGAR_URL`.
-2. Build a Release simulator app, so the JavaScript is inside it.
-3. Add the step:
-
-```yaml
-- uses: mariusud/hangar@main
-  with:
-    url: ${{ secrets.HANGAR_URL }}
-    token: ${{ secrets.HANGAR_TOKEN }}
-    app: build/Build/Products/Release-iphonesimulator/MyApp.app
-    flows: .maestro
-    shards: 3
-```
-
-Any other CI runs the same thing with `hangar run maestro .maestro --app MyApp.app --shards 3`.
-The CI runner has to reach the Mac, on the same network or through a VPN such as Tailscale.
-XCUITest and Espresso work the same way. [Full guide](docs/guides/github-actions.md).
-
-### An AI agent
-
-Claude Code, Cursor, Codex or any MCP client gets its own device for the session. The Connect
-page prints the line for your agent, with the token filled in:
-
-```bash
-claude mcp add --transport http hangar http://studio-mini.local:7420/mcp \
-  --header "Authorization: Bearer <token>"
-```
-
-Then ask it something like "lease an iPhone from hangar, open the app and check that sign-in
-works". The tools have the same names as mobile-mcp's, so prompts and agents written for
-mobile-mcp work as they are. The agent says what it is doing when it leases, and the Fleet page
-shows it. [Full guide](docs/guides/agents.md).
-
-### Your app, with Fast Refresh
-
-From your app's folder on your own laptop:
-
-```bash
-hangar login http://studio-mini.local:7420
-hangar run ios          # or: hangar run android
-```
-
-Hangar builds the app (or takes `--app`), leases a simulator, connects it to Metro on your
-laptop and opens the live screen. Save a file and the leased device updates. React Native
-DevTools works through the same connection. [Full guide](docs/guides/expo.md).
-
-### Testing by hand
-
-In the console, pick a device and press Use one. Install a build, use it with the mouse and
-keyboard, and press Record. Stopping gives one link with the video, every tap and the app log,
-for the bug report. [Full guide](docs/guides/recordings.md).
-
-### Your own scripts
-
-```ts
-import { Hangar } from 'hangar';
-
-const hangar = await Hangar.fromEnv(); // HANGAR_URL and HANGAR_TOKEN
-await using device = await hangar.lease({ model: 'iPhone 17' });
-await device.launch('com.example.app');
-await device.tap({ label: 'Sign in' });
-```
-
-The same calls are a REST API. [Agents and the REST API](docs/guides/agents.md#rest-for-agents-with-their-own-tools).
-
-## How it compares
-
-| | Hangar | Simlock | Argent | Expo Simulators | Hosted farms |
-|---|---|---|---|---|---|
-| What it is | A shared pool for a team | A device pool for coding agents | One agent driving local devices | Hosted simulators for agents | Rented devices |
-| Runs on | Your Macs | Your Macs and Linux machines | Your own computer | Expo's servers | Their servers |
-| People use devices in the browser | Yes, with touch and keyboard | Watch only | Not documented | Yes | Yes |
-| CI test runs, sharded, with JUnit | Maestro, XCUITest, Espresso | Not documented | Not documented | Not documented | Yes |
-| AI agents over MCP | Yes | Yes | Yes | Through other tools | Some |
-| Fast Refresh on a remote device | Yes | Metro tunnel only | Local only | Yes | No |
-| Physical phones | Not yet | Yes | Yes | No | Yes |
-| Cost | Free, Apache-2.0 | Free, MIT | Free, with proprietary helpers | Invite-only preview | Per minute |
-
-Pick Simlock if your only users are coding agents, or you need physical phones today. Pick
-Argent for one agent working on your own machine; it also covers TVs and profiling. Hangar is
-for when the same devices serve people, CI and agents at once.
-[Details and sources](docs/comparison.md).
-
-## Speed
-
-On an M4 Pro, through the real broker and agent:
-
-| | |
+| To use devices from | Run |
 |---|---|
-| Live screen | 52 fps, H.264, about 500 KB/s |
-| Swipe to first changed frame | 109 ms p50, 197 ms p95 |
-| Save a file to Fast Refresh on the leased device | 87 ms p50 |
-| Screenshot, element tree | 39 ms, 3 to 5 ms |
+| Claude Code | `hangar connect claude` |
+| Cursor or another MCP client | `hangar connect cursor` |
+| Maestro in CI | `hangar connect ci`, then paste the two secrets and the step it prints |
+| Your React Native app, with Fast Refresh | `hangar run ios` or `hangar run android` in your app's folder |
+| A test by hand | the console: Use one, then Record for a bug link |
+| Your own code | `const device = await hangar.lease()` ([client](docs/guides/agents.md#rest-for-agents-with-their-own-tools)) |
 
-[All measurements](docs/numbers.md).
+On the Hangar Mac these work right away. From your laptop, install the CLI the same way and run
+`hangar login http://your-mac.local:7420` once. CI has to reach the Mac too: run the CI runner on
+the same network, or join the job to a VPN with a step such as
+[Tailscale's GitHub Action](https://github.com/tailscale/github-action).
+
+Each guide has the details: [agents](docs/guides/agents.md),
+[GitHub Actions](docs/guides/github-actions.md), [your app](docs/guides/expo.md),
+[recordings](docs/guides/recordings.md), [Android](docs/guides/android.md),
+[XCUITest](docs/guides/xcuitest.md).
+
+## Why Hangar
+
+- **Free and open source.** Apache-2.0, with no account, no telemetry and no bill per minute. It
+  works without internet.
+- **One pool for everyone.** People, CI and agents use the same devices. The Fleet page shows who
+  has which device and what they are doing with it.
+- **A clean device every time.** Each device is deleted and replaced after use, so nothing leaks
+  from one test or person to the next.
+- **Builds stay with you.** Unreleased apps and test accounts never leave your network.
+- **Fast.** 52 frames a second in the browser, and 87 ms from saving a file to seeing the change on
+  the leased device, measured on one Mac ([numbers](docs/numbers.md)).
+
+Hosted is easier when nobody on the team wants to look after a Mac, or when your agents run in
+the cloud and cannot reach your network.
+
+| | Hangar | Simlock | Argent | Expo Simulators |
+|---|---|---|---|---|
+| Made for | People, CI and agents | Coding agents | One agent, locally | Agents, hosted |
+| Use a device in the browser | Yes | Watch only | Not documented | Yes |
+| Sharded CI runs with JUnit | Yes | Not documented | Not documented | Not documented |
+| Fast Refresh on a leased device | Yes | Metro tunnel only | Local only | Yes |
+| Physical phones | Not yet | Yes | Yes | No |
+| Runs on | Your Macs | Your machines | Your machine | Expo's servers |
+
+[Full comparison and sources](docs/comparison.md).
 
 ## Status
 
-Early, and not on npm yet. Everything above runs on one Mac. More Macs join with `hangar join`,
-which so far is only tested on one machine. A leased iOS app runs as a process on the Mac, so use
-separate Macs for teams that do not trust each other's code. Hangar runs on hardware you own,
-for your own development and testing; read Apple's macOS license for what that allows.
+Early, and not on npm yet. It runs on one Mac; more Macs join with `hangar join`, tested on one
+machine so far. A leased iOS app runs as a process on the Mac, so use separate Macs for teams that
+do not trust each other's code. Read Apple's macOS license for what running simulators for your
+own team allows.
 
-More: [all features](docs/features.md), [more Macs and Docker](docs/guides/more-macs.md),
-[single sign-on](docs/guides/sso.md), [device images](docs/guides/device-images.md),
-[design](docs/design.md), [brand](docs/brand.md), [roadmap](ROADMAP.md).
+[Features](docs/features.md) · [Measured speed](docs/numbers.md) ·
+[More Macs and Docker](docs/guides/more-macs.md) · [Single sign-on](docs/guides/sso.md) ·
+[Design](docs/design.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md) ·
+[Security](SECURITY.md) · Apache-2.0
 
-Apache-2.0. Hangar sends no telemetry and needs no internet access.
-[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+Hangar is not affiliated with Expo.

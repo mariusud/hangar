@@ -7,7 +7,7 @@ import { installService, uninstallService } from './service.ts';
 import { exportData, importData } from './backup.ts';
 import { brokerOnly, doctor, joinBroker, joinToken, printChecks, up } from './up.ts';
 
-const HELP = `hangar: a device fleet on your own Macs
+const HELP = `hangar: the open source device broker for React Native teams
 
 Server
   hangar up [--port 7420] [--warm 1] [--max N] [--url https://...] [--android <avd>]

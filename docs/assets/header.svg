@@ -10,18 +10,24 @@
   <rect width="1280" height="400" fill="#0C0E12"/>
 
   <!-- wordmark -->
-  <g transform="translate(96 92) scale(3)">
+  <g transform="translate(96 40) scale(1.6)">
     <path d="M2.5 28 A13.5 16 0 0 1 29.5 28" fill="none" stroke="#EEF0F3" stroke-width="2.4" stroke-linecap="round"/>
     <path d="M6.5 28 A9.5 11.5 0 0 1 25.5 28" fill="none" stroke="#EEF0F3" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
     <rect x="12" y="15" width="8" height="13" rx="2" fill="#F5A524"/>
     <rect x="14.6" y="16.6" width="2.8" height="1.1" rx=".55" fill="#0C0E12"/>
   </g>
-  <text x="206" y="178" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="96" font-weight="700" letter-spacing="-3">Hangar</text>
-  <text x="100" y="236" fill="#C9CED6" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="25">Shared simulators for people, CI and AI agents.</text>
-  <text x="100" y="272" fill="#9AA3AE" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="25">Self-hosted. Every device is wiped after use.</text>
-  <rect x="100" y="298" width="178" height="44" rx="10" fill="#161A20" stroke="#2A3038"/>
-  <text x="120" y="327" fill="#F5A524" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">$</text>
-  <text x="142" y="327" fill="#E6E9ED" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">hangar up</text>
+  <text x="156" y="84" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="-1.2">Hangar</text>
+  <text font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="38" font-weight="650" letter-spacing="-0.8" fill="#F2F4F7">
+    <tspan x="100" y="160">The open source device broker</tspan>
+    <tspan x="100" y="206">for React Native teams.</tspan>
+  </text>
+  <text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" fill="#9AA3AE">
+    <tspan x="100" y="250">A free alternative to Expo Simulators and</tspan>
+    <tspan x="100" y="278">EAS Maestro jobs, on your own Macs.</tspan>
+  </text>
+  <rect x="100" y="304" width="178" height="44" rx="10" fill="#161A20" stroke="#2A3038"/>
+  <text x="120" y="333" fill="#F5A524" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">$</text>
+  <text x="142" y="333" fill="#E6E9ED" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">hangar up</text>
 
   <!-- the hangar: an arch with ribs -->
   <g fill="none" stroke="#2A3038" stroke-width="2">

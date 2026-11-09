@@ -1,12 +1,14 @@
 // `hangar up`: broker and agent in one process on this Mac.
 
 import { execFile, spawn } from 'node:child_process';
-import { homedir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import { homedir, hostname, userInfo } from 'node:os';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { Agent, AndroidAgent, defaultMaxDevices, join as joinFleet } from '@hangar/agent';
 import { Db, mintHostToken, oidcFromEnv, s3FromEnv, startBroker, type OidcConfig, type S3Config } from '@hangar/broker';
 import type { AgentMessage, BrokerMessage } from '@hangar/protocol';
+import { CONFIG_FILE } from './client/index.ts';
 
 const run = promisify(execFile);
 
@@ -145,13 +147,20 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
 
   const bonjour = spawn('dns-sd', ['-R', 'Hangar', '_hangar._tcp', 'local', String(port)], { stdio: 'ignore' });
 
+  // The hangar commands on this Mac sign in as the admin, unless they already point somewhere.
+  const signedIn = await access(CONFIG_FILE).then(() => false, async () => {
+    await mkdir(dirname(CONFIG_FILE), { recursive: true });
+    await writeFile(CONFIG_FILE, JSON.stringify({ url: publicUrl, token: broker.adminToken(`hangar up on ${hostname()}`) }, null, 2), { mode: 0o600 });
+    return true;
+  });
+
   console.log(`
 Hangar is running at ${publicUrl}
 
   Sign in as admin:   ${broker.welcomeLink()}   (one use, 30 min)
-  Connect an agent:   make a token in the console, which shows the exact command
-  Lease from code:    HANGAR_URL=${publicUrl} npx hangar lease
-
+  Connect an agent:   hangar connect claude   (or cursor)
+  Connect CI:         hangar connect ci
+${signedIn ? '\n  The hangar commands on this Mac are signed in as admin.\n' : ''}
 ${publicUrl.startsWith('https:') ? '' : '  Traffic is plain HTTP on your network. Set up TLS before using Hangar beyond a trusted LAN.\n'}
   Press Ctrl-C to stop. Leased devices are deleted when Hangar stops.
 `);

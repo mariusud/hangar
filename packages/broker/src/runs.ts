@@ -327,7 +327,7 @@ export class Runs {
   private async shard(p: auth.Principal, id: string, shard: number, flows: string[], suite: Suite): Promise<void> {
     const { sha256, archive, env } = suite;
     const run = this.db.getRun(id)!;
-    const lease = this.leases.create(p, run.class, { via: `${run.kind ?? 'maestro'} run ${id.slice(0, 6)}, shard ${shard + 1} of ${run.shards}` });
+    const lease = this.leases.create(p, run.class, { via: `${{ maestro: 'Maestro', xcuitest: 'XCUITest', espresso: 'Espresso' }[run.kind ?? 'maestro']}, shard ${shard + 1} of ${run.shards}` });
     this.update(id, (r) => ({ leaseIds: [...r.leaseIds, lease.id] }));
     // Maestro calls can take minutes; the run renews its leases like a client would.
     const renew = setInterval(() => {

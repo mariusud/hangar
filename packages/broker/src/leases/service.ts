@@ -56,7 +56,7 @@ export function describeOp(o: Op): string | null {
       return { tap: 'Tapped', longPress: 'Long-pressed', swipe: 'Swiped', type: 'Typed text', key: 'Pressed a key', button: `Pressed ${'button' in a ? a.button : 'a button'}`, waitFor: 'Waited for the screen' }[a.type];
     }
     case 'install':
-      return 'Installed an app';
+      return 'Installing an app';
     case 'launch':
       return `Opened ${o.bundleId}`;
     case 'openUrl':
@@ -179,6 +179,13 @@ export class Leases {
       throw new ApiError(409, 'LEASE_NOT_ACTIVE', 'This lease has no device yet.');
     }
     const startedAt = this.now();
+    // The Fleet page shows what is happening now, so the activity is set when the op starts.
+    const activity = isHolder ? describeOp(body) : null;
+    const status = this.status.get(lease.id);
+    if (activity && status) {
+      status.activity = activity;
+      status.activityAt = startedAt;
+    }
     // A recording's stop waits for the host to upload the video.
     const timeout = body.op === 'maestro' ? 31 * 60_000 : body.op === 'install' || body.op === 'recordStop' ? 300_000 : 60_000;
     const res = await this.hosts
@@ -192,12 +199,6 @@ export class Leases {
     if (isHolder) {
       // Recordings keep a timeline of what was done.
       this.events.emit('op', lease.id, body, startedAt, res.result);
-      const activity = describeOp(body);
-      const s = this.status.get(lease.id);
-      if (activity && s) {
-        s.activity = activity;
-        s.activityAt = this.now();
-      }
     }
     return { result: res.result, ...(res.binary ? { binary: Buffer.from(res.binary, 'base64') } : {}) };
   }

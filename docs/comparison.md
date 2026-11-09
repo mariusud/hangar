@@ -21,5 +21,19 @@ do not mention it, not that the tool cannot do it.
 
 Sources: Simlock's docs in github.com/callstackincubator/simlock (website/src/content/docs),
 Argent's README and Telemetry.md in the `@swmansion/argent` package, Expo's
-docs/pages/preview/simulators in github.com/expo/expo. Prices of hosted farms are in
-[decision 0010](decisions/0010-hangar-2.md).
+docs/pages/preview/simulators in github.com/expo/expo.
+
+## Hosted prices
+
+Read on 2026-11-08 from each service's pricing page.
+
+| Service | Price |
+|---|---|
+| Maestro Cloud | $250 per device per month, set by the most runs at once |
+| AWS Device Farm | $0.17 per device-minute, or $250 per device slot per month |
+| Sauce Labs virtual devices | $149 per parallel test per month billed yearly, $199 monthly |
+| Appetize | $59 to $319 per month billed yearly, 500 minutes included, then $0.06 per minute |
+| Expo Simulators | limited beta; usage-based, 60 minutes a month included until 2027, price not published |
+| GitHub macOS runner | $0.062 per minute, $0.102 for the M2 Pro runner; for building, not a device pool |
+| Mac mini (M6, 16 GB) | from $899, once; Hangar runs 3 simulators on it by default, 6 on 24 GB |
+
