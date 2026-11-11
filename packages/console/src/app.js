@@ -1,3 +1,5 @@
+import { LANGUAGES, LIMIT_FIELDS, canRerun, canRotate, capSeconds, capValue, deviceRows, duration, flowRecordings, isLanguageTag, leaseClass, limitsText, parseEnv, percent, viewExpiry, withView } from './lib.js';
+
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
 const who = document.getElementById('who');
@@ -24,7 +26,7 @@ async function api(method, path, body) {
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const e = data?.error ?? { message: `HTTP ${res.status}` };
-    throw new Error(e.hint ? `${e.message} ${e.hint}` : e.message);
+    throw Object.assign(new Error(e.hint ? `${e.message} ${e.hint}` : e.message), { code: e.code });
   }
   return data;
 }
@@ -56,9 +58,16 @@ async function render() {
     banner.textContent = 'This connection is not encrypted. Anyone on this network can read your session. Set up TLS before using Hangar beyond a trusted LAN.';
   }
   if (invite) return inviteView(invite[1]);
+  const recording = path.match(/^\/recordings\/([^/]+)$/);
+  const view = new URLSearchParams(location.search).get('view');
+  if (!me && recording && view) {
+    nav.replaceChildren();
+    who.replaceChildren();
+    return recordingView(recording[1], view);
+  }
   if (!me) return loginView();
   who.replaceChildren(`${me.name} · `, h('a', { href: '#', onclick: async (e) => { e.preventDefault(); await api('POST', '/v1/logout'); go('/'); } }, 'Sign out'));
-  const links = [['/', 'Devices'], ['/runs', 'Runs'], ['/recordings', 'Recordings'], ['/connect', 'Connect']];
+  const links = [['/', 'Devices'], ['/runs', 'Runs'], ['/tests/flaky', 'Flaky flows'], ['/recordings', 'Recordings'], ['/connect', 'Connect']];
   if (me.role === 'operator') {
     links.splice(1, 0, ['/fleet', 'Fleet']);
     links.push(['/people', 'People']);
@@ -66,12 +75,12 @@ async function render() {
   nav.replaceChildren(...links.map(([href, label]) => h('a', { href, 'data-link': true, class: path === href ? 'on' : '' }, label)));
   const lease = path.match(/^\/leases\/([^/]+)$/);
   if (lease) return leaseView(lease[1]);
-  const recording = path.match(/^\/recordings\/([^/]+)$/);
-  if (recording) return recordingView(recording[1]);
+  if (recording) return recordingView(recording[1], view);
   if (path === '/recordings') return recordingsView();
   const run = path.match(/^\/runs\/([^/]+)$/);
   if (run) return runView(run[1]);
   if (path === '/runs') return runsView();
+  if (path === '/tests/flaky') return flakyView();
   if (path === '/connect') return connectView();
   if (path === '/cli-login') return cliLoginView();
   if (path === '/people') return peopleView();
@@ -151,24 +160,34 @@ function inviteView(code) {
 
 async function devicesView() {
   const err = h('p', { class: 'error' });
-  const [devices, leases] = await Promise.all([api('GET', '/v1/devices'), api('GET', '/v1/leases')]);
+  const [devices, leases, images] = await Promise.all([api('GET', '/v1/devices'), api('GET', '/v1/leases'), api('GET', '/v1/images').catch(() => [])]);
   const mine = leases.filter((l) => l.state !== 'ended');
-  const models = [...new Map(devices.map((d) => [`${d.platform}|${d.model}|${d.os}`, d])).values()];
+  if (chosenImage && !images.some((i) => i.name === chosenImage)) chosenImage = null;
+  const rows = deviceRows(devices, chosenImage);
   let waiting = false;
-  const use = async (d, button) => {
+  const use = async (row, button, label) => {
     waiting = true;
     button.disabled = true;
     button.textContent = 'Getting a device…';
     try {
-      const lease = await api('POST', '/v1/leases?wait=120', { class: { platform: d.platform, model: d.model, os: d.os }, via: 'Console' });
+      const lease = await api('POST', '/v1/leases?wait=120', { class: leaseClass(row, chosenImage), via: 'Console' });
       go(`/leases/${lease.id}`);
     } catch (x) {
       err.textContent = x.message;
       button.disabled = false;
-      button.textContent = 'Use one';
+      button.textContent = label;
       waiting = false;
     }
   };
+  const picker = images.length
+    ? h('div', { class: 'row', style: 'margin-bottom:10px' },
+        h('label', { for: 'image', style: 'margin:0' }, 'Image'),
+        h('select', { id: 'image', onchange: (e) => { chosenImage = e.target.value || null; render(); } },
+          h('option', { value: '', selected: !chosenImage }, 'None: a clean device'),
+          ...images.map((i) => h('option', { value: i.name, selected: i.name === chosenImage }, imageLabel(i)))),
+      )
+    : '';
+  const waitButton = h('button', { class: 'primary', onclick: () => use(null, waitButton, 'Wait for one') }, 'Wait for one');
   app.replaceChildren(
     h('h1', {}, 'Devices'),
     mine.length
@@ -179,23 +198,34 @@ async function devicesView() {
         ))
       : '',
     h('h2', {}, 'Available'),
-    models.length
+    rows.length
       ? h('div', { class: 'card' },
+          picker,
           h('table', {},
             h('tr', {}, h('th', {}, 'Device'), h('th', {}, 'Free'), h('th', {}, 'Mac'), h('th', {})),
-            ...models.map((d) => {
-              const same = devices.filter((x) => x.platform === d.platform && x.model === d.model && x.os === d.os);
-              const free = same.filter((x) => x.state === 'ready').length;
-              const b = h('button', { class: 'primary', onclick: () => use(d, b) }, 'Use one');
-              return h('tr', {}, h('td', {}, system(d)), h('td', {}, `${free} of ${same.length}`), h('td', { class: 'muted' }, d.host), h('td', { style: 'text-align:right' }, b));
+            ...rows.map((row) => {
+              const b = h('button', { class: 'primary', onclick: () => use(row, b, 'Use one') }, 'Use one');
+              return h('tr', {}, h('td', {}, system(row)), h('td', {}, `${row.free} of ${row.total}`), h('td', { class: 'muted' }, row.host), h('td', { style: 'text-align:right' }, b));
             }),
           ))
-      : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `npx hangar up` on a Mac with Xcode.'),
+      : chosenImage
+        ? h('div', { class: 'card' },
+            picker,
+            h('p', { class: 'muted' }, `No device has the image ${chosenImage} yet. Each Mac builds its image devices after an operator sets the image, which takes a few minutes. You can wait in the queue for one.`),
+            waitButton)
+        : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `npx hangar up` on a Mac with Xcode.'),
     err,
   );
   const t = setInterval(() => !waiting && render(), 10_000);
   cleanup = () => clearInterval(t);
 }
+
+let chosenImage = null;
+
+const imageLabel = (i) => {
+  const extras = [i.apps.length ? `${i.apps.length} app${i.apps.length === 1 ? '' : 's'}` : '', i.locale ?? '', i.appearance ?? ''].filter(Boolean);
+  return extras.length ? `${i.name} (${extras.join(', ')})` : i.name;
+};
 
 function h264View(canvas, askKeyframe) {
   const ctx = canvas.getContext('2d');
@@ -354,8 +384,17 @@ async function leaseView(id) {
     }
   });
 
+  const ends = h('p', { class: 'muted', style: 'margin-top:0' });
+  const showEnd = (l) => {
+    ends.textContent = l.expiresAt ? `If nothing happens on it, it ends at ${new Date(l.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : '';
+  };
+  showEnd(lease);
+  // An open, visible tab counts as use. The checkbox lets a hidden tab count too, up to the longest-lease limit.
+  const background = h('input', { type: 'checkbox' });
   const renew = setInterval(() => {
-    if (document.visibilityState === 'visible') api('POST', `/v1/leases/${id}/renew`).catch(() => {});
+    if (document.visibilityState === 'visible' || background.checked) {
+      api('POST', `/v1/leases/${id}/renew`).then(showEnd, () => {});
+    }
   }, 60_000);
   cleanup = () => {
     clearInterval(renew);
@@ -374,6 +413,19 @@ async function leaseView(id) {
   const isAndroid = lease.device.platform === 'android-emulator';
   const file = h('input', { type: 'file', accept: isAndroid ? '.apk' : '.zip,.tar,.tgz,.gz' });
   const urlInput = h('input', { type: 'url', placeholder: 'https://example.com or myapp://path' });
+  const bundleInput = h('input', { type: 'text', placeholder: 'App bundle ID, such as com.example.app', 'aria-label': 'App bundle ID' });
+  const languageInput = h('input', { type: 'text', list: 'languages', placeholder: 'nb-NO', 'aria-label': 'Language', style: 'width:9em' });
+  const setLanguage = () => run('Changing the language', async () => {
+    const bundleId = bundleInput.value.trim();
+    const language = languageInput.value.trim();
+    if (!bundleId) throw new Error('Enter the bundle ID of the app to change. Installing an app here fills it in.');
+    if (!isLanguageTag(language)) throw new Error(`"${language}" is not a language tag such as nb-NO or en-US.`);
+    await api('POST', `/v1/leases/${id}/locale`, { bundleId, language });
+    // The app reads its language when it starts, so restart it if it is running.
+    await api('POST', `/v1/leases/${id}/apps/${encodeURIComponent(bundleId)}/terminate`).catch(() => {});
+    await api('POST', `/v1/leases/${id}/apps/${encodeURIComponent(bundleId)}/launch`);
+    return `${bundleId} now runs in ${language}.`;
+  });
 
   app.replaceChildren(
     h('div', { class: 'lease' },
@@ -390,7 +442,10 @@ async function leaseView(id) {
       h('div', { class: 'side' },
         h('div', { class: 'card' },
           h('h1', { style: 'margin-bottom:4px' }, system(lease.device)),
-          h('p', { class: 'muted', style: 'margin-top:0' }, 'Yours until you release it or leave it idle for 5 minutes. It is wiped when released.'),
+          h('p', { class: 'muted', style: 'margin-top:0;margin-bottom:4px' }, limitsText(lease.limits)),
+          ends,
+          h('label', { class: 'check', title: `Keeps the device while you work in another tab. It still ends ${duration(lease.limits.maxMs)} after you got it, and soon after you close this tab.` },
+            background, ' Keep it while this tab is in the background'),
           h('div', { class: 'row' },
             recordButton(id, out),
             h('button', { onclick: () => navigator.clipboard.writeText(location.href).then(() => (out.textContent = 'Link copied.')) }, 'Copy link'),
@@ -403,9 +458,35 @@ async function leaseView(id) {
           h('p', { class: 'muted' }, `${isAndroid ? 'An .apk' : 'A zipped simulator build (.app folder)'}. Uploading needs permission from an operator.`),
           h('div', { class: 'row' }, file, h('button', { onclick: () => file.files[0] && run('Installing', async () => {
             const r = await api('POST', `/v1/leases/${id}/apps?name=${encodeURIComponent(file.files[0].name)}`, file.files[0]);
+            bundleInput.value = r.bundleId;
             await api('POST', `/v1/leases/${id}/apps/${encodeURIComponent(r.bundleId)}/launch`);
             return `Installed and opened ${r.name}.`;
           }) }, 'Install')),
+        ),
+        h('div', { class: 'card' },
+          h('h2', { style: 'margin-top:0' }, 'Device settings'),
+          h('div', { class: 'row' },
+            h('span', { class: 'muted' }, 'Appearance'),
+            h('button', { onclick: () => run('Switching to light', () => api('POST', `/v1/leases/${id}/appearance`, { mode: 'light' })) }, 'Light'),
+            h('button', { onclick: () => run('Switching to dark', () => api('POST', `/v1/leases/${id}/appearance`, { mode: 'dark' })) }, 'Dark'),
+          ),
+          canRotate(lease.device.platform)
+            ? h('div', { class: 'row', style: 'margin-top:8px' },
+                h('span', { class: 'muted' }, 'Rotation'),
+                h('button', { onclick: () => run('Rotating', () => api('POST', `/v1/leases/${id}/orientation`, { orientation: 'portrait' })) }, 'Portrait'),
+                h('button', { onclick: () => run('Rotating', () => api('POST', `/v1/leases/${id}/orientation`, { orientation: 'landscapeLeft' })) }, 'Landscape'),
+              )
+            : '',
+          isAndroid
+            ? ''
+            : h('div', {},
+                h('p', { class: 'muted' }, 'Language for one app. The app restarts in that language.'),
+                h('div', { class: 'row' }, bundleInput),
+                h('div', { class: 'row', style: 'margin-top:8px' },
+                  languageInput,
+                  h('datalist', { id: 'languages' }, ...LANGUAGES.map(([tag, name]) => h('option', { value: tag }, name))),
+                  h('button', { onclick: setLanguage }, 'Set language')),
+              ),
         ),
         h('div', { class: 'card' },
           h('h2', { style: 'margin-top:0' }, 'Open a URL'),
@@ -550,7 +631,7 @@ function cliLoginView() {
 }
 
 async function peopleView() {
-  const [people, teams] = await Promise.all([api('GET', '/v1/people'), api('GET', '/v1/teams')]);
+  const [people, teams, limits] = await Promise.all([api('GET', '/v1/people'), api('GET', '/v1/teams'), api('GET', '/v1/lease-limits').catch(() => null)]);
   const result = h('div');
   const status = h('p', { class: 'muted' });
   const role = h('select', {}, h('option', { value: 'member' }, 'Member: uses devices'), h('option', { value: 'operator' }, 'Operator: runs Hangar, can upload apps'));
@@ -582,6 +663,7 @@ async function peopleView() {
       h('div', { class: 'row' }, newTeam, h('button', { onclick: () => save(() => api('POST', '/v1/teams', { name: newTeam.value })) }, 'Add team')),
       status,
     ),
+    ...(limits ? leaseLimitsCard(limits.caps) : []),
     h('h2', {}, 'Invite someone'),
     h('div', { class: 'card' },
       role,
@@ -592,6 +674,40 @@ async function peopleView() {
       result,
     ),
   );
+}
+
+const ROLE_NAMES = { member: 'Members', operator: 'Operators', agent: 'Agent tokens' };
+
+function leaseLimitsCard(caps) {
+  const status = h('p', { class: 'muted' });
+  const rows = Object.entries(caps).map(([role, cap]) => {
+    const inputs = LIMIT_FIELDS.map((f) => h('input', { type: 'number', min: 0, step: 'any', value: capValue(cap[`${f.key}Ms`], f), 'aria-label': `${f.label} for ${role}, in ${f.unit}`, style: 'width:7em' }));
+    const saveButton = h('button', { onclick: async () => {
+      try {
+        const b = Object.fromEntries(LIMIT_FIELDS.map((f, i) => [`${f.key}Seconds`, capSeconds(inputs[i]?.value ?? '', f)]));
+        const next = await api('PUT', `/v1/lease-limits/${role}`, b);
+        LIMIT_FIELDS.forEach((f, i) => {
+          const input = inputs[i];
+          if (input) input.value = capValue(next[`${f.key}Ms`], f);
+        });
+        status.textContent = `Saved the caps for ${ROLE_NAMES[role]?.toLowerCase() ?? role}. Leases already running keep the limits they started with.`;
+      } catch (x) {
+        status.textContent = x.message;
+      }
+    } }, 'Save');
+    return h('tr', {}, h('td', {}, ROLE_NAMES[role] ?? role), ...inputs.map((i) => h('td', {}, i)), h('td', {}, saveButton));
+  });
+  return [
+    h('h2', {}, 'Lease limits'),
+    h('div', { class: 'card' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, 'The most a token may ask for, per role. A lease ends when it has been idle this long, or held this long in all. Reconnect grace is how long a lease waits for a client that lost its connection. Empty a field to go back to the built-in cap.'),
+      h('table', {},
+        h('tr', {}, h('th', {}, 'Role'), ...LIMIT_FIELDS.map((f) => h('th', {}, `${f.label} (${f.unit})`)), h('th', {})),
+        ...rows,
+      ),
+      status,
+    ),
+  ];
 }
 
 render();
@@ -645,12 +761,16 @@ async function recordingsView() {
   );
 }
 
-async function recordingView(id) {
-  const rec = await api('GET', `/v1/recordings/${id}`).catch((x) => ({ error: x.message }));
+async function recordingView(id, view = null) {
+  const rec = await api('GET', withView(`/v1/recordings/${id}`, view)).catch((x) => ({ error: x.message }));
   if (rec.error) {
-    app.replaceChildren(h('p', { class: 'error' }, rec.error), h('a', { href: '/recordings', 'data-link': true }, 'All recordings'));
+    app.replaceChildren(
+      h('p', { class: 'error' }, me ? rec.error : 'This link has expired or is not valid. Ask the person who shared it for a new one.'),
+      me ? h('a', { href: '/recordings', 'data-link': true }, 'All recordings') : '',
+    );
     return;
   }
+  const files = Object.fromEntries(Object.entries(rec.files).map(([k, v]) => [k, withView(v, view)]));
   const title = h('h1', { style: 'margin-bottom:4px' }, `${rec.device ?? 'Device'}, recorded by ${rec.owner}`);
   const meta = h('p', { class: 'muted', style: 'margin-top:0' }, rec.startedAt ? `${new Date(rec.startedAt).toLocaleString()} · ${rec.durationMs === null ? '' : seconds(rec.durationMs)}` : '');
   if (rec.state !== 'ready') {
@@ -659,13 +779,13 @@ async function recordingView(id) {
     return;
   }
 
-  const video = h('video', { src: rec.files.video, controls: true, playsinline: true, preload: 'auto' });
+  const video = h('video', { src: files.video, controls: true, playsinline: true, preload: 'auto' });
   const seek = (ms) => {
     video.currentTime = ms / 1000;
     video.play().catch(() => {});
   };
-  const timeline = await fetch(rec.files.timeline).then((r) => (r.ok ? r.json() : []), () => []);
-  const logText = await fetch(rec.files.log).then((r) => (r.ok ? r.text() : ''), () => '');
+  const timeline = await fetch(files.timeline).then((r) => (r.ok ? r.json() : []), () => []);
+  const logText = await fetch(files.log).then((r) => (r.ok ? r.text() : ''), () => '');
   const log = logText.split('\n').filter(Boolean).flatMap((line) => {
     try {
       const e = JSON.parse(line);
@@ -690,11 +810,13 @@ async function recordingView(id) {
         h('div', { class: 'card' },
           title,
           meta,
+          view ? h('p', { class: 'muted' }, `View only. This link works until ${new Date(viewExpiry(view) ?? 0).toLocaleString()}.`) : '',
           h('div', { class: 'row' },
-            h('button', { onclick: (e) => navigator.clipboard.writeText(location.href).then(() => (e.target.textContent = 'Link copied')) }, 'Copy link'),
-            h('a', { class: 'button', href: rec.files.video, download: `hangar-${id}.mp4` }, 'Video'),
-            h('a', { class: 'button', href: rec.files.screenshot, download: `hangar-${id}.png` }, 'Last screenshot'),
-            h('a', { class: 'button', href: rec.files.log, download: `hangar-${id}.ndjson` }, 'App log'),
+            me ? h('button', { onclick: (e) => navigator.clipboard.writeText(location.origin + location.pathname).then(() => (e.target.textContent = 'Link copied')) }, 'Copy link') : '',
+            me ? shareButton(id) : '',
+            h('a', { class: 'button', href: files.video, download: `hangar-${id}.mp4` }, 'Video'),
+            h('a', { class: 'button', href: files.screenshot, download: `hangar-${id}.png` }, 'Last screenshot'),
+            h('a', { class: 'button', href: files.log, download: `hangar-${id}.ndjson` }, 'App log'),
           ),
         ),
         h('div', { class: 'card' },
@@ -710,6 +832,22 @@ async function recordingView(id) {
       ),
     ),
   );
+}
+
+function shareButton(id) {
+  const button = h('button', { title: 'A link anyone can open for 7 days to watch this recording, without an account', onclick: async () => {
+    button.disabled = true;
+    try {
+      const link = await api('POST', `/v1/recordings/${id}/share`);
+      await navigator.clipboard.writeText(link.url);
+      button.textContent = `View-only link copied, works until ${new Date(link.expiresAt).toLocaleDateString()}`;
+    } catch (x) {
+      button.textContent = x.message;
+    } finally {
+      button.disabled = false;
+    }
+  } }, 'Copy view-only link');
+  return button;
 }
 
 const system = (d) => `${d.model}, ${d.platform === 'android-emulator' ? 'Android' : 'iOS'} ${d.os}`;
@@ -742,10 +880,60 @@ async function runView(id) {
     app.replaceChildren(h('p', { class: 'error' }, first.error), h('a', { href: '/runs', 'data-link': true }, 'All runs'));
     return;
   }
+  let events = null;
+  const follow = () => {
+    events?.close();
+    events = new EventSource(`/v1/runs/${id}/events`);
+    const stream = events;
+    for (const state of ['running', 'passed', 'failed', 'cancelled']) {
+      stream.addEventListener(state, (e) => {
+        show(JSON.parse(e.data));
+        // The server ends the stream once the run is over; without this EventSource reconnects.
+        if (state !== 'running') stream.close();
+      });
+    }
+  };
+  cleanup = () => events?.close();
+  // Hangar keeps a run's environment values in memory only, so after a restart a rerun asks for them again.
+  const status = h('p', { class: 'muted' });
+  const envBox = h('div', { class: 'card', hidden: true });
+  const rerun = async (flow, env) => {
+    status.textContent = `Rerunning ${flow} on a fresh device…`;
+    try {
+      const r = await api('POST', `/v1/runs/${id}/flows/${encodeURIComponent(flow)}/rerun`, env ? { env } : {});
+      envBox.hidden = true;
+      status.textContent = `Rerunning ${flow} on a fresh device. The result shows here when it is done.`;
+      show(r);
+      follow();
+    } catch (x) {
+      status.textContent = x.message;
+      if (x.code === 'ENV_NEEDED') askEnv(flow);
+    }
+  };
+  const askEnv = (flow) => {
+    const text = h('textarea', { rows: 4, placeholder: 'USER=test\nPASSWORD=…', 'aria-label': 'Environment values' });
+    const err = h('p', { class: 'error' });
+    envBox.replaceChildren(
+      h('h2', { style: 'margin-top:0' }, `Environment for ${flow}`),
+      h('p', { class: 'muted' }, 'One KEY=value per line. Hangar uses them for this rerun and does not save them.'),
+      text,
+      h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'primary', onclick: () => {
+        try {
+          void rerun(flow, parseEnv(text.value));
+        } catch (x) {
+          err.textContent = x.message;
+        }
+      } }, 'Rerun'), h('button', { onclick: () => (envBox.hidden = true) }, 'Cancel')),
+      err,
+    );
+    envBox.hidden = false;
+    text.focus();
+  };
   const show = (r) => {
     const cancel = r.state === 'running' && (r.owner === me.name || me.role === 'operator')
       ? h('button', { onclick: () => api('DELETE', `/v1/runs/${id}`).then(show) }, 'Cancel run')
       : '';
+    if (r.state !== 'running' && status.textContent.startsWith('Rerunning')) status.textContent = '';
     app.replaceChildren(
       h('h1', { style: 'margin-bottom:4px' }, `${r.build}, started by ${r.owner}`),
       h('p', { class: 'muted', style: 'margin-top:0' }, `${new Date(r.createdAt).toLocaleString()} · ${r.shards} shard${r.shards === 1 ? '' : 's'} · ${seconds(r.durationMs)} · `, h('span', { class: `state ${r.state}` }, r.state)),
@@ -758,21 +946,57 @@ async function runView(id) {
           h('td', {}, f.shard + 1),
           h('td', {}, f.attempts),
           h('td', { class: `state ${f.status}` }, f.status),
-          h('td', {}, f.recording ? h('a', { href: new URL(f.recording).pathname, 'data-link': true }, 'Recording') : ''),
+          h('td', {},
+            h('div', { class: 'row' },
+              ...flowRecordings(f).map((l) => h('a', { href: l.href, 'data-link': true }, l.label)),
+              canRerun(r, f) ? h('button', { title: 'Run this flow again on a fresh device, recorded', onclick: () => rerun(f.flow) }, 'Rerun') : '',
+            ),
+          ),
         )),
       ),
+      status,
+      envBox,
     );
   };
   show(first);
-  if (first.state === 'running') {
-    const events = new EventSource(`/v1/runs/${id}/events`);
-    for (const state of ['running', 'passed', 'failed', 'cancelled']) {
-      events.addEventListener(state, (e) => {
-        show(JSON.parse(e.data));
-        // The server ends the stream once the run is over; without this EventSource reconnects.
-        if (state !== 'running') events.close();
-      });
-    }
-    cleanup = () => events.close();
-  }
+  if (first.state === 'running') follow();
+}
+
+async function flakyView() {
+  const data = await api('GET', '/v1/tests/flaky');
+  const recordingLink = (url) => {
+    const [link] = flowRecordings({ flow: '', status: 'failed', recording: url });
+    return link ? h('a', { href: link.href, 'data-link': true }, 'Recording') : '';
+  };
+  app.replaceChildren(
+    h('h1', { style: 'margin-bottom:4px' }, 'Flaky flows'),
+    h('p', { class: 'muted', style: 'margin-top:0' }, `From your team's last ${data.runs} finished run${data.runs === 1 ? '' : 's'}. A flow is flaky in a run when it failed and then passed on a retry or a rerun.`),
+    data.tests.length === 0
+      ? h('p', { class: 'card muted' }, 'No flow has failed or been flaky in these runs.')
+      : h('div', { class: 'card' },
+          h('table', {},
+            h('tr', {}, h('th', {}, 'Flow'), h('th', {}, 'Runs'), h('th', {}, 'Flaky'), h('th', {}, 'Failed'), h('th', {}, 'Last')),
+            ...data.tests.map((t) => h('tr', {},
+              h('td', {}, t.test, t.kind !== 'maestro' ? h('span', { class: 'muted' }, ` (${t.kind})`) : ''),
+              h('td', {}, t.runs),
+              h('td', {}, `${percent(t.flakeRate)} (${t.flaky})`),
+              h('td', {}, `${percent(t.failRate)} (${t.failed})`),
+              h('td', { class: `state ${t.lastStatus}` }, t.lastStatus, h('span', { class: 'muted' }, ` · ${new Date(t.lastRunAt).toLocaleDateString()}`)),
+            )),
+          )),
+    h('h2', {}, 'Failures by message'),
+    data.failures.length === 0
+      ? h('p', { class: 'card muted' }, 'No failures.')
+      : h('div', { class: 'card' },
+          h('p', { class: 'muted', style: 'margin-top:0' }, 'Messages that differ only in numbers, ids and timings are counted together.'),
+          h('table', {},
+            h('tr', {}, h('th', {}, 'Message'), h('th', {}, 'Times'), h('th', {}, 'Flows'), h('th', {})),
+            ...data.failures.map((g) => h('tr', {},
+              h('td', {}, h('code', {}, g.example)),
+              h('td', {}, g.count),
+              h('td', {}, g.tests.join(', ')),
+              h('td', {}, h('div', { class: 'row' }, h('a', { href: `/runs/${g.lastRunId}`, 'data-link': true }, 'Last run'), g.recording ? recordingLink(g.recording) : '')),
+            )),
+          )),
+  );
 }

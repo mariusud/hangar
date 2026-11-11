@@ -23,6 +23,9 @@ placed on any Mac with a matching device. If the connection drops, the Mac keeps
 and leases and reconnects, waiting up to 30 s between tries; its leases survive if it is back
 within a minute. `--warm` and `--max` work as they do for `hangar up`.
 
+To start a Mac's Hangar at login or at boot without anyone at it, see
+[unattended.md](unattended.md).
+
 A host token does not expire. Anyone with it can offer devices to your Hangar, so keep it like
 a password.
 

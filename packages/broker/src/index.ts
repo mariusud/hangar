@@ -11,6 +11,8 @@ import { Leases } from './leases/service.ts';
 import { Metrics } from './metrics.ts';
 import { Recordings } from './recordings.ts';
 import { Runs } from './runs.ts';
+import { closeWindowNight } from './reports.ts';
+import { onWindowClosed } from './schedule.ts';
 import { Store, type S3Config } from './store.ts';
 import { Oidc, type OidcConfig } from './oidc.ts';
 import { attachAgents } from './agents.ts';
@@ -55,6 +57,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   const hosts = new Hosts();
   const leases = new Leases(db, hosts);
   hosts.onChange = () => void leases.tick();
+  const stopNights = onWindowClosed((w) => void closeWindowNight(db, w));
   hosts.onHello = (held, link) => {
     for (const leaseId of held) {
       const lease = db.getLease(leaseId);
@@ -129,6 +132,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     close: async () => {
       clearInterval(timer);
       clearInterval(sweeper);
+      stopNights();
       hosts.onChange = () => {};
       leases.stopped = true;
       for (const u of upgrades) {

@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { PRIVACY_SERVICES, type DeviceInfo, type Frame, type KeyModifier, type PrivacyService, type UiNode } from '@hangar/protocol';
 import * as hid from './hid.ts';
+import { iosPredicate, parseIosLine, type LogSource } from '../applog.ts';
+import { forgetCapture } from './capture.ts';
+
+export * from './golden.ts';
+export * from './capture.ts';
 
 const run = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -21,7 +26,7 @@ export class DriverError extends Error {
   }
 }
 
-async function simctl(...args: string[]): Promise<string> {
+export async function simctl(...args: string[]): Promise<string> {
   try {
     const { stdout } = await run('xcrun', ['simctl', ...args], { maxBuffer: MAX_BUFFER });
     return stdout;
@@ -71,6 +76,10 @@ export function stopCompanion(udid: string): void {
   companions.delete(udid);
 }
 
+export function companionSocket(udid: string): string | null {
+  return companions.get(udid)?.socket ?? null;
+}
+
 async function idb(udid: string, ...args: string[]): Promise<string> {
   const companion = companions.get(udid);
   if (!companion) {
@@ -91,35 +100,6 @@ function stderrOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export type Runtime = { identifier: string; version: string; name: string };
-export type DeviceType = { identifier: string; name: string };
-
-export async function runtimes(): Promise<Runtime[]> {
-  const json = JSON.parse(await simctl('list', 'runtimes', '-j')) as {
-    runtimes: { identifier: string; version: string; name: string; isAvailable: boolean; platform?: string }[];
-  };
-  return json.runtimes
-    .filter((r) => r.isAvailable && r.identifier.includes('iOS'))
-    .map(({ identifier, version, name }) => ({ identifier, version, name }));
-}
-
-export async function deviceTypes(): Promise<DeviceType[]> {
-  const json = JSON.parse(await simctl('list', 'devicetypes', '-j')) as {
-    devicetypes: { identifier: string; name: string; productFamily?: string }[];
-  };
-  return json.devicetypes
-    .filter((d) => d.productFamily === 'iPhone' || d.productFamily === 'iPad')
-    .map(({ identifier, name }) => ({ identifier, name }));
-}
-
-export async function create(name: string, deviceType: string, runtime: string): Promise<string> {
-  return (await simctl('create', name, deviceType, runtime)).trim();
-}
-
-export async function clone(sourceUdid: string, name: string): Promise<string> {
-  return (await simctl('clone', sourceUdid, name)).trim();
-}
-
 export async function boot(udid: string): Promise<void> {
   await simctl('bootstatus', udid, '-b');
   await startCompanion(udid);
@@ -138,6 +118,7 @@ export async function shutdown(udid: string): Promise<void> {
 
 export async function remove(udid: string): Promise<void> {
   stopCompanion(udid);
+  forgetCapture(udid);
   await simctl('delete', udid);
 }
 
@@ -151,18 +132,6 @@ export async function listOwned(): Promise<{ udid: string; name: string; state: 
     .flat()
     .filter((d) => d.name.startsWith(NAME_PREFIX))
     .map(({ udid, name, state }) => ({ udid, name, state }));
-}
-
-export async function setLocale(udid: string, locale: string): Promise<void> {
-  await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLanguages', '-array', locale.split('_')[0] ?? locale);
-  await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLocale', locale);
-}
-
-export async function prepareGolden(udid: string): Promise<void> {
-  await simctl('bootstatus', udid, '-b');
-  await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLanguages', '-array', 'en');
-  await simctl('spawn', udid, 'defaults', 'write', '-g', 'AppleLocale', 'en_US');
-  await shutdown(udid);
 }
 
 export async function screenshot(udid: string, format: 'png' | 'jpeg' = 'png', maxSize?: number, quality = 70): Promise<Buffer> {
@@ -597,4 +566,38 @@ export async function versions(): Promise<Record<string, string>> {
     out.idbCompanion = 'missing';
   }
   return out;
+}
+
+export async function deviceName(udid: string): Promise<string> {
+  const owned = await listOwned();
+  return owned.find((d) => d.udid === udid)?.name ?? '';
+}
+
+// Lines the app's own process logs, found by the path of its installed bundle.
+export async function appLogSource(udid: string, bundleId: string): Promise<LogSource> {
+  checkBundleId(bundleId);
+  const container = (
+    await simctl('get_app_container', udid, bundleId, 'app').catch(() => {
+      throw new DriverError('APP_NOT_INSTALLED', `${bundleId} is not installed on this device.`);
+    })
+  ).trim();
+  const predicate = iosPredicate(container);
+  return {
+    key: predicate,
+    command: 'xcrun',
+    args: ['simctl', 'spawn', udid, 'log', 'stream', '--style', 'ndjson', '--level', 'info', '--predicate', predicate],
+    parse: parseIosLine,
+    backfill: async () => {
+      const { stdout } = await run('xcrun', ['simctl', 'spawn', udid, 'log', 'show', '--style', 'ndjson', '--info', '--last', '2m', '--predicate', predicate], { maxBuffer: MAX_BUFFER, timeout: 20_000 });
+      return stdout.split('\n').flatMap((l) => parseIosLine(l) ?? []);
+    },
+  };
+}
+
+export function orientation(): never {
+  throw new DriverError('UNSUPPORTED', 'Rotating an iOS simulator is not supported: simctl has no command for it and the idb companion has no orientation call.');
+}
+
+export function multiTouch(): never {
+  throw new DriverError('UNSUPPORTED', "Pinch and rotate are not supported on iOS simulators: the idb companion's HID call takes one touch point at a time.");
 }

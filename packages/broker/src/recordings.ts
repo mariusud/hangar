@@ -5,13 +5,14 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import type { Op } from '@hangar/protocol';
+import type { LogLine, NetworkEntry, Op } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import type { Principal } from './auth.ts';
 import type { Db, RecordingRow } from './db.ts';
 import { ApiError, type Leases } from './leases/service.ts';
 import type { Lease } from './leases/machine.ts';
 import type { Store } from './store.ts';
+import { Findings, RECORDER } from './findings.ts';
 
 export const RECORDING_PARTS = ['video', 'log', 'screenshot'] as const;
 export type RecordingPart = (typeof RECORDING_PARTS)[number];
@@ -26,8 +27,36 @@ const SAVE_TIMEOUT_MS = 30 * 60_000;
 
 export type TimelineEvent = { at: number; what: string; failed?: string };
 
+// Files the broker writes for a recording itself, next to the ones the Mac uploads.
+export const BROKER_PARTS = ['timeline', 'applog', 'network'] as const;
+export type BrokerPart = (typeof BROKER_PARTS)[number];
+const BROKER_FILES: Record<BrokerPart, string> = { timeline: 'timeline.json', applog: 'applog.json', network: 'network.json' };
+
+export const LOG_LIMIT = 5000;
+export const NETWORK_LIMIT = 2000;
+const TEXT_LIMIT = 2000;
+const COLLECT_EVERY_MS = 10_000;
+
+type Source = { next: number | null; dropped: boolean; error: string | null };
+
+export type Timeline = {
+  recordingId: string;
+  startedAt: number;
+  events: TimelineEvent[];
+  log: LogLine[];
+  network: Map<string, NetworkEntry>;
+  sources: { appLog: Source; network: Source };
+  collecting: Promise<void> | null;
+  timer: NodeJS.Timeout | null;
+};
+
+export type CollectedLog = { lines: LogLine[]; dropped: boolean; error: string | null };
+export type CollectedNetwork = { requests: NetworkEntry[]; dropped: boolean; error: string | null };
+
 export class Recordings {
-  private timelines = new Map<string, { recordingId: string; startedAt: number; events: TimelineEvent[] }>();
+  private timelines = new Map<string, Timeline>();
+  readonly findings: Findings;
+  private collectEveryMs: number;
 
   private db: Db;
   private leases: Leases;
@@ -35,8 +64,10 @@ export class Recordings {
   private store: Store;
   private internalUrl: () => string;
 
-  constructor(db: Db, leases: Leases, store: Store, internalUrl: () => string) {
+  constructor(db: Db, leases: Leases, store: Store, internalUrl: () => string, opts: { collectEveryMs?: number } = {}) {
     this.db = db;
+    this.collectEveryMs = opts.collectEveryMs ?? COLLECT_EVERY_MS;
+    this.findings = new Findings(db, leases, this, store);
     this.leases = leases;
     this.store = store;
     this.dir = store.local('recordings');
@@ -72,6 +103,7 @@ export class Recordings {
     if (!rec) {
       throw new ApiError(409, 'NOT_RECORDING', 'This lease is not being recorded.');
     }
+    await this.collect(leaseId);
     this.db.updateRecording(rec.id, { state: 'saving', endedAt: Date.now() });
     try {
       await this.saveTimeline(leaseId);
@@ -93,16 +125,89 @@ export class Recordings {
     return rec;
   }
 
-  key(id: string, part: RecordingPart | 'timeline'): string {
-    return `recordings/${id}/${part === 'timeline' ? 'timeline.json' : PART_FILES[part].file}`;
+  key(id: string, part: RecordingPart | BrokerPart): string {
+    return `recordings/${id}/${isBrokerPart(part) ? BROKER_FILES[part] : PART_FILES[part].file}`;
   }
 
-  path(id: string, part: RecordingPart | 'timeline'): string {
+  path(id: string, part: RecordingPart | BrokerPart): string {
     return this.store.local(this.key(id, part));
   }
 
+  // The recording a lease is making now and when its video started, or null.
+  current(leaseId: string): { recordingId: string; startedAt: number } | null {
+    const t = this.timelines.get(leaseId);
+    return t ? { recordingId: t.recordingId, startedAt: t.startedAt } : null;
+  }
+
+  // Steps taken from `fromMs` into the recording on.
+  stepsFrom(leaseId: string, fromMs: number): TimelineEvent[] {
+    return (this.timelines.get(leaseId)?.events ?? []).filter((e) => e.at >= fromMs);
+  }
+
+  appLog(leaseId: string): CollectedLog {
+    const t = this.timelines.get(leaseId);
+    return { lines: t?.log ?? [], dropped: t?.sources.appLog.dropped ?? false, error: t?.sources.appLog.error ?? null };
+  }
+
+  networkLog(leaseId: string): CollectedNetwork {
+    const t = this.timelines.get(leaseId);
+    return { requests: [...(t?.network.values() ?? [])], dropped: t?.sources.network.dropped ?? false, error: t?.sources.network.error ?? null };
+  }
+
+  // Reads the app log and network requests the Mac buffered since the last read. One read runs at a time.
+  collect(leaseId: string): Promise<void> {
+    const t = this.timelines.get(leaseId);
+    if (!t) {
+      return Promise.resolve();
+    }
+    t.collecting ??= (async () => {
+      await this.collectSource(leaseId, t, 'appLog');
+      await this.collectSource(leaseId, t, 'network');
+    })().finally(() => {
+      t.collecting = null;
+    });
+    return t.collecting;
+  }
+
+  private async collectSource(leaseId: string, t: Timeline, source: 'appLog' | 'network'): Promise<void> {
+    const state = t.sources[source];
+    let result: unknown;
+    try {
+      result = (await this.leases.op(RECORDER, leaseId, { op: source, limit: 1000, ...(state.next === null ? {} : { since: state.next }) })).result;
+    } catch (err) {
+      state.error = err instanceof Error ? err.message : String(err);
+      return;
+    }
+    if (!isPage(result)) {
+      state.error = 'The Mac answered with something other than a page.';
+      return;
+    }
+    state.error = null;
+    state.dropped ||= result.dropped;
+    state.next = result.next;
+    if (source === 'appLog') {
+      t.log.push(...result.items.filter(isLogLine).map(boundLine));
+      if (t.log.length > LOG_LIMIT) {
+        t.log.splice(0, t.log.length - LOG_LIMIT);
+        state.dropped = true;
+      }
+      return;
+    }
+    for (const entry of result.items.filter(isNetworkEntry)) {
+      t.network.delete(entry.id);
+      t.network.set(entry.id, boundRequest(entry));
+    }
+    for (const id of t.network.keys()) {
+      if (t.network.size <= NETWORK_LIMIT) {
+        break;
+      }
+      t.network.delete(id);
+      state.dropped = true;
+    }
+  }
+
   private async removeFiles(id: string): Promise<void> {
-    await this.store.remove([...RECORDING_PARTS.map((p) => this.key(id, p)), this.key(id, 'timeline'), `recordings/${id}`]);
+    await this.store.remove([...RECORDING_PARTS.map((p) => this.key(id, p)), ...BROKER_PARTS.map((p) => this.key(id, p)), `recordings/${id}`]);
   }
 
   async delete(p: Principal, id: string): Promise<void> {
@@ -159,6 +264,7 @@ export class Recordings {
       await this.removeFiles(rec.id);
       this.db.updateRecording(rec.id, { state: 'deleted' });
     }
+    await this.findings.sweep(now - RETENTION_MS);
   }
 
   private async begin(leaseId: string, p?: Principal): Promise<RecordingRow> {
@@ -181,10 +287,25 @@ export class Recordings {
     ) as Record<RecordingPart, string>;
     const startedAt = Date.now();
     this.db.updateRecording(rec.id, { state: 'recording', startedAt });
-    this.timelines.set(leaseId, { recordingId: rec.id, startedAt, events: [] });
+    const t: Timeline = {
+      recordingId: rec.id,
+      startedAt,
+      events: [],
+      log: [],
+      network: new Map(),
+      sources: { appLog: { next: null, dropped: false, error: null }, network: { next: null, dropped: false, error: null } },
+      collecting: null,
+      timer: null,
+    };
+    this.timelines.set(leaseId, t);
     try {
       const { result } = await this.leases.op(holder, leaseId, { op: 'recordStart', uploads });
       this.db.updateRecording(rec.id, { device: (result as { device?: string } | undefined)?.device ?? null });
+      if (this.collectEveryMs > 0 && this.timelines.get(leaseId) === t) {
+        t.timer = setInterval(() => void this.collect(leaseId), this.collectEveryMs);
+        t.timer.unref();
+        void this.collect(leaseId);
+      }
     } catch (err) {
       this.timelines.delete(leaseId);
       this.db.updateRecording(rec.id, { state: 'failed', error: (err as Error).message });
@@ -221,11 +342,73 @@ export class Recordings {
     if (!t) {
       return;
     }
+    if (t.timer) {
+      clearInterval(t.timer);
+    }
+    // A read that is under way when the lease ends still lands in the files.
+    await t.collecting?.catch(() => {});
     this.timelines.delete(leaseId);
     await mkdir(join(this.dir, t.recordingId), { recursive: true });
-    await writeFile(this.path(t.recordingId, 'timeline'), JSON.stringify(t.events));
-    await this.store.saved(this.key(t.recordingId, 'timeline'));
+    const log: CollectedLog = { lines: t.log, dropped: t.sources.appLog.dropped, error: t.sources.appLog.error };
+    const network: CollectedNetwork = { requests: [...t.network.values()], dropped: t.sources.network.dropped, error: t.sources.network.error };
+    const files: [BrokerPart, string][] = [
+      ['timeline', JSON.stringify(t.events)],
+      ['applog', JSON.stringify(log)],
+      ['network', JSON.stringify(network)],
+    ];
+    for (const [part, data] of files) {
+      await writeFile(this.path(t.recordingId, part), data);
+      await this.store.saved(this.key(t.recordingId, part));
+    }
   }
+}
+
+export function isBrokerPart(part: string): part is BrokerPart {
+  return BROKER_PARTS.some((p) => p === part);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function isPage(v: unknown): v is { items: unknown[]; next: number; dropped: boolean } {
+  return isRecord(v) && Array.isArray(v.items) && typeof v.next === 'number' && typeof v.dropped === 'boolean';
+}
+
+function isLogLine(v: unknown): v is LogLine {
+  return isRecord(v) && typeof v.time === 'number' && typeof v.level === 'string' && typeof v.message === 'string';
+}
+
+function isNetworkEntry(v: unknown): v is NetworkEntry {
+  return isRecord(v) && typeof v.id === 'string' && typeof v.method === 'string' && typeof v.url === 'string' && typeof v.startedAt === 'number';
+}
+
+function clip(text: string): string {
+  return text.length > TEXT_LIMIT ? `${text.slice(0, TEXT_LIMIT)}...` : text;
+}
+
+export function boundLine(l: LogLine): LogLine {
+  return { time: l.time, level: l.level, message: clip(l.message), ...(typeof l.tag === 'string' ? { tag: l.tag.slice(0, 200) } : {}) };
+}
+
+export function boundRequest(e: NetworkEntry): NetworkEntry {
+  const out: NetworkEntry = { id: e.id.slice(0, 200), method: e.method.slice(0, 20), url: clip(e.url), startedAt: e.startedAt };
+  if (typeof e.status === 'number') {
+    out.status = e.status;
+  }
+  if (typeof e.mimeType === 'string') {
+    out.mimeType = e.mimeType.slice(0, 200);
+  }
+  if (typeof e.durationMs === 'number') {
+    out.durationMs = e.durationMs;
+  }
+  if (typeof e.bytes === 'number') {
+    out.bytes = e.bytes;
+  }
+  if (typeof e.error === 'string') {
+    out.error = clip(e.error);
+  }
+  return out;
 }
 
 function point(p: [number, number]): string {

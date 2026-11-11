@@ -1,13 +1,14 @@
 # Roadmap
 
-Each milestone ends in a release, and the README and docs describe only what that release does.
+The work is in streams that can run at the same time (see "Where Hangar is going"). The README and
+docs describe only what has shipped.
 
 ## Goal
 
-Hangar is the fastest way for React Native and Expo teams to give every developer, QA tester, CI
-job and AI agent a fresh iOS simulator or Android emulator from a Mac mini in the office. The
-targets and their benchmarks are in [the design](docs/design.md#targets); a target counts as met
-only when its benchmark runs in CI on a real Mac mini and the README shows the number.
+Hangar gives a React Native or Expo team one pool of fresh iOS simulators and Android emulators on
+its own Macs, shared on a schedule by CI, by people in the browser and by the team's own AI agents.
+The targets and their benchmarks are in [the design](docs/design.md#targets); a target counts as
+met only when its benchmark runs on a real Mac mini and the README shows the number.
 
 ## Current status
 
@@ -136,96 +137,188 @@ Done:
   off-screen for 31 s, and companions left by a Hangar that was killed hard are stopped when
   the next one starts.
 
-To do:
+## Where Hangar is going
 
-- The input benchmark measures iOS, not Hangar. A trace of 8 swipes through the real stack
-  (2026-11-07): the viewer's input reaches the HID call in 1 to 7 ms (20 ms on the first), and
-  the first changed frame comes 56 to 112 ms later (382 ms on the first after Settings launches).
-  The same swipe straight on the driver, mid-list, shows its first frame in 18 ms p50, 74 ms p95.
-  The time goes to iOS recognizing a scroll that starts on a table row. Still to do: a benchmark
-  whose input changes the screen at once, so the target measures Hangar.
-- WebRTC for video and input, with TURN in the broker, once a WAN measurement shows the WebSocket
-  path is too slow. On one machine the transport is 20 ms of the 339 ms p95.
-- The hardened level: the whole host inside one Tart macOS VM that joins with `hangar join`
-  (decision 0010). First measure, in a guest: simulator boot and frame rate, whether H.264
-  encoding is hardware or software and its CPU per stream, clone and boot time, idle memory.
-  Needs a macOS VM image with Xcode, tens of GB to download. Tart's license needs a reading.
-- A Homebrew formula, which needs a published release to point at.
-- The broker's Docker image in a real deployment with an agent joined to it. It builds (411 MB)
-  and starts, serves the console and keeps its data volume across restarts (2026-11-08).
-- A public demo that resets itself.
-- Not checked: simulators booting for a `hangar` user that is logged in in the background.
+The target README is a scheduled pool of simulators and emulators on a team's own Macs. CI gets
+devices on demand, people use them in the browser during the day, and at night a booking holds
+devices for the nightly suite and the team's own QA agents. Every lease keeps the same record,
+and a morning report collects what the night found. Hangar never ships an agent or calls a model.
 
-## Milestone 1: one Mac, iOS simulators, fast
+The work is split into streams that can run at the same time, one agent or person per stream.
+Each stream owns its files. Where two streams need the same file, the table says who owns it and
+the other only adds entries to it (a route, a tool, a type), never changes existing code.
 
-`hangar up` and `hangar doctor`, the broker and agent in one process on SQLite, leases with the
-fair queue and wipe on release, the device API, MCP, the TypeScript SDK and CLI, built-in
-accounts with invite links, the console with the native H.264 stream and touch input,
-recordings, Prometheus metrics, and the benchmark suite.
+### Rules for parallel work
 
-Done when:
+- Stream 0 goes first and alone. Everything else waits for it.
+- Each stream works in its own git worktree and branch, touches only the files it owns, and ends
+  with `pnpm typecheck` and `pnpm test` passing and a suggested commit message. Nobody commits
+  for the maintainer.
+- Shared files take additions only: `packages/protocol/src/index.ts` (new types), the route and
+  tool registries from stream 0, and `docs/features.md` (one line per shipped feature).
+- A change to the design gets a decision file first. Stream A writes decision 0012 (the schedule)
+  before it writes code; it replaces decision 0011.
+- Docs describe what exists. Stream H writes a guide only after the feature is merged.
 
-1. On a Mac with only Xcode installed, `npx hangar up` and opening the printed link get a
-   teammate on another machine driving a simulator in the browser, in under 5 minutes, with no
-   config file. Tested by someone who has not used Hangar before.
+### Stream 0: make room (one agent, first)
+
+Split the files every stream would otherwise edit:
+
+- `packages/broker/src/http.ts` (906 lines) into one route file per area under
+  `packages/broker/src/routes/` (leases, runs, recordings, images, hosts, people), with one list
+  that registers them.
+- The MCP tools in `mcp.ts` and `mcp-mobile.ts` into `packages/broker/src/tools/`, one file per
+  area, with one list that registers them.
+- The golden-device code in `packages/agent/src/drivers/ios/index.ts` into `golden.ts`.
+
+Done when the diff moves code without changing behaviour and every test passes.
+
+### Who owns what
+
+| Stream | Owns |
+|---|---|
+| A. Leases and schedule | `broker/src/leases/`, `broker/src/schedule.ts` (new), `routes/leases.ts`, `routes/schedule.ts`, `tools/leases.ts`, `hangar/src/client/` lease and booking calls |
+| B. Test runs | `broker/src/runs.ts`, `routes/runs.ts`, `hangar/src/run.ts`, `hangar/src/client/maestro.ts`, `action.yml`, `agent/src/xcuitest.ts` |
+| C. Evidence and night reports | `broker/src/recordings.ts`, `broker/src/findings.ts` (new), `broker/src/reports.ts` (new), `routes/recordings.ts`, `routes/findings.ts`, `tools/findings.ts` |
+| D. Device tools | `agent/src/drivers/` except `golden.ts`, `agent/src/tunnels.ts`, `agent/src/android.ts`, `tools/device.ts` |
+| E. Device images | `broker/src/images.ts`, `routes/images.ts`, `agent/src/drivers/ios/golden.ts` |
+| F. Host operations | `hangar/src/up.ts`, `hangar/src/service.ts`, doctor, `bench/`, `e2e/`, `agent/native/screen.swift`, `hosts/versions.json` (new) |
+| G. Console | `packages/console/` |
+| H. Docs and launch | `README.md`, `docs/`, `examples/`, `docs/assets/` |
+
+### Wave 1: start together, after stream 0
+
+**A1. Leases that last.** An idle timeout per token and role, capped by the operator (today it is
+a fixed 5 minutes). A longest-lease cap, 8 hours by default. A keepalive MCP tool. Reattach by
+lease id after a disconnect, with a grace period before the wipe. Done when an agent that
+restarts mid-task gets its device back, in the property tests and on the office Mac mini.
+
+**B1. Better test runs.** Record the first failed attempt, not only the retry. Rerun one flow
+(`POST /v1/runs/:id/flows/:flow/rerun`). One pull request comment from `action.yml` with passed,
+flaky and failed flows and a video link for each failure, plus a nightly cron example. Flake rate
+per flow and failures grouped by error, from the history `GET /v1/tests` already keeps.
+
+**D1. Device tools agents ask for.** The app log through `simctl spawn ... log stream` filtered to
+the app, and `adb logcat` on Android. JavaScript evaluate and console through the Metro and Hermes
+inspector the tunnel already carries. Network requests through the CDP Network domain on React
+Native 0.83 and later, and a `fetch`/XHR patch before that. Two-finger HID for pinch and rotate if
+the idb companion sends two contacts; check first. Orientation.
+
+**E1. Images with a signed-in user.** `hangar image set --sign-in <file>` runs a sign-in Maestro
+flow once on the golden device, with the account's secrets from the environment, never from the
+repo. Permissions granted in the image with `simctl privacy`.
+
+**F1. A Mac that runs alone.** A LaunchDaemon or a background `hangar` user, checked through a
+real reboot with nobody logged in. `hangar doctor` fixes the idb companion when Homebrew refuses
+it because the Command Line Tools are older than Xcode. A smoke test on each new Xcode (boot,
+clone, capture, tree, tap, two Maestro flows, wipe) that writes `hosts/versions.json`, and a host
+that won't schedule on an Xcode that hasn't passed. A fallback when the IOSurface capture breaks:
+`idb video-stream`, then JPEG screenshots.
+
+**G1. Console wiring for what exists.** An image picker when leasing, buttons for locale, dark
+mode and rotation (the presets exist in the API), and a view-only link to one lease or recording.
+
+**H1. Docs that can be written now.** `docs/licensing.md`, which links Apple's terms and claims
+nothing. Remove the README line saying XCUITest and Espresso work the same way until B3 runs them
+for real. Update `docs/comparison.md` so it makes no claims about other tools' security and uses
+no "unique".
+
+### Wave 2: needs wave 1
+
+**A2. Held devices** (needs A1). A lease can end in a held state instead of a wipe, with its own
+time limit that counts against the quota, and a person can take it over.
+
+**A3. Bookings, priority and preemption** (needs A1 and decision 0012). A booking has a name, a
+device count, days, a window, an image and a report target. CI keeps a floor that bookings can't
+take. A lease from a lower priority gets a warning and ends two minutes later when a higher one
+needs the device, with the reason recorded; an interrupted CI shard reruns. Property tests: an
+agent that overruns its window never starves morning CI, and two bookings never hold one device.
+`hangar book` and `hangar connect night`, which makes a token that works only inside a booking.
+
+**B2. Hold on failure** (needs A2). `hangar run maestro --hold 30m` keeps the failed shard's device,
+and the pull request comment links to it.
+
+**C1. Findings and the morning report** (needs D1 for logs and network, A3 for the window end).
+Every lease's record gains the app log and network requests. A `report_finding` MCP tool files a
+title and description with the last two minutes of video, the taps, the log and a screenshot. A
+night run groups a booking's leases and findings, and when the window closes Hangar posts the
+report to a Slack webhook or a GitHub issue. Build it against a manual "end the night" call first,
+so it doesn't wait for A3.
+
+**G2. Console for wave 2.** The Schedule page, the held-device page with the flow's steps beside the
+stream and a rerun button, flake rate on the Runs page, and a page per night with its findings.
+
+**E2. Image refresh.** Rebuild an image when a new app build lands, without ending active leases.
+
+### Wave 3: proof and launch
+
+**C2. Open again.** Replay a finding's taps on a fresh lease of the same image.
+
+**B3. XCUITest and Espresso for real**, against a real UI test target and a real test APK.
+
+**F2. Numbers on a quiet Mac mini.** The office suite serially, then on 2 and 3 shards; flake rate
+over 100 runs from the same golden device; lease, clone and wipe times. These need the office Mac
+mini and the maintainer's go-ahead, since they are benchmark runs.
+
+**H2. Launch.** `examples/night-qa` with a brief and an MCP settings file. Guides for Maestro,
+night QA and device images. The README from `.agents/README-target.md` once everything in it
+exists, with the measured numbers. A new header image and GIF. npm under Apache-2.0.
+
+### Using it for real
+
+Alongside the streams, one office Mac mini moves its real work to Hangar, outside this repo:
+
+- An assistant agent hosted in the cloud, which reaches the Mac over Tailscale and today uses
+  another tool server, after A1 and D1.
+- A nightly e2e suite on `hangar run maestro` with a device image of the app, after B1 and E1.
+- Night QA with the team's own agent, after A3 and C1.
+
+### Release gates
+
+The first public release ships when these hold, each checked on a real Mac mini:
+
+1. On a Mac with only Xcode installed, `npx hangar up` and the printed link get a teammate on
+   another machine using a simulator in the browser in under 5 minutes, with no config file.
+   Tested by someone who hasn't used Hangar before.
 2. `bench/stream`: glass to glass p95 under 50 ms on a LAN, 60 fps, with 6 simulators streaming
    on one Mac mini; tap to first changed frame p95 under 80 ms.
 3. `bench/lease`: lease from the warm pool to an interactive device, p95 under 2 s.
-4. An AI agent does lease, install, screenshot, tree, tap by label over MCP, added with the one
-   line the console shows.
-5. A tester leases a simulator in the console, uses it by touch, and gets a bug link with the
-   recording.
-6. Two clients asking for the last free device at the same moment: one gets it, the other is
+4. An AI agent leases, installs, takes a screenshot, reads the tree and taps by label over MCP,
+   added with the one line the console shows.
+5. Two clients asking for the last free device at the same moment: one gets it, the other is
    queued. The next lease of a released device finds no trace of the previous app, data or
-   keychain. Both checked in the end-to-end suite.
-7. The Mac reboots, and Hangar is back with nobody logged in, or with auto-login set up by
-   `hangar up` if that fails.
+   keychain.
+6. The Mac reboots, and Hangar comes back with nobody logged in.
+7. A night booking runs four agents and the nightly suite, ends on time, and posts its report;
+   a pull request at 05:50 still gets a device.
 
-## Milestone 2: the React Native workflow
+### Later
 
-- `npx hangar run ios`: build locally or take an EAS or Bazel artifact, install on a leased
-  simulator, connect the app to the developer's own Metro through the broker. `bench/metro`:
-  Fast Refresh on the remote simulator under 1 s.
-- The dev menu, deep links, simulated push, permissions, locale and location presets as API
-  calls and MCP tools.
-- React DevTools, the Hermes debugger and the network inspector through the lease.
-- Maestro runs sharded over devices, with retries, merged JUnit and per-test video, the runs page
-  in the console, a GitHub Action. `bench/shard`: 200 tests over 6 simulators, 5 times faster
-  than on one.
-- Docs: an Expo quickstart, a GitHub Actions recipe, an agent recipe for Claude Code and Cursor.
-
-## Milestone 3: Android, more hosts
-
-- Android emulators on Mac and in Linux containers with KVM, Android phones over USB.
-- `hangar join` for more Macs and Linux boxes, placed by class, capacity and team.
-- The broker as a container image, `hangar export` and `hangar import`, the Helm chart.
-- XCUITest and Espresso runs, the Appium endpoint at `/wd/hub`.
-- OIDC, teams and quotas, Postgres, S3-compatible artifact storage.
-- The agent as its own macOS user, and an optional Tart VM image users build themselves.
-
-## Milestone 4: device images and iPhones
-
-- Device images: a declared state (OS runtime, app build, signed-in test account, permissions,
-  locale) built once, stored by content hash, copied to every host. Started: an operator declares
-  an image (apps, locale, appearance) with `PUT /v1/images/:name` or `hangar image set`, each iOS
-  host builds it once as its own golden device and keeps clones warm, and `class.image` leases
-  one ([guide](docs/guides/device-images.md)). On this Mac a lease asked for right after the
-  declaration queued, the image built in about 40 s, and the lease was active at 44 s on a clone
-  with the declared locale and appearance. Not yet: Android images,
-  signed-in accounts, permissions.
+- WebRTC for video and input, with TURN in the broker, once a measurement over the internet shows
+  the WebSocket path is too slow. On one machine the transport is 20 ms of the 339 ms p95.
+- A benchmark whose input changes the screen at once, so the input target measures Hangar rather
+  than iOS (see the trace under "Hangar 2").
+- The hardened level: the whole host inside one Tart macOS VM that joins with `hangar join`
+  (decision 0010), measured in a guest first. Tart is being relicensed more permissively.
+- The broker's Docker image in a real deployment with an agent joined, and a lint and install of
+  the Helm chart.
+- A second real Mac joined to a broker.
+- A Homebrew formula, once a release exists.
+- A public demo that resets itself.
+- An agent-device provider plugin, so agent-device users can lease Hangar devices.
+- Android emulators in Linux containers with KVM, Android phones over USB, Android images.
 - Physical iPhones in the same pool and API.
-- Booking a phone for a time window.
-
-## Integrations outside this repo
-
-- Bazel, through rules_react_native: a rule that uploads a built `.app` or `.apk` to Hangar, and a
-  `react_native_device_test` rule that runs Maestro flows on the fleet with `hangar run`, so Bazel
-  caches device test results by the app's and flows' content. Hangar itself never depends on
-  Bazel.
+- The Appium endpoint at `/wd/hub`.
+- Postgres (decision 0009), and S3, OIDC and Postgres checked against real services.
+- Bazel, through rules_react_native: a rule that uploads a built app to Hangar, and a
+  `react_native_device_test` rule that runs Maestro flows with `hangar run`. Hangar never depends
+  on Bazel.
 
 ## Not planned
 
 - A hosted service, or features for reselling devices to third parties.
 - Telemetry of any kind.
-- A test framework or flow format of Hangar's own.
+- An AI QA agent, exploration prompts, or triage of findings. Teams bring their own agent.
+- A built-in cron. A booking holds devices; the team's own scheduler starts the agent.
+- A test framework, flow format or flow recorder of Hangar's own. Maestro Studio records flows.
 - Raw shell access to hosts through the API.

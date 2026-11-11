@@ -1,7 +1,7 @@
 
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { Account, Db, TokenRow } from './db.ts';
+import type { Account, Db, TokenLimitRow, TokenRow } from './db.ts';
 
 const scryptAsync = promisify(scrypt);
 
@@ -10,6 +10,8 @@ export type Principal = {
   name: string;
   role: Account['role'];
   scopes: string[];
+  // The bearer token, when there is one, and what it allows its leases.
+  token?: { hash: string } & TokenLimitRow;
 };
 
 export function sha256(s: string): string {
@@ -109,7 +111,8 @@ export function authenticate(
     }
     const account = db.getAccount(token.accountId);
     const scopes = account?.role === 'operator' ? ['install:upload', ...token.scopes] : token.scopes;
-    return account ? { accountId: account.id, name: account.name, role: account.role, scopes } : null;
+    const limits = db.tokenLimits(token.hash) ?? { agent: false, idleMs: null, maxMs: null, graceMs: null };
+    return account ? { accountId: account.id, name: account.name, role: account.role, scopes, token: { hash: token.hash, ...limits } } : null;
   }
   const session = readCookie(headers.cookie, SESSION_COOKIE);
   if (session) {

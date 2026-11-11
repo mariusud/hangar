@@ -12,7 +12,7 @@ Maestro jobs, with or without the rest of EAS. Physical phones are on the [roadm
   they do locally.
 - **Test every pull request.** The GitHub Action splits your Maestro flows over fresh devices,
   runs a failed flow once more, and writes one JUnit report with a video of each failure.
-  XCUITest and Espresso work the same way.
+  XCUITest and Espresso runs are built but haven't run against a real test target yet.
 - **Let AI agents check their own work.** Claude Code, Cursor or any MCP client can take a device,
   tap through your app and read what is on the screen.
 - **Try a build by hand.** Open a device in the browser, click and type on it, and send a
@@ -71,7 +71,7 @@ the cloud and can't reach your network.
 | | Hangar | Simlock | Argent | Expo Simulators |
 |---|---|---|---|---|
 | Made for | People, CI and agents | Coding agents | One agent, locally | Agents, hosted |
-| Use a device in the browser | Yes | Watch only | Not documented | Yes |
+| Use a device in the browser | Yes | Yes, off by default | Not documented | Yes |
 | Sharded CI runs with JUnit | Yes | Not documented | Not documented | Not documented |
 | Fast Refresh on a leased device | Yes | Metro tunnel only | Local only | Yes |
 | Physical phones | Not yet | Yes | Yes | No |

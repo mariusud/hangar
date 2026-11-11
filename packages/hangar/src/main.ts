@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { HangarError } from './client/index.ts';
 import { CLIENT_HELP, clientCommand } from './client.ts';
 import { RUN_HELP, runAndroid, runEspressoCommand, runIos, runMaestroCommand, runXcuitestCommand } from './run.ts';
-import { installService, uninstallService } from './service.ts';
+import { installService, serviceUpArgs, uninstallService } from './service.ts';
 import { exportData, importData } from './backup.ts';
 import { brokerOnly, doctor, joinBroker, joinToken, printChecks, up } from './up.ts';
 
@@ -14,7 +14,10 @@ Server
                                                  run Hangar on this Mac; --android adds
                                                  emulators from that Android virtual device
   hangar up --install [same options]             run it as a service that starts at login
-  hangar up --uninstall                          remove the service
+  sudo hangar up --install --system --user <name> [same options]
+                                                 start it at boot as that user, with
+                                                 nobody logged in (a LaunchDaemon)
+  hangar up --uninstall [--system]               remove the service
   hangar doctor                                  check this Mac
 
 More Macs
@@ -37,14 +40,14 @@ async function main(): Promise<void> {
     case 'up': {
       const { values } = parseArgs({
         args: rest,
-        options: { port: { type: 'string' }, warm: { type: 'string' }, max: { type: 'string' }, url: { type: 'string' }, android: { type: 'string' }, install: { type: 'boolean' }, uninstall: { type: 'boolean' } },
+        options: { port: { type: 'string' }, warm: { type: 'string' }, max: { type: 'string' }, url: { type: 'string' }, android: { type: 'string' }, install: { type: 'boolean' }, uninstall: { type: 'boolean' }, system: { type: 'boolean' }, user: { type: 'string' } },
       });
       if (values.uninstall) {
-        await uninstallService();
+        await uninstallService({ system: values.system ?? false });
         return;
       }
       if (values.install) {
-        await installService(rest.filter((a) => a !== '--install'));
+        await installService(serviceUpArgs(rest), { system: values.system ?? false, ...(values.user ? { user: values.user } : {}) });
         return;
       }
       await up({
@@ -104,6 +107,9 @@ async function main(): Promise<void> {
       await runIos(rest.slice(1));
       return;
     }
+    case 'night':
+      await (await import('./night.ts')).nightCommand(rest);
+      return;
     case 'doctor': {
       const checks = await doctor();
       printChecks(checks);

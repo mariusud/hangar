@@ -23,6 +23,9 @@ import {
   type UiNode,
 } from '@hangar/protocol';
 import * as sim from './drivers/ios/index.ts';
+import { cursor, LeaseTools, pageLimit } from './drivers/devtools.ts';
+import type { JsTools } from './drivers/cdp.ts';
+import { ToolError } from './drivers/tool-error.ts';
 import { Tunnels } from './tunnels.ts';
 import { xcuitest } from './xcuitest.ts';
 
@@ -40,8 +43,6 @@ export type AgentOptions = {
 type Device = AgentDevice & { leaseId: string | null; screen: Frame | null };
 
 type Golden = { udid: string; model: string; os: string };
-
-type ImageEntry = { image: DeviceImage; golden: Golden | null; failed: boolean };
 
 type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> | null; wantH264: boolean };
 
@@ -70,13 +71,16 @@ export function defaultMaxDevices(memoryBytes = totalmem(), cores = cpus().lengt
 export class Agent {
   private devices = new Map<string, Device>();
   private golden: Golden | null = null;
-  private images = new Map<string, ImageEntry>();
+  private images = new Map<string, sim.ImageSlot>();
+  private retiring: string[] = [];
+  private cloneOf = new Map<string, string>();
   private imageWork: Promise<void> = Promise.resolve();
   private filling = false;
   private streams = new Map<string, Stream>();
   private stopped = false;
   private tunnels: Tunnels;
   private recordings = new Map<string, Recording>();
+  private tools = new LeaseTools();
   readonly maxDevices: number;
   readonly warm: number;
 
@@ -94,7 +98,7 @@ export class Agent {
   }
 
   async start(): Promise<void> {
-    sim.screenBinary().catch((err: Error) => this.log(`${err.message} Streams will use JPEG.`));
+    sim.screenBinary().catch((err: Error) => this.log(`${err.message} Streams will use the idb video stream, or JPEG if that fails too.`));
     await sim.stopLeftoverCompanions();
     for (const d of await sim.listOwned()) {
       if (!d.name.startsWith(`${sim.NAME_PREFIX}golden-`)) {
@@ -131,6 +135,7 @@ export class Agent {
   async stop(): Promise<void> {
     this.stopped = true;
     this.tunnels.stopAll();
+    this.tools.closeAll();
     for (const leaseId of this.streams.keys()) {
       await this.endStreams(leaseId);
     }
@@ -143,33 +148,44 @@ export class Agent {
 
   private imageOffers(): { model: string; os: string; image: string }[] {
     const g = this.golden;
-    return g ? [...this.images.values()].filter((e) => !e.failed).map((e) => ({ model: g.model, os: g.os, image: e.image.name })) : [];
+    return g ? sim.readyImages(this.images).map((image) => ({ model: g.model, os: g.os, image })) : [];
   }
 
   private async setImages(images: DeviceImage[]): Promise<void> {
     const offered = JSON.stringify(this.imageOffers());
-    const wanted = new Map(images.map((i) => [i.name, i]));
-    for (const [name, entry] of this.images) {
-      if (wanted.get(name)?.id === entry.image.id) {
-        continue;
-      }
-      this.images.delete(name);
-      for (const d of this.devices.values()) {
-        if (d.image === name && d.state === 'ready') {
-          this.devices.delete(d.deviceId);
-          await sim.remove(d.deviceId).catch(() => {});
-        }
+    const plan = sim.planImages(this.images, images);
+    this.images = plan.slots;
+    this.retiring.push(...plan.retire);
+    for (const d of [...this.devices.values()]) {
+      if (d.image !== undefined && plan.drop.includes(d.image) && d.state === 'ready') {
+        this.devices.delete(d.deviceId);
+        await sim.shutdown(d.deviceId).catch(() => {});
+        await sim.remove(d.deviceId).catch(() => {});
       }
     }
-    for (const image of images) {
-      if (!this.images.has(image.name)) {
-        this.images.set(image.name, { image, golden: null, failed: false });
-      }
+    if (plan.drop.length) {
+      this.publish();
     }
+    await this.retireGoldens();
     if (JSON.stringify(this.imageOffers()) !== offered) {
       await this.hello();
     }
     await this.buildImages();
+  }
+
+  // A golden from an older declaration goes once no device cloned from it is left.
+  private async retireGoldens(): Promise<void> {
+    const live = new Set(this.devices.keys());
+    for (const [device] of this.cloneOf) {
+      if (!live.has(device)) {
+        this.cloneOf.delete(device);
+      }
+    }
+    const done = sim.retirable(this.retiring, this.cloneOf, live);
+    this.retiring = this.retiring.filter((u) => !done.includes(u));
+    for (const udid of done) {
+      await sim.remove(udid).catch((err) => this.log(`Could not delete an old image device: ${err}`));
+    }
   }
 
   private async buildImages(): Promise<void> {
@@ -177,46 +193,41 @@ export class Agent {
     if (!base) {
       return;
     }
+    let offered = JSON.stringify(this.imageOffers());
     const owned = await sim.listOwned();
-    const goldenName = (e: ImageEntry): string => `${sim.NAME_PREFIX}golden-image-${e.image.id}-${base.model.replace(/\s+/g, '-')}-${base.os}`;
-    const names = new Set([...this.images.values()].map(goldenName));
+    const names = new Set([...this.images.values()].map((s) => sim.goldenImageName(s.image.id, base.model, base.os)));
     for (const d of owned) {
-      if (d.name.startsWith(`${sim.NAME_PREFIX}golden-image-`) && !names.has(d.name)) {
+      if (d.name.startsWith(`${sim.NAME_PREFIX}golden-image-`) && !names.has(d.name) && !this.retiring.includes(d.udid)) {
         await sim.remove(d.udid).catch(() => {});
       }
     }
-    for (const entry of this.images.values()) {
-      if (entry.golden || entry.failed || this.stopped) {
+    for (const slot of this.images.values()) {
+      if (slot.golden || slot.failed || this.stopped) {
         continue;
       }
-      const name = goldenName(entry);
+      const name = sim.goldenImageName(slot.image.id, base.model, base.os);
       const existing = owned.find((d) => d.name === name);
       if (existing) {
-        entry.golden = { ...base, udid: existing.udid };
+        slot.golden = existing.udid;
+        this.retiring = this.retiring.filter((u) => u !== existing.udid);
         continue;
       }
-      this.log(`Building image ${entry.image.name}.`);
+      this.log(`Building image ${slot.image.name}.`);
       const udid = await sim.clone(base.udid, name);
       try {
-        await sim.boot(udid);
-        for (const app of entry.image.apps) {
-          await this.install(udid, app.url, app.sha256);
-        }
-        if (entry.image.locale) {
-          await sim.setLocale(udid, entry.image.locale);
-        }
-        if (entry.image.appearance) {
-          await sim.appearance(udid, entry.image.appearance);
-        }
-        await sim.shutdown(udid);
-        entry.golden = { ...base, udid };
-        this.log(`Image ${entry.image.name} is ready.`);
-      } catch (err) {
-        entry.failed = true;
-        this.log(`Image ${entry.image.name} failed to build: ${err instanceof Error ? err.message : err}`);
-        await sim.remove(udid).catch(() => {});
+        await sim.buildImage(udid, slot.image, sim.imageSteps((u, app) => this.install(u, app.url, app.sha256)));
+        slot.golden = udid;
+        this.log(`Image ${slot.image.name} is ready.`);
         await this.hello();
+        offered = JSON.stringify(this.imageOffers());
+      } catch (err) {
+        slot.failed = true;
+        this.log(`Image ${slot.image.name} failed to build: ${err instanceof Error ? err.message : err}`);
+        await sim.remove(udid).catch(() => {});
       }
+    }
+    if (JSON.stringify(this.imageOffers()) !== offered) {
+      await this.hello();
     }
     void this.fill();
   }
@@ -247,8 +258,8 @@ export class Agent {
     return { udid, model: type.name, os: runtime.version };
   }
 
-  private inventory(): AgentDevice[] {
-    return [...this.devices.values()].map(({ deviceId, model, os, state, image }) => ({ deviceId, model, os, state, image }));
+  private inventory(): (AgentDevice & { capture: sim.CapturePath | null })[] {
+    return [...this.devices.values()].map(({ deviceId, model, os, state, image }) => ({ deviceId, model, os, state, image, capture: sim.capturePath(deviceId) }));
   }
 
   private publish(): void {
@@ -256,6 +267,7 @@ export class Agent {
   }
 
   private async fill(): Promise<void> {
+    void this.retireGoldens();
     if (this.filling || this.stopped || !this.golden) {
       return;
     }
@@ -267,9 +279,9 @@ export class Agent {
           break;
         }
         const targets: { image: string | undefined; golden: Golden }[] = [{ image: undefined, golden: this.golden }];
-        for (const e of this.images.values()) {
-          if (e.golden) {
-            targets.push({ image: e.image.name, golden: e.golden });
+        for (const slot of this.images.values()) {
+          if (slot.golden && !slot.failed) {
+            targets.push({ image: slot.image.name, golden: { ...this.golden, udid: slot.golden } });
           }
         }
         const target = targets.find((t) => all.filter((d) => d.state === 'ready' && d.image === t.image).length < this.warm);
@@ -278,14 +290,21 @@ export class Agent {
         }
         const { golden: g, image } = target;
         const udid = await sim.clone(g.udid, `${sim.NAME_PREFIX}${Date.now().toString(36)}`);
+        this.cloneOf.set(udid, g.udid);
         this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, image, state: 'wiping', leaseId: null, screen: null });
         try {
           await sim.boot(udid);
           await sim.describe(udid).catch(() => {});
           await sim.screenshot(udid, 'jpeg', 800).catch(() => {});
-          if (this.stopped) {
+          const stale = image !== undefined && this.images.get(image)?.golden !== g.udid;
+          if (this.stopped || stale) {
+            this.devices.delete(udid);
+            await sim.shutdown(udid).catch(() => {});
             await sim.remove(udid).catch(() => {});
-            break;
+            if (this.stopped) {
+              break;
+            }
+            continue;
           }
           this.devices.set(udid, { deviceId: udid, model: g.model, os: g.os, image, state: 'ready', leaseId: null, screen: null });
           this.log(`Device ready: ${g.model}, iOS ${g.os}${image ? `, image ${image}` : ''}`);
@@ -392,11 +411,15 @@ export class Agent {
     if (!d) {
       return Promise.reject(new OpError('LEASE_NOT_HELD', 'This Mac holds no device for that lease.'));
     }
-    const started = sim.screenStream(d.deviceId, (data) => {
-      if (st.wantH264) {
-        this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data });
-      }
-    });
+    const started = sim.captureStream(
+      d.deviceId,
+      (data) => {
+        if (st.wantH264) {
+          this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data });
+        }
+      },
+      { onPath: () => this.publish() },
+    );
     st.h264 = started;
     started.then(
       (stream) =>
@@ -483,6 +506,7 @@ export class Agent {
 
   private async endLease(leaseId: string): Promise<void> {
     this.tunnels.stop(leaseId);
+    this.tools.close(leaseId);
     await this.endStreams(leaseId);
     const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
     if (d) {
@@ -538,7 +562,7 @@ export class Agent {
       const out = await this.dispatch(d, body);
       this.opts.send({ type: 'response', id, ok: true, ...out });
     } catch (err) {
-      const code = err instanceof OpError || err instanceof sim.DriverError ? err.code : 'OP_FAILED';
+      const code = err instanceof OpError || err instanceof sim.DriverError || err instanceof ToolError ? err.code : 'OP_FAILED';
       this.respondError(id, code, err instanceof Error ? err.message : String(err));
     }
   }
@@ -568,10 +592,14 @@ export class Agent {
         }
         return { result: results };
       }
-      case 'install':
-        return { result: await this.install(udid, body.artifactUrl, body.sha256) };
+      case 'install': {
+        const installed = await this.install(udid, body.artifactUrl, body.sha256);
+        this.tools.noteApp(leaseId, installed.bundleId);
+        return { result: installed };
+      }
       case 'launch':
         await sim.launch(udid, body.bundleId, body.args);
+        this.tools.noteApp(leaseId, body.bundleId);
         return {};
       case 'terminate':
         await sim.terminate(udid, body.bundleId);
@@ -623,7 +651,30 @@ export class Agent {
         }
         await this.finishRecording(leaseId);
         return {};
+      case 'appLog':
+        return { result: await this.tools.appLog(leaseId, body, (bundleId) => sim.appLogSource(udid, bundleId)) };
+      case 'jsEvaluate':
+        return { result: await this.js(d).evaluate(body.expression, body.bundleId) };
+      case 'jsConsole':
+        return { result: await this.js(d).consolePage(body.bundleId, cursor(body.since), pageLimit(body.limit)) };
+      case 'network':
+        return { result: await this.js(d).networkPage(body.bundleId, cursor(body.since), pageLimit(body.limit)) };
+      case 'orientation':
+        return sim.orientation();
+      case 'gesture':
+        return sim.multiTouch();
     }
+  }
+
+  private js(d: Device): JsTools {
+    const leaseId = d.leaseId ?? '';
+    return this.tools.js(leaseId, {
+      port: () => this.tunnels.port(leaseId),
+      matchDevice: async () => {
+        const name = await sim.deviceName(d.deviceId).catch(() => '');
+        return (listed) => name !== '' && listed === name;
+      },
+    });
   }
 
   private async screen(d: Device): Promise<Frame> {

@@ -1,3 +1,6 @@
+import type { ImageSetup } from './images.ts';
+import type { DeviceToolOp } from './devicetools.ts';
+
 export const PROTOCOL_VERSION = 1;
 
 export type Platform = 'ios-simulator' | 'android-emulator';
@@ -16,6 +19,7 @@ export type DeviceImage = {
   locale?: string;
   appearance?: 'light' | 'dark';
   apps: { url: string; sha256: string }[];
+  setup?: ImageSetup;
 };
 
 export type DeviceInfo = {
@@ -35,7 +39,18 @@ export type LeaseEndReason =
   | 'device_lost'
   | 'failed'
   | 'cancelled'
-  | 'queue_timeout';
+  | 'queue_timeout'
+  | 'preempted'
+  | 'window_closed';
+
+/** Who a lease limit applies to: a person by account role, or a token made for an agent. */
+export type LimitRole = 'member' | 'operator' | 'agent';
+
+/** How long a lease lasts: ended after `idleMs` without use, `maxMs` after it started, or `ttlMs` after the last renew. */
+export type LeaseLimits = { idleMs: number; maxMs: number; ttlMs: number; graceMs: number };
+
+/** What a token allows its leases; `graceMs` is how long a lease that lost its client is kept from going idle. */
+export type TokenLimits = { agent: boolean; idleMs: number; maxMs: number; graceMs: number };
 
 export type Point = [number, number];
 
@@ -88,7 +103,8 @@ export type Op =
   | { op: 'xcuitest'; artifactUrl: string; sha256: string; tests: string[] }
   | { op: 'espresso'; app: { url: string; sha256: string }; testApp: { url: string; sha256: string }; tests: string[] }
   | { op: 'recordStart'; uploads: { video: string; log: string; screenshot: string } }
-  | { op: 'recordStop' };
+  | { op: 'recordStop' }
+  | DeviceToolOp;
 
 export type MaestroResult = { passed: boolean; junit: string; log: string; durationMs: number };
 
@@ -133,6 +149,9 @@ export type AgentDevice = {
   platform?: Platform;
   image?: string;
 };
+
+/** A device's state as the broker sees it: what its host reports, or `held` while a failed run flow keeps it. */
+export type DeviceState = AgentDevice['state'] | 'held';
 
 export type AgentMessage =
   | {
@@ -184,3 +203,9 @@ export function decodeMessage<T extends AgentMessage | BrokerMessage>(raw: Buffe
   const length = raw.readUInt32BE(0);
   return { ...JSON.parse(raw.subarray(4, 4 + length).toString('utf8')), data: raw.subarray(4 + length) };
 }
+
+export * from './schedule.ts';
+export * from './findings.ts';
+export * from './devicetools.ts';
+export * from './images.ts';
+export * from './capture.ts';

@@ -10,7 +10,7 @@ do not mention it, not that the tool cannot do it.
 | Telemetry | None | Not documented | On by default, `argent telemetry disable` | Hosted |
 | One device per user or agent | Yes, fair queue, TTL, idle timeout | Yes, queue and TTL (15 min default, 4 h max) | No pool | Sessions with time and idle limits |
 | Wiped between uses | Deleted and cloned fresh | Simulators and emulators deleted; phones wiped | Not documented | Not documented |
-| Live screen in the browser | Yes, H.264, touch and keyboard | Yes, watch only, off by default | Not documented | Yes |
+| Live screen in the browser | Yes, H.264, touch and keyboard | Yes, watch and input, off by default | Not documented | Yes |
 | AI agents | MCP with mobile-mcp tool names, CLI, REST | MCP, CLI, HTTP | MCP, CLI, skills | Through agent-device, Argent or Appium; CLI and REST |
 | CI test runs | Maestro, XCUITest, Espresso: sharded, retried, JUnit, recordings, GitHub Action | Not documented | Flows replay | Not documented; Appium works |
 | React Native dev loop | Metro through Hangar, Fast Refresh, DevTools | Port tunnels for Metro | Local only | Dev build and Metro tunnel |

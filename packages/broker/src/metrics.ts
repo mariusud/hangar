@@ -1,5 +1,5 @@
 
-import type { Op } from '@hangar/protocol';
+import { captureOf, type Op } from '@hangar/protocol';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
 import type { Lease } from './leases/machine.ts';
@@ -99,10 +99,18 @@ export class Metrics {
       const state = d.connected ? d.state : 'offline';
       devices.set(state, (devices.get(state) ?? 0) + 1);
     }
+    const capture = new Map<string, number>();
+    for (const d of this.hosts.devices()) {
+      const path = captureOf(d);
+      if (path && d.connected) {
+        capture.set(path, (capture.get(path) ?? 0) + 1);
+      }
+    }
     const states = ['queued', 'preparing', 'active'] as const;
     return [
       ...gauge('hangar_devices', 'Devices on connected and recently lost hosts, by state.', [...devices].map(([state, n]) => [{ state }, n])),
       ...gauge('hangar_leases', 'Live leases, by state.', states.map((state) => [{ state }, this.db.leasesIn([state]).length])),
+      ...gauge('hangar_devices_capture', 'Connected devices by the capture path of their last H.264 stream.', [...capture].map(([path, n]) => [{ path }, n])),
       ...gauge('hangar_hosts_connected', 'Macs connected to the broker.', [[{}, this.hosts.connectedCount()]]),
       ...this.leaseWait.render(),
       ...this.leasesEnded.render(),

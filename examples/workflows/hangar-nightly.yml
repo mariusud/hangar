@@ -1,0 +1,72 @@
+# Runs every Maestro flow each night on fresh simulators, and lets you run one flow of a past run
+# again from the Actions tab. Copy it to .github/workflows/ in your app's repository.
+# <owner>/hangar is wherever your copy of the Hangar repository lives on GitHub.
+#
+# Secrets: HANGAR_URL (the Hangar address) and HANGAR_TOKEN (a token made on the console's
+# Connect page with "Can upload apps" ticked).
+name: e2e nightly
+
+on:
+  schedule:
+    # 03:00 UTC every day. GitHub runs scheduled workflows from the default branch only.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      rerun:
+        description: A Hangar run id, from its link, to run one flow of it again. Leave empty to run everything.
+        default: ''
+      flow:
+        description: The flow to run again, such as login.yaml.
+        default: ''
+      pr:
+        description: A pull request whose Hangar comment the rerun updates. Optional.
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  maestro:
+    if: ${{ github.event_name == 'schedule' || inputs.rerun == '' }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci && npx expo prebuild -p ios
+      - run: |
+          xcodebuild -workspace ios/MyApp.xcworkspace -scheme MyApp -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build ONLY_ACTIVE_ARCH=YES ARCHS=arm64 build
+      - uses: <owner>/hangar@main
+        with:
+          url: ${{ secrets.HANGAR_URL }}
+          token: ${{ secrets.HANGAR_TOKEN }}
+          app: build/Build/Products/Release-iphonesimulator/MyApp.app
+          flows: .maestro
+          shards: 3
+          # Nightly runs retry twice, so a flow that fails three times in a row is a real failure.
+          retries: 2
+          env: |
+            TEST_USER=${{ secrets.TEST_USER }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: maestro-nightly, path: hangar-maestro.xml }
+
+  # Runs one flow of a finished run again on a fresh simulator, recorded, with the same build and
+  # flows Hangar kept from that run. The run's result for the flow is updated, and so is the pull
+  # request comment if `pr` names one.
+  rerun:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.rerun != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: <owner>/hangar@main
+        with:
+          url: ${{ secrets.HANGAR_URL }}
+          token: ${{ secrets.HANGAR_TOKEN }}
+          rerun: ${{ inputs.rerun }}
+          rerun-flow: ${{ inputs.flow }}
+          pr: ${{ inputs.pr }}
+          env: |
+            TEST_USER=${{ secrets.TEST_USER }}

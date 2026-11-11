@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Frame, TestCase, UiNode } from '@hangar/protocol';
+import type { Frame, Orientation, TestCase, UiNode } from '@hangar/protocol';
+import { parseLogcatLine, type LogSource } from '../applog.ts';
 
 const run = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -394,4 +395,29 @@ export async function instrument(serial: string, instrumentation: string, tests:
   } catch (err) {
     return String((err as { stdout?: string }).stdout ?? '');
   }
+}
+
+// Follows the app's current process; a new pid after a relaunch starts a new stream.
+export async function appLogSource(serial: string, pkg: string): Promise<LogSource | null> {
+  checkPackage(pkg);
+  const pid = (await adb(serial, 'shell', 'pidof', pkg).catch(() => '')).trim().split(/\s+/)[0] ?? '';
+  if (!/^\d+$/.test(pid)) {
+    return null;
+  }
+  return { key: pid, command: tool('platform-tools', 'adb'), args: ['-s', serial, 'logcat', '-v', 'epoch', '--pid', pid, '-T', '500'], parse: parseLogcatLine };
+}
+
+const ROTATIONS: Record<Orientation, number> = { portrait: 0, landscapeLeft: 1, portraitUpsideDown: 2, landscapeRight: 3 };
+
+export async function orientation(serial: string, o: Orientation): Promise<void> {
+  const rotation = ROTATIONS[o];
+  if (rotation === undefined) {
+    throw new DriverError('BAD_ORIENTATION', `Orientation is one of ${Object.keys(ROTATIONS).join(', ')}.`);
+  }
+  await adb(serial, 'shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0');
+  await adb(serial, 'shell', 'settings', 'put', 'system', 'user_rotation', String(rotation));
+}
+
+export function multiTouch(): never {
+  throw new DriverError('UNSUPPORTED', 'Pinch and rotate are not supported on Android emulators: `adb shell input` sends one pointer at a time.');
 }

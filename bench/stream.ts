@@ -112,6 +112,13 @@ async function settingsHome(lease: Lease): Promise<[number, number]> {
   return [n.normalized.x + n.normalized.width / 2, n.normalized.y + n.normalized.height / 2];
 }
 
+// The capture path the leased device's H.264 stream used, as the broker reports it.
+async function capture(url: string, token: string): Promise<string | null> {
+  const res = await fetch(`${url}/v1/devices`, { headers: { authorization: `Bearer ${token}` } });
+  const devices: { state: string; capture?: string | null }[] = await res.json();
+  return devices.find((d) => d.state === 'leased')?.capture ?? null;
+}
+
 const h = await start(1, () => {});
 try {
   const { hangar, token } = h.client('bench');
@@ -120,8 +127,12 @@ try {
     machine: machine(),
     date: new Date().toISOString().slice(0, 10),
     h264: await measure(h.broker.url, lease, token, 'h264'),
+    capture: await capture(h.broker.url, token),
     jpeg: await measure(h.broker.url, lease, token, 'jpeg'),
   };
+  if (results.capture !== 'iosurface') {
+    console.error(`The H.264 numbers come from the ${results.capture ?? 'unknown'} capture path, not the IOSurface helper; do not compare them with the baseline.`);
+  }
   await lease.release();
   console.log(JSON.stringify(results, null, 2));
 

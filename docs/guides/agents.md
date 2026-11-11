@@ -1,7 +1,18 @@
 # Connect an AI agent
 
 Agents use Hangar over MCP at `/mcp` (streamable HTTP, a bearer token) or over the REST API.
-Make a token in the console on the Connect page; it shows the exact command with the token.
+The quickest way to give an agent its own token is `hangar connect`, run on a machine where you
+are signed in with `hangar login`:
+
+```bash
+hangar connect claude    # adds Hangar to Claude Code, or prints the command if claude is not here
+hangar connect cursor    # prints the .cursor/mcp.json block
+hangar connect codex     # prints the block for ~/.codex/config.toml
+```
+
+Each makes an agent token labelled with the target and this computer's name (see "How long a
+lease lasts" below). You can also make a token in the console on the Connect page; it shows the
+exact command with the token, but that token has the ordinary limits.
 
 ## Claude Code
 
@@ -25,21 +36,103 @@ In `.cursor/mcp.json`:
 }
 ```
 
+## Codex
+
+In `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.hangar]
+url = "http://studio-mini.local:7420/mcp"
+http_headers = { Authorization = "Bearer hgr_member_..." }
+```
+
 ## The tools
 
 | Tool | What it does |
 |---|---|
-| `lease_device`, `release_device`, `renew_lease`, `list_leases` | Get a fresh device, give it back. |
+| `lease_device`, `release_device`, `renew_lease`, `list_leases` | Get a fresh device, give it back. `lease_device` takes `idleSeconds` and `maxSeconds` to ask for less than the token allows. |
+| `keepalive` | Count as activity without touching the device, for example while the agent thinks or waits for a build. |
+| `reattach_lease` | Pick up a lease again by id after a restart, with the same token. |
 | `observe` | A screenshot (1000 px JPEG) and the elements on screen, each with a center point. |
 | `act` | Taps (by element or point), swipes, typing, keys and buttons, waits, in one call. |
 | `install_build`, `launch_app`, `terminate_app`, `open_url` | Apps and deep links. |
 | `react_native` | Open the dev menu, or reload the bundle. |
 | `send_push`, `set_permission`, `set_location`, `set_appearance`, `set_app_language` | Device presets. |
 | `record` | Start or stop a recording. Stop returns a link with the video, the timeline of actions and the app log. |
+| `app_log` | The app's own log lines, newest last. |
+| `js_evaluate`, `js_console` | Evaluate a JavaScript expression in the React Native app, and read its console messages and uncaught exceptions. |
+| `network_requests` | HTTP requests the React Native app made: method, URL, status, duration. |
+| `set_orientation` | Rotate the device. Android emulators only; iOS simulators answer `UNSUPPORTED`. |
 
 Tools that act on a device take an optional `leaseId`; without it they use your only active
-lease. A good loop is lease, observe, act, observe, and release at the end; a device left idle
-for 5 minutes is released and wiped anyway.
+lease. A good loop is lease, observe, act, observe, and release at the end.
+
+## How long a lease lasts
+
+A lease ends at the first of three limits: the idle limit (no device action or keepalive for
+that long), the longest-lease limit (that long after it started), and, if it has one, a TTL
+that renewing pushes back. Each token carries its own idle and longest-lease limits, and a lease
+may ask for less than its token allows, never more. A request for more fails with
+`LEASE_LIMIT` and says what the token allows.
+
+| Token | Idle | Longest | TTL |
+|---|---|---|---|
+| Made in the console, or by `hangar login` | 5 minutes | 4 hours | 10 minutes, renewed by the client and CLI |
+| Made by `hangar connect claude`, `cursor` or `codex` | 30 minutes | 8 hours | none |
+
+Leases made over MCP have no TTL whatever the token, so they end only when idle or at the
+longest-lease limit. `GET /v1/lease-limits` shows the limits your token gets and the caps per
+role.
+
+Operators cap what a token may carry, per role (`member`, `operator`, `agent`). The built-in
+caps are 2 hours idle for all three, 12 hours longest for people and 8 hours for agents.
+Change one with `PUT /v1/lease-limits/agent` and `{ "idleSeconds": 3600, "maxSeconds": 14400 }`;
+a field set to `null` goes back to the built-in cap. A token's limits are checked against
+today's cap each time it leases, so lowering a cap applies to tokens that already exist. A
+token made with `POST /v1/tokens` takes `agent: true`, `idleSeconds`, `maxSeconds` and
+`graceSeconds`, each held under the cap for its role.
+
+An agent that will be quiet for a while calls `keepalive` (or `POST /v1/leases/:id/keepalive`,
+or `hangar keepalive`). It counts as activity and renews the TTL, and it does not touch the
+device.
+
+## Reattach after a restart
+
+An agent that restarts, or loses its connection, can pick its lease up again with
+`reattach_lease` and the lease id (`list_leases` shows it), or `POST /v1/leases/:id/attach`, or
+`hangar attach <lease-id>`. It has to use the same token that made the lease; another token of
+the same person gets `WRONG_TOKEN`. Reattaching an active lease counts as activity. A lease that
+ended can't be reattached.
+
+A client that follows `GET /v1/leases/:id/events` holds the lease open while the stream is
+connected. When the last such stream for a lease closes, the lease gets a grace period (60
+seconds by default, the token's `graceSeconds` if set) during which it doesn't end as idle,
+even if its idle time has run out. The idle limit applies again after that. MCP sessions don't
+start a grace period; for them the idle limit is what counts.
+
+## Logs, JavaScript and network
+
+`app_log` (`GET /v1/leases/:id/log`) returns the app's own log lines: `log stream` filtered to
+the app's installed bundle on iOS, with the last two minutes read back on the first call, and
+`adb logcat` for the app's process on Android, which restarts when the app gets a new process.
+The agent keeps the newest 2000 lines per app.
+
+`js_evaluate` (`POST /v1/leases/:id/js`), `js_console` (`GET /v1/leases/:id/js/console`) and
+`network_requests` (`GET /v1/leases/:id/network`) reach the app's JavaScript through Metro's
+debugger, over the Metro tunnel that `hangar run ios` or `hangar run android` opens. Without
+that tunnel they answer `NO_METRO_TUNNEL`. Console messages and requests are collected from the
+first JavaScript call on the lease, so call one of these tools early. Network requests come from
+the debugger's Network domain when the runtime has one; otherwise Hangar patches
+`XMLHttpRequest` in the app, which also covers `fetch`. Request and response bodies are not
+kept. The agent keeps the newest 500 console messages and 300 requests per lease.
+
+The tools take `bundleId`; without it they use the last app installed or launched through
+Hangar on the lease. `app_log`, `js_console` and `network_requests` return `next`: pass it as
+`since` on the next call to get only newer entries. `dropped: true` means entries after `since`
+fell out of the buffer. Everything is dropped when the lease ends.
+
+These tools are tested against a fake Metro and fake log processes. They have not yet been run
+against an app on a real leased simulator or emulator.
 
 ## Agents written for mobile-mcp
 
@@ -61,7 +154,8 @@ is a lease id:
 Coordinates are points on iOS and pixels on Android, the units the element list reports.
 `mobile_install_app` takes a build registered on Hangar, by name or hash, because a path on the
 agent's machine is not reachable from the fleet. mobile-mcp's tools for logs, crash reports,
-orientation, clipboard, folding and recording to a file are not there; use `record` instead.
+orientation, clipboard, folding and recording to a file are not there under their names; use
+`app_log`, `set_orientation` and `record` instead.
 
 ## REST, for agents with their own tools
 

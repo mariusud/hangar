@@ -4,7 +4,10 @@ import {
   activate,
   assign,
   deadline,
+  detach,
+  keepalive,
   matches,
+  reattach,
   due,
   end,
   newLease,
@@ -188,4 +191,87 @@ test('a device class picks iOS or Android; devices without a platform are iOS si
   assert.equal(matches({ platform: 'android-emulator' }, ios), false);
   assert.equal(matches({ platform: 'ios-simulator' }, ios), true);
   assert.equal(matches({}, pixel), true);
+});
+
+test('a lease that loses its client is not idle during the grace period', () => {
+  let l = activate(assign(lease('a', 0, { ttlMs: 10_000, maxMs: 10_000, idleMs: 100, graceMs: 60 }), 'd1', 0), 0);
+  l = detach(l, 90);
+  assert.deepEqual(deadline(l), { at: 150, reason: 'idle' }, 'idle would be 100; grace runs to 150');
+  l = detach(touch(l, 95), 95);
+  assert.deepEqual(deadline(l), { at: 195, reason: 'idle' }, 'grace never shortens the idle limit');
+  assert.deepEqual(due([l], 194), []);
+  l = reattach(l, 120);
+  assert.equal(l.detachedAt, null);
+  assert.deepEqual(deadline(l), { at: 220, reason: 'idle' }, 'reattaching counts as activity');
+  assert.throws(() => reattach(end(l, 'idle', 300), 301), { code: 'LEASE_ENDED' });
+  const queued = lease('q');
+  assert.equal(reattach(queued, 5), queued, 'a queued lease carries on waiting');
+});
+
+test('keepalive counts as activity and renews, and only for an active lease', () => {
+  let l = activate(assign(lease('a', 0, { ttlMs: 100, maxMs: 1000, idleMs: 50 }), 'd1', 0), 0);
+  l = keepalive(l, 40);
+  assert.deepEqual(deadline(l), { at: 90, reason: 'idle' });
+  l = { ...l, idleMs: 500 };
+  assert.deepEqual(deadline(l), { at: 140, reason: 'expired' }, 'keepalive renews the ttl');
+  assert.throws(() => keepalive(lease('q'), 1), { code: 'LEASE_NOT_ACTIVE' });
+});
+
+test('a lease stored before grace existed still has a deadline', () => {
+  const l = activate(assign(lease('a', 0, { idleMs: 50 }), 'd1', 0), 0);
+  const { graceMs: _g, detachedAt: _d, ...stripped } = l;
+  const old: Lease = JSON.parse(JSON.stringify(stripped));
+  assert.deepEqual(deadline(old), { at: 50, reason: 'idle' });
+});
+
+test('property: keepalive, disconnects and reattaches never end a lease early or past its longest', () => {
+  let seed = 7;
+  const rand = (n: number): number => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return seed % n;
+  };
+  for (let run = 0; run < 300; run++) {
+    let now = 0;
+    const idleMs = 100 + rand(400);
+    const graceMs = rand(300);
+    const maxMs = 2000 + rand(4000);
+    let l = activate(assign(lease(`r${run}`, 0, { ttlMs: maxMs, maxMs, idleMs, graceMs }), 'd1', 0), 0);
+    let lastUse = 0;
+    let lastDetach: number | null = null;
+    while (l.state === 'active') {
+      const before = deadline(l);
+      const roll = rand(5);
+      if (roll === 0) {
+        l = keepalive(l, now);
+        lastUse = now;
+        lastDetach = null;
+      } else if (roll === 1) {
+        l = detach(l, now);
+        lastDetach = now;
+      } else if (roll === 2) {
+        l = reattach(l, now);
+        lastUse = now;
+        lastDetach = null;
+      } else {
+        now += rand(idleMs + graceMs + 50);
+      }
+      const after = deadline(l);
+      assert.ok(after && after.at <= maxMs, 'a lease outlives its longest-lease limit');
+      if (before && roll === 1) {
+        assert.ok(after.at >= before.at, 'a disconnect made the deadline earlier');
+      }
+      if (roll === 0 || roll === 2) {
+        assert.ok(after.at >= Math.min(now + idleMs, maxMs), 'keepalive or reattach left less than the idle limit');
+      }
+      for (const d of due([l], now)) {
+        if (d.reason === 'idle') {
+          assert.ok(now >= lastUse + idleMs, 'ended idle while in use');
+          assert.ok(lastDetach === null || now >= lastDetach + graceMs, 'ended idle inside the grace period');
+        }
+        assert.ok(now >= lastUse + Math.min(idleMs, maxMs) || now >= maxMs, 'ended before any limit');
+        l = end(l, d.reason, now);
+      }
+    }
+    assert.ok(l.endedAt !== null && l.endedAt >= Math.min(maxMs, lastUse + idleMs));
+  }
 });

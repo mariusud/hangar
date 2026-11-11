@@ -16,11 +16,17 @@ export type FlowResult = {
   attempts: number;
   message?: string;
   recording?: string;
+  /** The first attempt's failure, kept when a retry or rerun passes. */
+  firstMessage?: string;
+  firstRecording?: string;
+  /** The device this flow failed on, kept as it was until `until` (runs started with a hold). */
+  held?: { until: number };
 };
 
 /** The broker's record of a run. */
 export type RunInfo = {
   id: string;
+  kind?: 'maestro' | 'xcuitest' | 'espresso';
   state: 'running' | 'passed' | 'failed' | 'cancelled';
   flows: FlowResult[];
   error: string | null;
@@ -29,7 +35,7 @@ export type RunInfo = {
 };
 
 /** The outcome of a finished run. */
-export type MaestroRun = { passed: boolean; flows: FlowResult[]; junit: string; durationMs: number; url: string };
+export type MaestroRun = { id: string; kind?: RunInfo['kind']; passed: boolean; flows: FlowResult[]; junit: string; durationMs: number; url: string };
 
 /** Options for a Maestro run. */
 export type MaestroOptions = {
@@ -39,8 +45,20 @@ export type MaestroOptions = {
   retries?: number;
   env?: Record<string, string>;
   device?: DeviceClass;
+  /** Keep a failed flow's device as it was for this many seconds, for people on your team. */
+  holdSeconds?: number;
   log?: (line: string) => void;
 };
+
+/** Seconds from "30m", "2h", "90s" or a plain number of seconds; null when it is none of those. */
+export function parseDuration(value: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*(s|m|h)?$/.exec(value.trim().toLowerCase());
+  if (!m) {
+    return null;
+  }
+  const n = Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2] === 'm' || m[2] === 'h' ? m[2] : 's'];
+  return n > 0 ? Math.round(n) : null;
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -65,13 +83,14 @@ export async function runMaestro(hangar: Hangar, opts: MaestroOptions): Promise<
   }
   const archive = (await run('tar', ['-cf', '-', '-C', opts.flowsDir, '.'], { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 })).stdout.toString('base64');
   const build = await buildRef(hangar, opts.app);
-  return follow(hangar, log, {
+  return follow(hangar, log, '/v1/runs', {
     build,
     suite: { kind: 'maestro', archive, flows },
     class: opts.device ?? {},
     shards: opts.shards ?? 1,
     retries: opts.retries ?? 1,
     env: opts.env ?? {},
+    ...(opts.holdSeconds ? { holdSeconds: opts.holdSeconds } : {}),
   });
 }
 
@@ -109,7 +128,7 @@ export async function runXcuitest(hangar: Hangar, opts: XcuitestOptions): Promis
   }
   log(`uploading ${basename(opts.products)}`);
   const build = await buildRef(hangar, opts.products);
-  return follow(hangar, log, { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
+  return follow(hangar, log, '/v1/runs', { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
 }
 
 /** Options for an Espresso run. */
@@ -128,11 +147,17 @@ export async function runEspresso(hangar: Hangar, opts: EspressoOptions): Promis
   const build = await buildRef(hangar, opts.app);
   const testBuild = await buildRef(hangar, opts.testApp);
   const tests = opts.tests?.length ? opts.tests : ['all'];
-  return follow(hangar, log, { build, suite: { kind: 'espresso', testBuild, tests }, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
+  return follow(hangar, log, '/v1/runs', { build, suite: { kind: 'espresso', testBuild, tests }, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
 }
 
-async function follow(hangar: Hangar, log: (line: string) => void, request: unknown): Promise<MaestroRun> {
-  let info = await hangar.json<RunInfo>('POST', '/v1/runs', request);
+/** Runs one flow of a finished run again on a fresh device, recorded, and follows the run until it ends. */
+export async function rerunFlow(hangar: Hangar, runId: string, flow: string, opts: { env?: Record<string, string>; log?: (line: string) => void } = {}): Promise<MaestroRun> {
+  const path = `/v1/runs/${encodeURIComponent(runId)}/flows/${encodeURIComponent(flow)}/rerun`;
+  return follow(hangar, opts.log ?? (() => {}), path, opts.env ? { env: opts.env } : {});
+}
+
+async function follow(hangar: Hangar, log: (line: string) => void, path: string, request: unknown): Promise<MaestroRun> {
+  let info = await hangar.json<RunInfo>('POST', path, request);
   log(`run ${info.url}`);
 
   const cancel = (): void => void hangar.request('DELETE', `/v1/runs/${info.id}`).finally(() => process.exit(130));
@@ -160,5 +185,5 @@ async function follow(hangar: Hangar, log: (line: string) => void, request: unkn
     log(`run failed: ${info.error}`);
   }
   const junit = await (await hangar.request('GET', `/v1/runs/${info.id}/junit.xml`)).text();
-  return { passed: info.state === 'passed', flows: info.flows, junit, durationMs: info.durationMs, url: info.url };
+  return { id: info.id, ...(info.kind ? { kind: info.kind } : {}), passed: info.state === 'passed', flows: info.flows, junit, durationMs: info.durationMs, url: info.url };
 }

@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
-import type { Action, DeviceClass, ElementSelector, Frame, LeaseEndReason, LeaseState, Platform, Point, PrivacyService, UiNode } from '@hangar/protocol';
+import type { Action, Booking, BookingWindow, DeviceClass, ElementSelector, Frame, LeaseEndReason, LeaseEnding, LeaseLimits, LeaseState, Platform, Point, Priority, PrivacyService, UiNode } from '@hangar/protocol';
 
 const run = promisify(execFile);
 
@@ -17,7 +17,16 @@ export type LeaseInfo = {
   device: { model: string; os: string; platform: Platform } | null;
   queuePosition: number | null;
   expiresAt: number | null;
+  limits?: LeaseLimits;
+  detachedAt?: number | null;
+  priority?: Priority;
+  booking?: string | null;
+  /** Set once the lease is told it ends early: preempted, or its booking's window closes. */
+  ending?: LeaseEnding | null;
 };
+
+/** A booking as the server shows it, with its open window or the next one. */
+export type BookingInfo = Booking & { team: string; timeZone: string; open: BookingWindow | null; next: BookingWindow | null; leases: number };
 
 /** A recording and the links to its files. */
 export type RecordingInfo = {
@@ -123,10 +132,12 @@ export class Hangar {
     return this.json('GET', `/v1/recordings/${encodeURIComponent(id)}`);
   }
 
-  async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean; via?: string } = {}): Promise<Lease> {
+  async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; idleSeconds?: number; maxSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean; via?: string } = {}): Promise<Lease> {
     let info = await this.json<LeaseInfo>('POST', `/v1/leases?wait=${opts.waitSeconds ?? 120}`, {
       class: cls,
       ...(opts.ttlSeconds ? { ttlSeconds: opts.ttlSeconds } : {}),
+      ...(opts.idleSeconds ? { idleSeconds: opts.idleSeconds } : {}),
+      ...(opts.maxSeconds ? { maxSeconds: opts.maxSeconds } : {}),
       ...(opts.record ? { record: true } : {}),
       ...(opts.via ? { via: opts.via } : {}),
     });
@@ -136,7 +147,13 @@ export class Hangar {
     if (info.state !== 'active') {
       throw new HangarError(409, 'LEASE_NOT_ACTIVE', `The lease ended before it started (${info.reason}).`);
     }
-    return new Lease(this, info, opts.autoRenew ?? true, opts.ttlSeconds ?? 600);
+    return new Lease(this, info, opts.autoRenew ?? true, ttlOf(info, opts.ttlSeconds));
+  }
+
+  /** Picks up a lease again after a restart or a lost connection. Use the token that made the lease. */
+  async reattach(leaseId: string, opts: { autoRenew?: boolean } = {}): Promise<Lease> {
+    const info = await this.json<LeaseInfo>('POST', `/v1/leases/${encodeURIComponent(leaseId)}/attach`, {});
+    return new Lease(this, info, opts.autoRenew ?? true, ttlOf(info));
   }
 
   attach(leaseId: string): Lease {
@@ -167,6 +184,12 @@ export class Lease {
 
   async renew(ttlSeconds?: number): Promise<LeaseInfo> {
     this.info = await this.client.json('POST', this.path('/renew'), ttlSeconds ? { ttlSeconds } : {});
+    return this.info;
+  }
+
+  /** Counts as activity without touching the device, so the lease does not end as idle. */
+  async keepalive(): Promise<LeaseInfo> {
+    this.info = await this.client.json('POST', this.path('/keepalive'), {});
     return this.info;
   }
 
@@ -332,6 +355,15 @@ export class Lease {
       };
     });
   }
+}
+
+function ttlOf(info: LeaseInfo, asked?: number): number {
+  if (asked) {
+    return asked;
+  }
+  // Renewing a third of the shorter of ttl and idle keeps a held lease from ending either way.
+  const ms = info.limits ? Math.min(info.limits.ttlMs, info.limits.idleMs) : 600_000;
+  return Math.max(3, Math.round(ms / 1000));
 }
 
 /** Opens a URL in the default browser, on macOS and Linux. */

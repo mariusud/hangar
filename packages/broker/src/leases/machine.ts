@@ -1,5 +1,5 @@
 
-import type { DeviceClass, LeaseEndReason, LeaseState, Platform } from '@hangar/protocol';
+import type { DeviceClass, LeaseEndReason, LeaseEnding, LeaseState, Platform, Priority } from '@hangar/protocol';
 
 export type Lease = {
   id: string;
@@ -18,9 +18,25 @@ export type Lease = {
   ttlMs: number;
   maxMs: number;
   idleMs: number;
+  graceMs: number;
+  detachedAt: number | null;
+  tokenHash: string | null;
   queueTimeoutMs: number;
   prepareTimeoutMs: number;
   attempts: number;
+  // Fields below came with bookings and priority; leases stored before them have none.
+  priority?: Priority;
+  bookingId?: string | null;
+  // A lease a run made for one of its shards, which goes before agent leases inside a booking.
+  shard?: boolean;
+  // Set when the lease was told it ends early: preempted, or its booking's window closes.
+  ending?: LeaseEnding | null;
+  // A booked lease ends here at the latest, when its booking's window closes.
+  windowEndsAt?: number | null;
+  // The lease id the host knows the device by, when that is an earlier lease's (a held device).
+  hostLeaseId?: string | null;
+  // When this queued request last made another lease end early, so it waits for that device.
+  preemptedAt?: number | null;
 };
 
 export type PoolDevice = {
@@ -36,6 +52,7 @@ export const DEFAULTS = {
   ttlMs: 10 * 60_000,
   maxMs: 4 * 60 * 60_000,
   idleMs: 5 * 60_000,
+  graceMs: 60_000,
   queueTimeoutMs: 10 * 60_000,
   prepareTimeoutMs: 5 * 60_000,
   maxAttempts: 3,
@@ -66,6 +83,9 @@ export function newLease(
     ttlMs: DEFAULTS.ttlMs,
     maxMs: DEFAULTS.maxMs,
     idleMs: DEFAULTS.idleMs,
+    graceMs: DEFAULTS.graceMs,
+    detachedAt: null,
+    tokenHash: null,
     queueTimeoutMs: DEFAULTS.queueTimeoutMs,
     prepareTimeoutMs: DEFAULTS.prepareTimeoutMs,
     attempts: 0,
@@ -79,11 +99,20 @@ export function deadline(lease: Lease): { at: number; reason: LeaseEndReason } |
   }
   const renewed = lease.lastRenewAt ?? lease.activatedAt;
   const used = lease.lastActivityAt ?? lease.activatedAt;
+  // A lease that lost its client is not idle until the grace period after the disconnect runs out.
+  const detachedAt = lease.detachedAt ?? null;
+  const graceEnd = detachedAt === null ? -Infinity : detachedAt + (lease.graceMs ?? DEFAULTS.graceMs);
   const candidates: { at: number; reason: LeaseEndReason }[] = [
     { at: renewed + lease.ttlMs, reason: 'expired' },
     { at: lease.activatedAt + lease.maxMs, reason: 'expired' },
-    { at: used + lease.idleMs, reason: 'idle' },
+    { at: Math.max(used + lease.idleMs, graceEnd), reason: 'idle' },
   ];
+  if (lease.windowEndsAt) {
+    candidates.push({ at: lease.windowEndsAt, reason: 'window_closed' });
+  }
+  if (lease.ending) {
+    candidates.push({ at: lease.ending.at, reason: lease.ending.reason });
+  }
   return candidates.reduce((a, b) => (b.at < a.at ? b : a));
 }
 
@@ -148,6 +177,40 @@ export function touch(lease: Lease, now: number): Lease {
     throw new LeaseError('LEASE_NOT_ACTIVE', `Lease ${lease.id} is ${lease.state}. Device actions need an active lease.`);
   }
   return { ...lease, lastActivityAt: now };
+}
+
+// Activity that doesn't touch the device: renews the lease and marks its client present.
+export function keepalive(lease: Lease, now: number): Lease {
+  if (lease.state !== 'active') {
+    throw new LeaseError('LEASE_NOT_ACTIVE', `Lease ${lease.id} is ${lease.state}. Only active leases can be kept alive.`);
+  }
+  return { ...lease, lastRenewAt: now, lastActivityAt: now, detachedAt: null };
+}
+
+// Tells an active lease it ends early. An earlier notice stands.
+export function warn(lease: Lease, ending: LeaseEnding): Lease {
+  if (lease.state !== 'active' || (lease.ending && lease.ending.at <= ending.at)) {
+    return lease;
+  }
+  return { ...lease, ending };
+}
+
+export function detach(lease: Lease, now: number): Lease {
+  if (lease.state !== 'active') {
+    return lease;
+  }
+  return { ...lease, detachedAt: now };
+}
+
+// A client that comes back to its lease. A lease still waiting for a device carries on waiting.
+export function reattach(lease: Lease, now: number): Lease {
+  if (lease.state === 'ended') {
+    throw new LeaseError('LEASE_ENDED', `Lease ${lease.id} ended (${lease.reason ?? 'unknown'}).`);
+  }
+  if (lease.state !== 'active') {
+    return lease;
+  }
+  return keepalive(lease, now);
 }
 
 export function end(lease: Lease, reason: LeaseEndReason, now: number): Lease {

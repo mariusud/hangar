@@ -6,6 +6,9 @@ import { promisify } from 'node:util';
 import * as android from './drivers/android/index.ts';
 import { PROTOCOL_VERSION, type Action, type ActionResult, type AgentDevice, type AgentMessage, type BrokerMessage, type Op, type TestResult } from '@hangar/protocol';
 import { download, findAll, findOne, maestro, onScreen, OpError } from './index.ts';
+import { cursor, LeaseTools, pageLimit } from './drivers/devtools.ts';
+import type { JsTools } from './drivers/cdp.ts';
+import { ToolError } from './drivers/tool-error.ts';
 import { Tunnels } from './tunnels.ts';
 
 const run = promisify(execFile);
@@ -31,6 +34,7 @@ export class AndroidAgent {
   private model = { model: 'Android', os: '' };
   private streams = new Map<string, Promise<android.ScreenStream>>();
   private tunnels: Tunnels;
+  private tools = new LeaseTools();
   private next = 0;
   readonly maxDevices: number;
   readonly warm: number;
@@ -72,6 +76,7 @@ export class AndroidAgent {
   async stop(): Promise<void> {
     this.stopped = true;
     this.tunnels.stopAll();
+    this.tools.closeAll();
     for (const s of this.streams.values()) {
       await (await s).stop();
     }
@@ -188,6 +193,7 @@ export class AndroidAgent {
 
   private async endLease(leaseId: string): Promise<void> {
     this.tunnels.stop(leaseId);
+    this.tools.close(leaseId);
     await this.stopStream(leaseId);
     const d = this.held(leaseId);
     if (!d) {
@@ -211,7 +217,7 @@ export class AndroidAgent {
     try {
       this.opts.send({ type: 'response', id, ok: true, ...(await this.dispatch(d, body)) });
     } catch (err) {
-      const code = err instanceof OpError || err instanceof android.DriverError ? err.code : 'OP_FAILED';
+      const code = err instanceof OpError || err instanceof android.DriverError || err instanceof ToolError ? err.code : 'OP_FAILED';
       this.opts.send({ type: 'response', id, ok: false, error: { code, message: err instanceof Error ? err.message : String(err) } });
     }
   }
@@ -243,6 +249,9 @@ export class AndroidAgent {
           const apk = join(dir, 'app.apk');
           await download(new URL(body.artifactUrl, this.opts.brokerUrl).toString(), body.sha256, apk);
           const pkg = await android.install(serial, apk);
+          if (d.leaseId) {
+            this.tools.noteApp(d.leaseId, pkg);
+          }
           return { result: { bundleId: pkg, name: pkg } };
         } finally {
           await rm(dir, { recursive: true, force: true });
@@ -250,6 +259,9 @@ export class AndroidAgent {
       }
       case 'launch':
         await android.launch(serial, body.bundleId);
+        if (d.leaseId) {
+          this.tools.noteApp(d.leaseId, body.bundleId);
+        }
         return {};
       case 'terminate':
         await android.terminate(serial, body.bundleId);
@@ -276,9 +288,35 @@ export class AndroidAgent {
         return { result: await maestro(serial, body.archive, body.flows, body.env ?? {}) };
       case 'espresso':
         return { result: await this.espresso(serial, body.app, body.testApp, body.tests) };
+      case 'appLog':
+        return { result: await this.tools.appLog(d.leaseId ?? '', body, (pkg) => android.appLogSource(serial, pkg)) };
+      case 'jsEvaluate':
+        return { result: await this.js(d).evaluate(body.expression, body.bundleId) };
+      case 'jsConsole':
+        return { result: await this.js(d).consolePage(body.bundleId, cursor(body.since), pageLimit(body.limit)) };
+      case 'network':
+        return { result: await this.js(d).networkPage(body.bundleId, cursor(body.since), pageLimit(body.limit)) };
+      case 'orientation': {
+        await android.orientation(serial, body.orientation);
+        const size = await android.screenSize(serial);
+        const sideways = body.orientation === 'landscapeLeft' || body.orientation === 'landscapeRight';
+        d.screen = sideways ? { width: size.height, height: size.width } : size;
+        return {};
+      }
+      case 'gesture':
+        return android.multiTouch();
       default:
         throw new OpError('NOT_ON_ANDROID', `${body.op} is not supported on Android emulators yet.`);
     }
+  }
+
+  private js(d: Device): JsTools {
+    const leaseId = d.leaseId ?? '';
+    const model = d.model;
+    return this.tools.js(leaseId, {
+      port: () => this.tunnels.port(leaseId),
+      matchDevice: async () => (listed) => model !== '' && listed.startsWith(model),
+    });
   }
 
   private async espresso(serial: string, app: { url: string; sha256: string }, testApp: { url: string; sha256: string }, tests: string[]): Promise<TestResult> {

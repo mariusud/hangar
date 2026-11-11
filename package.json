@@ -15,6 +15,7 @@
     "bench:metro": "node --disable-warning=ExperimentalWarning bench/metro.ts",
     "bench:lease": "node --disable-warning=ExperimentalWarning bench/lease.ts",
     "bench:compare": "node --disable-warning=ExperimentalWarning bench/compare.ts",
+    "bench:smoke": "node --disable-warning=ExperimentalWarning bench/smoke.ts",
     "hangar": "node --disable-warning=ExperimentalWarning packages/hangar/src/main.ts"
   },
   "devDependencies": {

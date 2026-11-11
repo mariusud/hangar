@@ -76,7 +76,7 @@ h2 { font-size: 16px; margin: 24px 0 10px; }
 .narrow { max-width: 380px; margin: 40px auto; }
 label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
 label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--text); }
-input[type='text'], input[type='password'], input[type='url'], select {
+input[type='text'], input[type='password'], input[type='url'], input[type='number'], select, textarea {
   width: 100%;
   padding: 9px 10px;
   border: 1px solid var(--line);
@@ -85,6 +85,7 @@ input[type='text'], input[type='password'], input[type='url'], select {
   color: var(--text);
   font: inherit;
 }
+textarea { font: 13px/1.4 var(--mono); }
 button, .button {
   display: inline-block;
   padding: 8px 14px;

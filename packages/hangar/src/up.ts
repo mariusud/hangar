@@ -3,10 +3,11 @@ import { access, mkdir, writeFile } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { Agent, AndroidAgent, defaultMaxDevices, join as joinFleet } from '@hangar/agent';
+import { Agent, AndroidAgent, join as joinFleet } from '@hangar/agent';
 import { Db, mintHostToken, oidcFromEnv, s3FromEnv, startBroker, type OidcConfig, type S3Config } from '@hangar/broker';
 import type { AgentMessage, BrokerMessage } from '@hangar/protocol';
 import { CONFIG_FILE } from './client/index.ts';
+import { doctor, printChecks, smokeCheck } from './doctor.ts';
 
 const run = promisify(execFile);
 
@@ -16,63 +17,7 @@ export function dataDir(): string {
   return process.env.HANGAR_HOME ?? join(homedir(), '.hangar');
 }
 
-type Check = { name: string; ok: boolean; detail: string; fix?: string };
-
-export async function doctor(): Promise<Check[]> {
-  const checks: Check[] = [];
-  const has = async (cmd: string, args: string[]): Promise<string | null> => {
-    try {
-      return (await run(cmd, args)).stdout.trim();
-    } catch {
-      return null;
-    }
-  };
-  const xcode = await has('xcodebuild', ['-version']);
-  checks.push(
-    xcode
-      ? { name: 'Xcode', ok: true, detail: xcode.split('\n')[0] ?? '' }
-      : { name: 'Xcode', ok: false, detail: 'not found', fix: 'Install Xcode from the App Store, open it once, then run `sudo xcode-select -s /Applications/Xcode.app`.' },
-  );
-  const runtimes = await has('xcrun', ['simctl', 'list', 'runtimes', '-j']);
-  const ios = runtimes
-    ? (JSON.parse(runtimes) as { runtimes: { name: string; isAvailable: boolean }[] }).runtimes.filter((r) => r.isAvailable && r.name.startsWith('iOS'))
-    : [];
-  checks.push(
-    ios.length
-      ? { name: 'iOS runtimes', ok: true, detail: ios.map((r) => r.name).join(', ') }
-      : { name: 'iOS runtimes', ok: false, detail: 'none installed', fix: 'In Xcode, open Settings > Components and install an iOS simulator runtime.' },
-  );
-  const companion = await has('idb_companion', ['--version']);
-  checks.push(
-    companion
-      ? { name: 'idb companion', ok: true, detail: 'installed' }
-      : { name: 'idb companion', ok: false, detail: 'not found', fix: 'brew tap facebook/fb && brew install idb-companion' },
-  );
-  const client = await has('idb', ['--help']);
-  checks.push(
-    client
-      ? { name: 'idb client', ok: true, detail: 'installed' }
-      : { name: 'idb client', ok: false, detail: 'not found', fix: 'pipx install fb-idb   (or: pip3 install --user fb-idb)' },
-  );
-  const user = userInfo().username;
-  checks.push({
-    name: 'User',
-    ok: true,
-    detail: user === 'hangar' ? 'runs as its own user, hangar' : `runs as ${user}; apps on the simulators can read this user's files. See docs/guides/isolation.md`,
-  });
-  const max = defaultMaxDevices();
-  checks.push({ name: 'Capacity', ok: true, detail: `up to ${max} simulator${max === 1 ? '' : 's'} at once on this Mac` });
-  return checks;
-}
-
-export function printChecks(checks: Check[]): void {
-  for (const c of checks) {
-    console.log(`  ${c.ok ? 'ok ' : 'NO '} ${c.name.padEnd(14)} ${c.detail}`);
-    if (!c.ok && c.fix) {
-      console.log(`      fix: ${c.fix}`);
-    }
-  }
-}
+export { doctor, printChecks, type Check } from './doctor.ts';
 
 async function lanName(): Promise<string> {
   try {
@@ -96,7 +41,7 @@ function fromEnv(): { oidc?: OidcConfig; s3?: S3Config } {
 
 export async function up(opts: { port?: number; warm?: number; max?: number; url?: string; android?: string }): Promise<void> {
   console.log('Checking this Mac...');
-  const checks = await doctor();
+  const checks = await doctor({ smoke: false });
   printChecks(checks);
   if (checks.some((c) => !c.ok)) {
     console.log('\nFix the items marked NO, then run `npx hangar up` again.');
@@ -114,19 +59,25 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
     throw err;
   });
 
-  let toAgent: (m: BrokerMessage) => void = () => {};
-  const handlers = broker.attach({ send: (m) => setImmediate(() => toAgent(m)), close: () => {} });
-  const agent = new Agent({
-    send: (m: AgentMessage) => setImmediate(() => handlers.message(m)),
-    brokerUrl: `http://127.0.0.1:${port}`,
-    log: (line) => console.log(`  ${line}`),
-    ...(opts.warm !== undefined ? { warm: opts.warm } : {}),
-    ...(opts.max !== undefined ? { maxDevices: opts.max } : {}),
-  });
-  toAgent = (m) => agent.receive(m);
-
-  console.log(`\nStarting devices (up to ${agent.maxDevices}, ${agent.warm} kept ready)...`);
-  await agent.start();
+  const smoke = await smokeCheck();
+  let agent: Agent | null = null;
+  if (smoke.ok) {
+    let toAgent: (m: BrokerMessage) => void = () => {};
+    const handlers = broker.attach({ send: (m) => setImmediate(() => toAgent(m)), close: () => {} });
+    const ios = new Agent({
+      send: (m: AgentMessage) => setImmediate(() => handlers.message(m)),
+      brokerUrl: `http://127.0.0.1:${port}`,
+      log: (line) => console.log(`  ${line}`),
+      ...(opts.warm !== undefined ? { warm: opts.warm } : {}),
+      ...(opts.max !== undefined ? { maxDevices: opts.max } : {}),
+    });
+    toAgent = (m) => ios.receive(m);
+    agent = ios;
+    console.log(`\nStarting devices (up to ${ios.maxDevices}, ${ios.warm} kept ready)...`);
+    await ios.start();
+  } else {
+    console.log(`\nNo simulators on this Mac: ${smoke.detail}.\n  fix: ${smoke.fix ?? ''}`);
+  }
 
   let androidAgent: AndroidAgent | null = null;
   if (opts.android) {
@@ -166,7 +117,7 @@ ${publicUrl.startsWith('https:') ? '' : '  Traffic is plain HTTP on your network
     console.log('\nStopping: deleting devices...');
     bonjour.kill();
     await androidAgent?.stop();
-    await agent.stop();
+    await agent?.stop();
     await broker.close();
     process.exit(0);
   };

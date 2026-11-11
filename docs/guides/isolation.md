@@ -23,7 +23,9 @@ The simulators then live in that user's home, and apps can read only what that u
 3. As `hangar`, install the tools `hangar doctor` asks for, then start Hangar with
    `hangar up --install` (or `hangar join ... ` on hosts that join a broker elsewhere).
 4. Keep the `hangar` user logged in, with fast user switching or automatic login. The LaunchAgent
-   that `--install` writes runs only while that user is logged in.
+   that `--install` writes runs only while that user is logged in. A LaunchDaemon that starts
+   Hangar as `hangar` at boot, with nobody logged in, is in [unattended.md](unattended.md); it
+   has not been checked through a real reboot.
 
 `hangar doctor` reports which user Hangar runs as.
 

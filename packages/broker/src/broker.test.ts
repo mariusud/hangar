@@ -550,6 +550,10 @@ test('runs and recordings are visible to their team and operators only', async (
     assert.deepEqual((await call(broker, other, 'GET', '/v1/runs')).json, []);
     assert.equal((await call(broker, qa, 'GET', '/v1/runs')).json.length, 1);
 
+    // The run records its first pass and deletes that recording when every flow passes.
+    for (let i = 0; i < 100 && (await call(broker, qa, 'GET', `/v1/runs/${run.id}`)).json.state === 'running'; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
     assert.equal((await call(broker, qa, 'GET', '/v1/recordings/rec-1')).status, 200);
     assert.equal((await call(broker, other, 'GET', '/v1/recordings/rec-1')).status, 404);
     assert.deepEqual((await call(broker, other, 'GET', '/v1/recordings?all=1')).json, []);

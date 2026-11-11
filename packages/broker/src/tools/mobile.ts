@@ -1,24 +1,9 @@
 // Coordinates are points on iOS and pixels on Android.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Action, DeviceClass, Frame, Point, UiNode } from '@hangar/protocol';
-import type * as auth from './auth.ts';
-import type { Db } from './db.ts';
-import { ApiError, type Leases } from './leases/service.ts';
-
-type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
-type Result = { content: Content[]; isError?: boolean };
-
-export type MobileDeps = {
-  server: McpServer;
-  p: auth.Principal;
-  db: Db;
-  leases: Leases;
-  safe: (fn: () => Promise<Result>) => Promise<Result>;
-  text: (value: unknown) => Result;
-  install: (leaseId: string, build: string) => Promise<unknown>;
-};
+import { ApiError } from '../leases/service.ts';
+import type { ToolDeps } from './util.ts';
 
 const device = z.string().describe('The device id from mobile_allocate_remote_device (a Hangar lease id)');
 
@@ -26,7 +11,7 @@ function actionable(nodes: UiNode[]): UiNode[] {
   return nodes.filter((n) => n.role !== 'application' && (n.label || n.identifier));
 }
 
-export function registerMobileTools({ server, p, db, leases, safe, text, install }: MobileDeps): void {
+export function registerMobileTools({ server, p, db, leases, safe, text, install }: ToolDeps): void {
   const screenOf = async (id: string): Promise<{ screen: Frame; nodes: UiNode[] }> => (await leases.op(p, id, { op: 'describe' })).result as { screen: Frame; nodes: UiNode[] };
 
   const target = async (id: string, x?: number, y?: number, ref?: string): Promise<Point> => {

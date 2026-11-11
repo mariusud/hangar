@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { Lease } from './leases/machine.ts';
 import type { Run } from './runs.ts';
+import type { Finding } from '@hangar/protocol';
 
 const SCHEMA = `
 create table if not exists accounts (
@@ -91,6 +92,83 @@ create table if not exists audit (
   lease_id text,
   event text not null
 );
+-- What a member token allows its leases; null is the default. No row is a token made before limits.
+create table if not exists token_limits (
+  hash text primary key,
+  agent integer not null default 0,
+  idle_ms integer,
+  max_ms integer,
+  grace_ms integer
+);
+-- The operator's caps on token limits per role (member, operator, agent); null is the built-in cap.
+create table if not exists lease_limits (
+  role text primary key,
+  idle_ms integer,
+  max_ms integer,
+  grace_ms integer
+);
+-- What an image sets up after its apps are installed: granted permissions and a sign-in flow.
+create table if not exists image_setups (
+  name text primary key collate nocase,
+  data text not null
+);
+-- Values for the environment names a sign-in flow reads. The API never returns them.
+create table if not exists image_secrets (
+  name text primary key,
+  value text not null,
+  updated_at integer not null
+);
+-- What a run needs to run one of its flows again: the build hashes and the flows archive.
+-- Only the names of the run's environment variables are kept, never their values.
+create table if not exists run_suites (
+  run_id text primary key,
+  data text not null
+);
+-- Devices a team holds for a window on given days.
+create table if not exists bookings (
+  id text primary key,
+  name text not null unique collate nocase,
+  data text not null
+);
+-- Devices per host, by host name, that bookings never count as theirs; no row is the default floor.
+create table if not exists ci_floors (
+  host_name text primary key,
+  floor integer not null
+);
+-- A token's lease priority, and the booking it leases from; no row is interactive.
+create table if not exists token_priorities (
+  hash text primary key,
+  priority text not null,
+  booking_id text
+);
+-- Devices a failed run flow left as they were, by device id.
+create table if not exists holds (
+  device_id text primary key,
+  data text not null
+);
+-- A finding an agent or a person filed on a lease. data is the FindingData JSON.
+create table if not exists findings (
+  id text primary key,
+  lease_id text not null,
+  account_id text not null,
+  team_id text not null,
+  night_id text,
+  created_at integer not null,
+  data text not null
+);
+create index if not exists findings_by_lease on findings(lease_id);
+create index if not exists findings_by_night on findings(night_id);
+-- One booking window: its leases, findings and runs. data holds the members frozen at close.
+create table if not exists nights (
+  id text primary key,
+  team_id text not null,
+  booking text not null collate nocase,
+  state text not null,
+  opened_at integer not null,
+  closed_at integer,
+  data text not null
+);
+create index if not exists nights_by_team on nights(team_id, opened_at);
 `;
 
 export const DEFAULT_TEAM = 'default';
@@ -379,6 +457,270 @@ export class Db {
   audit(event: string, principalId: string | null, leaseId: string | null): void {
     this.sql.prepare('insert into audit (at, principal_id, lease_id, event) values (?, ?, ?, ?)').run(Date.now(), principalId, leaseId, event);
   }
+
+  saveRunSuite(runId: string, suite: RunSuite): void {
+    this.sql.prepare('insert or replace into run_suites (run_id, data) values (?, ?)').run(runId, JSON.stringify(suite));
+  }
+
+  getRunSuite(runId: string): RunSuite | null {
+    const row = this.sql.prepare('select data from run_suites where run_id = ?').get(runId);
+    if (!row) {
+      return null;
+    }
+    const suite: RunSuite = JSON.parse(String(row.data));
+    return suite;
+  }
+
+  imageSetup(name: string): string | null {
+    const row = this.sql.prepare('select data from image_setups where name = ?').get(name);
+    return row ? String(row.data) : null;
+  }
+
+  saveImageSetup(name: string, data: string | null): void {
+    if (data === null) {
+      this.sql.prepare('delete from image_setups where name = ?').run(name);
+      return;
+    }
+    this.sql.prepare('insert or replace into image_setups (name, data) values (?, ?)').run(name, data);
+  }
+
+  imageSecrets(): { name: string; updatedAt: number }[] {
+    return this.sql.prepare('select name, updated_at from image_secrets order by name').all().map((r) => ({ name: String(r.name), updatedAt: Number(r.updated_at) }));
+  }
+
+  imageSecretValues(names: string[]): Record<string, string> {
+    const values: Record<string, string> = {};
+    for (const name of names) {
+      const row = this.sql.prepare('select value from image_secrets where name = ?').get(name);
+      if (row) {
+        values[name] = String(row.value);
+      }
+    }
+    return values;
+  }
+
+  saveImageSecret(name: string, value: string, at: number): void {
+    this.sql.prepare('insert or replace into image_secrets (name, value, updated_at) values (?, ?, ?)').run(name, value, at);
+  }
+
+  removeImageSecret(name: string): boolean {
+    return this.sql.prepare('delete from image_secrets where name = ?').run(name).changes === 1;
+  }
+
+  setTokenLimits(hash: string, limits: TokenLimitRow): void {
+    this.sql
+      .prepare('insert or replace into token_limits (hash, agent, idle_ms, max_ms, grace_ms) values (?, ?, ?, ?, ?)')
+      .run(hash, limits.agent ? 1 : 0, limits.idleMs, limits.maxMs, limits.graceMs);
+  }
+
+  tokenLimits(hash: string): TokenLimitRow | null {
+    const row = this.sql.prepare('select agent, idle_ms, max_ms, grace_ms from token_limits where hash = ?').get(hash);
+    if (!row) {
+      return null;
+    }
+    return { agent: Number(row.agent) === 1, idleMs: numOrNull(row.idle_ms), maxMs: numOrNull(row.max_ms), graceMs: numOrNull(row.grace_ms) };
+  }
+
+  leaseLimitCaps(): LeaseLimitRow[] {
+    return this.sql
+      .prepare('select role, idle_ms, max_ms, grace_ms from lease_limits')
+      .all()
+      .map((r) => ({ role: String(r.role), idleMs: numOrNull(r.idle_ms), maxMs: numOrNull(r.max_ms), graceMs: numOrNull(r.grace_ms) }));
+  }
+
+  setLeaseLimitCap(row: LeaseLimitRow): void {
+    this.sql
+      .prepare('insert or replace into lease_limits (role, idle_ms, max_ms, grace_ms) values (?, ?, ?, ?)')
+      .run(row.role, row.idleMs, row.maxMs, row.graceMs);
+  }
+
+  bookings(): Booking[] {
+    return this.sql.prepare('select data from bookings order by name').all().map((r) => parseBooking(r));
+  }
+
+  saveBooking(b: Booking): void {
+    this.sql.prepare('insert or replace into bookings (id, name, data) values (?, ?, ?)').run(b.id, b.name, JSON.stringify(b));
+  }
+
+  removeBooking(id: string): boolean {
+    return this.sql.prepare('delete from bookings where id = ?').run(id).changes === 1;
+  }
+
+  ciFloors(): Map<string, number> {
+    return new Map(this.sql.prepare('select host_name, floor from ci_floors').all().map((r) => [String(r.host_name), Number(r.floor)]));
+  }
+
+  setCiFloor(hostName: string, floor: number | null): void {
+    if (floor === null) {
+      this.sql.prepare('delete from ci_floors where host_name = ?').run(hostName);
+      return;
+    }
+    this.sql.prepare('insert or replace into ci_floors (host_name, floor) values (?, ?)').run(hostName, floor);
+  }
+
+  setTokenPriority(hash: string, row: TokenPriorityRow): void {
+    this.sql.prepare('insert or replace into token_priorities (hash, priority, booking_id) values (?, ?, ?)').run(hash, row.priority, row.bookingId);
+  }
+
+  tokenPriority(hash: string): TokenPriorityRow | null {
+    const row = this.sql.prepare('select priority, booking_id from token_priorities where hash = ?').get(hash);
+    if (!row) {
+      return null;
+    }
+    const priority = row.priority === 'ci' || row.priority === 'booked' ? row.priority : 'interactive';
+    return { priority, bookingId: row.booking_id === null ? null : String(row.booking_id) };
+  }
+
+  holds(): Hold[] {
+    return this.sql.prepare('select data from holds').all().map((r) => parseHold(r));
+  }
+
+  saveHold(h: Hold): void {
+    this.sql.prepare('insert or replace into holds (device_id, data) values (?, ?)').run(h.deviceId, JSON.stringify(h));
+  }
+
+  removeHold(deviceId: string): void {
+    this.sql.prepare('delete from holds where device_id = ?').run(deviceId);
+  }
+
+  insertFinding(f: FindingRow): void {
+    this.sql
+      .prepare('insert into findings (id, lease_id, account_id, team_id, night_id, created_at, data) values (?, ?, ?, ?, ?, ?, ?)')
+      .run(f.id, f.leaseId, f.accountId, f.teamId, f.nightId, f.createdAt, JSON.stringify(f.data));
+  }
+
+  getFinding(id: string): FindingRow | null {
+    const row = this.sql.prepare('select * from findings where id = ?').get(id);
+    return row ? toFinding(row) : null;
+  }
+
+  findingsOf(opts: { nightId?: string; leaseIds?: string[] }): FindingRow[] {
+    const leaseIds = opts.leaseIds ?? [];
+    const where: string[] = [];
+    const args: string[] = [];
+    if (opts.nightId) {
+      where.push('night_id = ?');
+      args.push(opts.nightId);
+    }
+    if (leaseIds.length) {
+      where.push(`lease_id in (${leaseIds.map(() => '?').join(', ')})`);
+      args.push(...leaseIds);
+    }
+    if (!where.length) {
+      return [];
+    }
+    return this.sql.prepare(`select * from findings where ${where.join(' or ')} order by created_at`).all(...args).map(toFinding);
+  }
+
+  findingsBefore(before: number): FindingRow[] {
+    return this.sql.prepare('select * from findings where created_at < ?').all(before).map(toFinding);
+  }
+
+  insertNight(n: NightRow): void {
+    this.sql
+      .prepare('insert into nights (id, team_id, booking, state, opened_at, closed_at, data) values (?, ?, ?, ?, ?, ?, ?)')
+      .run(n.id, n.teamId, n.booking, n.state, n.openedAt, n.closedAt, JSON.stringify(n.data));
+  }
+
+  updateNight(n: NightRow): void {
+    this.sql.prepare('update nights set state = ?, closed_at = ?, data = ? where id = ?').run(n.state, n.closedAt, JSON.stringify(n.data), n.id);
+  }
+
+  getNight(id: string): NightRow | null {
+    const row = this.sql.prepare('select * from nights where id = ?').get(id);
+    return row ? toNight(row) : null;
+  }
+
+  nights(opts: { teamId?: string; booking?: string; state?: NightRow['state'] } = {}, limit = 100): NightRow[] {
+    const where: string[] = [];
+    const args: string[] = [];
+    if (opts.teamId) {
+      where.push('team_id = ?');
+      args.push(opts.teamId);
+    }
+    if (opts.booking) {
+      where.push('booking = ?');
+      args.push(opts.booking);
+    }
+    if (opts.state) {
+      where.push('state = ?');
+      args.push(opts.state);
+    }
+    const clause = where.length ? `where ${where.join(' and ')}` : '';
+    return this.sql.prepare(`select * from nights ${clause} order by opened_at desc, rowid desc limit ?`).all(...args, limit).map(toNight);
+  }
+
+  // Leases of a team that were active at some point in [from, to].
+  teamLeasesActiveBetween(teamId: string, from: number, to: number): Lease[] {
+    return this.sql
+      .prepare(
+        "select data from leases where json_extract(data, '$.teamId') = ? and json_extract(data, '$.activatedAt') is not null and json_extract(data, '$.activatedAt') <= ? and coalesce(json_extract(data, '$.endedAt'), ?) >= ? order by rowid",
+      )
+      .all(teamId, to, Number.MAX_SAFE_INTEGER, from)
+      .map(parseLease);
+  }
+}
+
+export type TokenLimitRow = { agent: boolean; idleMs: number | null; maxMs: number | null; graceMs: number | null };
+export type LeaseLimitRow = { role: string; idleMs: number | null; maxMs: number | null; graceMs: number | null };
+
+function numOrNull(v: unknown): number | null {
+  return v === null || v === undefined ? null : Number(v);
+}
+
+export type RunSuite = { sha256: string; testSha256: string; archive: string; envKeys: string[] };
+
+type Booking = import('@hangar/protocol').Booking;
+type Hold = import('@hangar/protocol').Hold;
+export type TokenPriorityRow = { priority: import('@hangar/protocol').Priority; bookingId: string | null };
+
+function parseBooking(row: Record<string, unknown>): Booking {
+  const b: Booking = JSON.parse(String(row.data));
+  return b;
+}
+
+function parseHold(row: Record<string, unknown>): Hold {
+  const h: Hold = JSON.parse(String(row.data));
+  return h;
+}
+
+export type FindingRow = { id: string; leaseId: string; accountId: string; teamId: string; nightId: string | null; createdAt: number; data: FindingData };
+export type FindingData = Omit<Finding, 'id' | 'leaseId' | 'nightId' | 'by' | 'createdAt' | 'video' | 'screenshot'> & {
+  video: { recordingId: string; fromMs: number; toMs: number; startedWithFinding: boolean } | null;
+  screenshot: boolean;
+};
+export type NightRow = {
+  id: string;
+  teamId: string;
+  booking: string;
+  state: 'open' | 'closed';
+  openedAt: number;
+  closedAt: number | null;
+  data: { openedBy: string; closedBy: string | null; leaseIds: string[] | null; runIds: string[] | null };
+};
+
+function toFinding(row: Record<string, unknown>): FindingRow {
+  return {
+    id: String(row.id),
+    leaseId: String(row.lease_id),
+    accountId: String(row.account_id),
+    teamId: String(row.team_id),
+    nightId: row.night_id === null ? null : String(row.night_id),
+    createdAt: Number(row.created_at),
+    data: JSON.parse(String(row.data)),
+  };
+}
+
+function toNight(row: Record<string, unknown>): NightRow {
+  return {
+    id: String(row.id),
+    teamId: String(row.team_id),
+    booking: String(row.booking),
+    state: String(row.state) === 'closed' ? 'closed' : 'open',
+    openedAt: Number(row.opened_at),
+    closedAt: row.closed_at === null ? null : Number(row.closed_at),
+    data: JSON.parse(String(row.data)),
+  };
 }
 
 function parseLease(row: Record<string, unknown>): Lease {

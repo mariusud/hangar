@@ -58,15 +58,24 @@ func send(_ o: AnyObject, _ sel: String) -> AnyObject? {
   return o.perform(s)?.takeUnretainedValue()
 }
 
+// A selector that a new Xcode renamed would crash the helper; failing with a code lets the agent fall back.
+func require(_ o: AnyObject, _ s: Selector) {
+  guard o.responds(to: s) else {
+    fail("SIMULATORKIT_CHANGED", "SimulatorKit in this Xcode has no \(NSStringFromSelector(s)).")
+  }
+}
+
 func sendU16(_ o: AnyObject, _ sel: String) -> UInt16 {
   typealias F = @convention(c) (AnyObject, Selector) -> UInt16
   let s = NSSelectorFromString(sel)
+  require(o, s)
   return unsafeBitCast(o.method(for: s), to: F.self)(o, s)
 }
 
 func register(_ o: AnyObject, _ sel: String, _ block: AnyObject) {
   typealias F = @convention(c) (AnyObject, Selector, NSUUID, AnyObject) -> Void
   let s = NSSelectorFromString(sel)
+  require(o, s)
   unsafeBitCast(o.method(for: s), to: F.self)(o, s, NSUUID(), block)
 }
 
@@ -180,6 +189,7 @@ let out = DispatchQueue(label: "out")
 let work = DispatchQueue(label: "work")
 let frameInterval = 1.0 / Double(fps)
 
+require(display, NSSelectorFromString("framebufferSurface"))
 var surface: IOSurfaceRef? = send(display, "framebufferSurface").map { unsafeBitCast($0, to: IOSurfaceRef.self) }
 var session: VTCompressionSession?
 var transfer: VTPixelTransferSession?

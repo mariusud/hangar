@@ -470,7 +470,10 @@ States: `queued`, `preparing`, `active`, `ended`. `ended` is terminal and carrie
 - Only `active` leases accept device ops. Anything else returns `LEASE_NOT_ACTIVE` with the state.
 - The deadline is `min(lastRenew + ttl, activatedAt + maxSeconds, lastActivity + idle)`, by the
   broker's clock. A scheduler tick every second ends leases past their deadline. A console tab
-  that is open and visible counts as activity.
+  that is open and visible counts as activity, and so does `keepalive`.
+- `idle` and `maxSeconds` come from the lease's token, under a cap per role (decision 0012).
+  When the last event stream of a lease closes, the idle end waits at least the token's grace
+  period (60 s by default) after the disconnect, so a client can reattach with the same token.
 - Renew on a lease that is not `active` fails. An ended lease never comes back.
 - `idempotencyKey` returns the existing lease for the same token and key for 24 hours.
 - The SDK and CLI renew at a third of the TTL.
