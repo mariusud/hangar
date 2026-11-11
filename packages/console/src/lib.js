@@ -129,3 +129,94 @@ export function capSeconds(value, field) {
 export function capValue(ms, field) {
   return String(Math.round((ms / field.ms) * 100) / 100);
 }
+
+const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+export function daysText(days) {
+  if (days.length === 7) return 'every day';
+  const sorted = WEEK.filter((d) => days.includes(d));
+  if (sorted.join(',') === 'mon,tue,wed,thu,fri') return 'weekdays';
+  if (sorted.join(',') === 'sat,sun') return 'weekends';
+  return sorted.join(', ');
+}
+
+// Whether a booking's window is open now, and when it closes or next opens.
+export function windowStatus(booking, now) {
+  if (booking.open) return { open: true, text: `Open, closes in ${duration(booking.open.to - now)}` };
+  if (booking.next) {
+    const ms = booking.next.from - now;
+    const days = Math.round(ms / 86_400_000);
+    return { open: false, text: ms >= 36 * 3_600_000 ? `Opens in ${days} days` : `Opens in ${duration(ms)}` };
+  }
+  return { open: false, text: 'No window ahead' };
+}
+
+// The Schedule form's fields as the body POST /v1/bookings takes. The broker checks days and times.
+export function bookingBody(fields) {
+  const body = {};
+  for (const key of ['name', 'days', 'from', 'to', 'image', 'platform', 'model', 'os']) {
+    const value = String(fields[key] ?? '').trim();
+    if (value) body[key] = value;
+  }
+  const devices = Number(String(fields.devices ?? '').trim() || 'x');
+  if (!Number.isInteger(devices) || devices < 1) throw new Error('Devices must be a whole number from 1.');
+  body.devices = devices;
+  return body;
+}
+
+// MCP settings for a token, the same as `hangar connect <booking>` prints.
+export function mcpSettings(mcpUrl, token) {
+  return {
+    json: JSON.stringify({ mcpServers: { hangar: { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
+    claude: `claude mcp add --transport http hangar ${mcpUrl} --header "Authorization: Bearer ${token}"`,
+  };
+}
+
+export function countdown(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// The banner for a lease that was told it ends early.
+export function endingText(ending, now) {
+  const left = countdown(ending.at - now);
+  if (ending.reason === 'preempted') {
+    return `A request with a higher priority needs this device. This lease ends in ${left}. The recording and findings are kept.`;
+  }
+  return `The booking’s window is closing. This lease ends in ${left}. The recording and findings are kept.`;
+}
+
+export function heldText(until, now) {
+  if (until <= now) return 'The hold has ended. Hangar wipes the device.';
+  return `Kept as the flow left it for ${duration(until - now)} more.`;
+}
+
+export function logTail(lines, count = 20) {
+  return lines.slice(-count);
+}
+
+// Where to go after POST /v1/findings/:id/open-again: the new lease's page, or the link it returns.
+export function openAgainTarget(result) {
+  if (result?.lease?.id) return `/leases/${result.lease.id}`;
+  if (result?.leaseId) return `/leases/${result.leaseId}`;
+  if (result?.id && result?.state) return `/leases/${result.id}`;
+  if (typeof result?.url === 'string') return pathOf(result.url);
+  return null;
+}
+
+export function openAgainError(err) {
+  if (err.code === 'NOT_FOUND' && /^No route/.test(err.message)) {
+    return 'This Hangar cannot open findings again yet. Update the broker, or follow the steps above on a fresh device.';
+  }
+  return err.message;
+}
+
+// A link the broker gives as a full URL, as a path on this console. It keeps the query and a video's #t= span.
+export function linkPath(url) {
+  try {
+    const u = new URL(url);
+    return `${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return url;
+  }
+}

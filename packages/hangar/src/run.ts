@@ -18,15 +18,17 @@ export const RUN_HELP = `  hangar run ios [--app App.app] [--port 8081] [--schem
   hangar run android [--app app-debug.apk] [--port 8081]
                                            the same on a leased Android emulator
   hangar run maestro <flows-dir> --app <App.app | build> [--shards N] [--retries 1]
-                     [--junit report.xml] [-e KEY=VALUE]... [--hold 30m]
+                     [--junit report.xml] [-e KEY=VALUE]... [--hold 30m] [--booking B]
                                            run Maestro flows sharded over fresh devices;
                                            --hold keeps a failed flow's device as it was,
-                                           for your team (hangar held <run-id> <flow>)
+                                           for your team (hangar held <run-id> <flow>);
+                                           --booking leases the shards inside your team's
+                                           open booking, ahead of its agents
   hangar run maestro --rerun <run-id> --flow <flow> [-e KEY=VALUE]...
                                            run one flow of a finished run again, recorded
-  hangar run xcuitest <Build/Products> [--tests Target/Class,...] [--shards N] [--junit report.xml]
+  hangar run xcuitest <Build/Products> [--tests Target/Class,...] [--shards N] [--junit report.xml] [--booking B]
                                            run XCUITest from build-for-testing the same way
-  hangar run espresso --app app.apk --test-apk app-test.apk [--tests com.example.LoginTest,...]
+  hangar run espresso --app app.apk --test-apk app-test.apk [--tests com.example.LoginTest,...] [--booking B]
                                            run Espresso on Android emulators the same way`;
 
 export async function runMaestroCommand(args: string[]): Promise<void> {
@@ -43,6 +45,7 @@ export async function runMaestroCommand(args: string[]): Promise<void> {
       rerun: { type: 'string' },
       flow: { type: 'string' },
       hold: { type: 'string' },
+      booking: { type: 'string' },
     },
   });
   const holdSeconds = values.hold === undefined ? undefined : parseDuration(values.hold);
@@ -71,6 +74,7 @@ export async function runMaestroCommand(args: string[]): Promise<void> {
     env,
     ...(values.model ? { device: { model: values.model } } : {}),
     ...(holdSeconds ? { holdSeconds } : {}),
+    ...(values.booking ? { booking: values.booking } : {}),
     log: (line) => process.stderr.write(`${line}\n`),
   });
   await report(result, values.junit, 'Maestro');
@@ -80,7 +84,7 @@ export async function runXcuitestCommand(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { tests: { type: 'string' }, shards: { type: 'string' }, retries: { type: 'string' }, junit: { type: 'string' }, model: { type: 'string' } },
+    options: { tests: { type: 'string' }, shards: { type: 'string' }, retries: { type: 'string' }, junit: { type: 'string' }, model: { type: 'string' }, booking: { type: 'string' } },
   });
   const products = positionals[0];
   if (!products) {
@@ -92,6 +96,7 @@ export async function runXcuitestCommand(args: string[]): Promise<void> {
     shards: Number(values.shards ?? 1),
     retries: Number(values.retries ?? 1),
     ...(values.model ? { device: { model: values.model } } : {}),
+    ...(values.booking ? { booking: values.booking } : {}),
     log: (line) => process.stderr.write(`${line}\n`),
   });
   await report(result, values.junit, 'XCUITest');
@@ -100,7 +105,7 @@ export async function runXcuitestCommand(args: string[]): Promise<void> {
 export async function runEspressoCommand(args: string[]): Promise<void> {
   const { values } = parseArgs({
     args,
-    options: { app: { type: 'string' }, 'test-apk': { type: 'string' }, tests: { type: 'string' }, shards: { type: 'string' }, retries: { type: 'string' }, junit: { type: 'string' } },
+    options: { app: { type: 'string' }, 'test-apk': { type: 'string' }, tests: { type: 'string' }, shards: { type: 'string' }, retries: { type: 'string' }, junit: { type: 'string' }, booking: { type: 'string' } },
   });
   const testApp = values['test-apk'];
   if (!values.app || !testApp) {
@@ -112,6 +117,7 @@ export async function runEspressoCommand(args: string[]): Promise<void> {
     ...(values.tests ? { tests: values.tests.split(',').map((t) => t.trim()).filter(Boolean) } : {}),
     shards: Number(values.shards ?? 1),
     retries: Number(values.retries ?? 1),
+    ...(values.booking ? { booking: values.booking } : {}),
     log: (line) => process.stderr.write(`${line}\n`),
   });
   await report(result, values.junit, 'Espresso');
@@ -151,6 +157,16 @@ export function commentKey(env: NodeJS.ProcessEnv): string {
   return createHash('sha256').update(`${env.GITHUB_WORKFLOW ?? ''}\n${env.GITHUB_JOB ?? ''}\n${env.HANGAR_COMMENT_KEY ?? ''}`).digest('hex').slice(0, 16);
 }
 
+/** The run page with a held flow picked, where a person on the team takes over its device. */
+export function heldLink(runUrl: string, flow: string): string {
+  return `${runUrl}?flow=${encodeURIComponent(flow)}`;
+}
+
+// The runner's time zone is rarely the reader's, so the comment says UTC.
+function clock(ms: number): string {
+  return `${new Date(ms).toISOString().slice(11, 16)} UTC`;
+}
+
 /** The pull request comment for a run. Its first line marks it, so a later job or a rerun updates it. */
 export function commentBody(result: MaestroRun, key: string): string {
   const c = counts(result.flows);
@@ -169,6 +185,10 @@ export function commentBody(result: MaestroRun, key: string): string {
   const passed = result.flows.filter((f) => f.status === 'passed');
   if (passed.length) {
     lines.push('', `<details><summary>${passed.length} passed</summary>`, '', passed.map((f) => cell(f.flow)).join(', '), '', '</details>');
+  }
+  const held = result.flows.flatMap((f) => (f.held ? [`- ${cell(f.flow)}: [open the device](${heldLink(result.url, f.flow)}), held until ${clock(f.held.until)}, or \`hangar held ${result.id} ${f.flow.replace(/[`\s]/g, '')}\``] : []));
+  if (held.length) {
+    lines.push('', 'Devices kept as the failed flow left them, for people on your team:', '', ...held);
   }
   const failed = bad.find((f) => f.status === 'failed');
   if (failed) {

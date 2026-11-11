@@ -23,4 +23,18 @@ export function registerFindingTools({ server, p, db, recordings, publicUrl, pic
         return text({ id: f.id, url: `${publicUrl}/v1/findings/${f.id}`, video: f.video?.video ?? null, screenshot: f.screenshot, steps: f.steps.length, logLines: f.log.length, notes: f.notes });
       }),
   );
+
+  server.registerTool(
+    'open_again',
+    {
+      description:
+        "Reproduce a finding: lease a fresh device of the same image, record it, and replay the taps, swipes, typing, keys, buttons, app launches and URLs taken before the finding. Taps go to the element with the recorded label when it is on screen, else to the recorded point. Returns the new lease id and each step as ok, skipped or failed. You hold the new lease afterwards; release it when done. Only the finding's team can open it again.",
+      inputSchema: {
+        findingId: z.string(),
+        waitSeconds: z.number().min(1).max(3600).optional().describe('How long to wait for a free device. Defaults to 300'),
+      },
+    },
+    ({ findingId, waitSeconds }) =>
+      safe(async () => text(await recordings.findings.openAgain(p, findingId, publicUrl, { waitMs: (waitSeconds ?? 300) * 1000 }))),
+  );
 }

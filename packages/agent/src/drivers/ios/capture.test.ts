@@ -65,7 +65,7 @@ test('helpers', () => {
   assert.equal(captureOf({}), null);
 });
 
-type Fake = { stream: ScreenStream; emit: () => void; exit: (err: string | null) => void; keyframes: number; stopped: boolean };
+type Fake = { stream: ScreenStream; emit: () => void; exit: (err: string | null) => void; keyframes: number; stopped: boolean; recorded: string[]; finished: number };
 
 // A stream that answers keyframe requests with a frame when `answers` is true.
 function fake(answers: boolean, onFrame: (r: Buffer) => void): Fake {
@@ -76,6 +76,8 @@ function fake(answers: boolean, onFrame: (r: Buffer) => void): Fake {
   const f: Fake = {
     keyframes: 0,
     stopped: false,
+    recorded: [],
+    finished: 0,
     emit: () => onFrame(Buffer.from([1])),
     exit: (err) => exit(err),
     stream: {
@@ -85,8 +87,13 @@ function fake(answers: boolean, onFrame: (r: Buffer) => void): Fake {
           f.emit();
         }
       },
-      record: () => {},
-      stopRecording: () => Promise.resolve(),
+      record: (path) => {
+        f.recorded.push(path);
+        f.stream.keyframe();
+      },
+      stopRecording: async () => {
+        f.finished += 1;
+      },
       stop: async () => {
         f.stopped = true;
         exit(null);
@@ -247,5 +254,22 @@ test('a slow first frame is allowed more time than a later keyframe', async () =
   assert.equal(capturePath('dev-i'), 'jpeg');
   send();
   assert.equal(frames.length, 1, 'frames after the switch are dropped');
+  resetCaptureHealth();
+});
+
+test('a recording moves to the next path with the stream', async () => {
+  resetCaptureHealth();
+  const made: Fake[] = [];
+  const s = await captureStream('dev-j', () => {}, {}, deps({ iosurface: 'ok', idb: 'ok' }, made));
+  s.record('/rec/video.mp4');
+  assert.deepEqual(made[0]?.recorded, ['/rec/video.mp4']);
+  made[0]?.exit('SIMULATORKIT_CHANGED: gone');
+  await sleep(10);
+  assert.equal(capturePath('dev-j'), 'idb');
+  assert.equal(made[0]?.stopped, true, 'the failed path is stopped before the next one writes the file');
+  assert.deepEqual(made[1]?.recorded, ['/rec/video.mp4']);
+  await s.stopRecording();
+  assert.equal(made[1]?.finished, 1);
+  await s.stop();
   resetCaptureHealth();
 });

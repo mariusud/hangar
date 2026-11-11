@@ -115,6 +115,8 @@ export async function captureStream(
   const reasons: string[] = [];
   let stopping = false;
   let current: { path: VideoPath; stream: ScreenStream } | null = null;
+  // A recording moves to the next path with the stream. That path rewrites the file from its first keyframe.
+  let recording: string | null = null;
   let askedAt: number | null = null;
   let healthy = false;
   let watchdog: NodeJS.Timeout | null = null;
@@ -153,13 +155,16 @@ export async function captureStream(
     }
   };
 
-  const fail = async (failed: { path: VideoPath }, code: string, message: string): Promise<void> => {
+  const fail = async (failed: { path: VideoPath; stream: ScreenStream }, code: string, message: string): Promise<void> => {
     if (stopping || (current && current !== failed)) {
       return;
     }
     current = null;
     reasons.push(message);
     health = recordFailure(health, failed.path, code, deps.now());
+    if (recording) {
+      await failed.stream.stop().catch(() => {});
+    }
     await start(failed.path);
   };
 
@@ -204,7 +209,11 @@ export async function captureStream(
         }
       });
       ask();
-      stream.keyframe();
+      if (recording) {
+        stream.record(recording);
+      } else {
+        stream.keyframe();
+      }
       return;
     }
     if (!stopping) {
@@ -226,10 +235,14 @@ export async function captureStream(
       current?.stream.keyframe();
     },
     record: (path) => {
+      recording = path;
       ask();
       current?.stream.record(path);
     },
-    stopRecording: () => current?.stream.stopRecording() ?? Promise.resolve(),
+    stopRecording: () => {
+      recording = null;
+      return current?.stream.stopRecording() ?? Promise.resolve();
+    },
     stop: async () => {
       stopping = true;
       if (watchdog) {

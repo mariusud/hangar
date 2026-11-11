@@ -5,14 +5,14 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import type { LogLine, NetworkEntry, Op } from '@hangar/protocol';
+import type { LogLine, NetworkEntry, Op, UiNode } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import type { Principal } from './auth.ts';
 import type { Db, RecordingRow } from './db.ts';
 import { ApiError, type Leases } from './leases/service.ts';
 import type { Lease } from './leases/machine.ts';
 import type { Store } from './store.ts';
-import { Findings, RECORDER } from './findings.ts';
+import { ACTION_LIMIT, Findings, nodesOf, RECORDER, recordOp, type RecordedAction } from './findings.ts';
 
 export const RECORDING_PARTS = ['video', 'log', 'screenshot'] as const;
 export type RecordingPart = (typeof RECORDING_PARTS)[number];
@@ -50,11 +50,14 @@ export type Timeline = {
   timer: NodeJS.Timeout | null;
 };
 
-export type CollectedLog = { lines: LogLine[]; dropped: boolean; error: string | null };
+type ActionLog = { actions: RecordedAction[]; truncated: boolean; screen: UiNode[] | null };
+
+export type CollectedLog ={ lines: LogLine[]; dropped: boolean; error: string | null };
 export type CollectedNetwork = { requests: NetworkEntry[]; dropped: boolean; error: string | null };
 
 export class Recordings {
   private timelines = new Map<string, Timeline>();
+  private taken = new Map<string, ActionLog>();
   readonly findings: Findings;
   private collectEveryMs: number;
 
@@ -67,16 +70,20 @@ export class Recordings {
   constructor(db: Db, leases: Leases, store: Store, internalUrl: () => string, opts: { collectEveryMs?: number } = {}) {
     this.db = db;
     this.collectEveryMs = opts.collectEveryMs ?? COLLECT_EVERY_MS;
-    this.findings = new Findings(db, leases, this, store);
+    this.findings = new Findings(db, leases, this, store, internalUrl);
     this.leases = leases;
     this.store = store;
     this.dir = store.local('recordings');
     this.internalUrl = internalUrl;
-    leases.events.on('op', (leaseId: string, body: Op, at: number, result: unknown) => this.note(leaseId, body, at, result));
+    leases.events.on('op', (leaseId: string, body: Op, at: number, result: unknown) => {
+      this.note(leaseId, body, at, result);
+      this.keep(leaseId, body, at, result);
+    });
     leases.events.on('any', (lease: Lease) => {
       if (lease.state === 'active' && this.db.recordingOf(lease.id, ['waiting'])) {
         void this.begin(lease.id).catch(() => {});
       } else if (lease.state === 'ended') {
+        this.taken.delete(lease.id);
         void this.leaseEnded(lease.id).catch((err: Error) => console.error(`Could not save the timeline of lease ${lease.id}: ${err.message}`));
       }
     });
@@ -137,6 +144,35 @@ export class Recordings {
   current(leaseId: string): { recordingId: string; startedAt: number } | null {
     const t = this.timelines.get(leaseId);
     return t ? { recordingId: t.recordingId, startedAt: t.startedAt } : null;
+  }
+
+  // The actions the lease's holder took up to `until`, recorded or not, for a finding to replay.
+  actionsOf(leaseId: string, until: number): { actions: RecordedAction[]; truncated: boolean } {
+    const log = this.taken.get(leaseId);
+    return { actions: (log?.actions ?? []).filter((a) => a.at <= until), truncated: log?.truncated ?? false };
+  }
+
+  // A describe names the elements under the taps that follow it, until the next action changes the screen.
+  private keep(leaseId: string, body: Op, at: number, result: unknown): void {
+    if (this.db.getLease(leaseId)?.state !== 'active') {
+      return;
+    }
+    const log = this.taken.get(leaseId) ?? { actions: [], truncated: false, screen: null };
+    this.taken.set(leaseId, log);
+    if (body.op === 'describe') {
+      log.screen = nodesOf(result);
+      return;
+    }
+    const actions = recordOp(body, at, result, log.screen);
+    if (!actions.length) {
+      return;
+    }
+    log.screen = null;
+    log.actions.push(...actions);
+    if (log.actions.length > ACTION_LIMIT) {
+      log.actions.splice(0, log.actions.length - ACTION_LIMIT);
+      log.truncated = true;
+    }
   }
 
   // Steps taken from `fromMs` into the recording on.
@@ -465,6 +501,15 @@ export function describeOp(body: Op): string | null {
       return `Connect ${body.bundleId} to Metro`;
     case 'maestro':
       return `Run Maestro: ${body.flows.join(', ')}`;
+    case 'xcuitest':
+    case 'espresso':
+      return `Run ${body.op === 'xcuitest' ? 'XCUITest' : 'Espresso'}${body.tests.length ? `: ${body.tests.join(', ')}` : ''}`;
+    case 'jsEvaluate':
+      return 'Run JavaScript in the app';
+    case 'orientation':
+      return `Rotate to ${body.orientation}`;
+    case 'gesture':
+      return `${body.gesture === 'pinch' ? 'Pinch' : 'Rotate'} at ${point(body.center)}`;
     default:
       return null;
   }

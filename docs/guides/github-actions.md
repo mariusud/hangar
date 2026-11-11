@@ -52,6 +52,14 @@ lease, so a Mac with three simulators runs three shards at once and queues the r
 the job cancels the run, which releases its devices. If the runner dies before it can say so,
 the run goes on in Hangar and releases its devices when it ends; cancel it on its page.
 `config.yaml` in the flows folder is Maestro's own settings file and is not run as a flow.
+[Maestro flows](maestro.md) describes the command itself, including `--hold`, which keeps a failed
+flow's device for a person to look at; the action has no input for it yet.
+
+A token made by `hangar connect ci` has the `ci` priority, so its shards go first in the queue,
+can end a lower-priority lease with two minutes' notice when every device is busy, and can use
+the devices a booking keeps free ([Night QA](night-qa.md#priority-and-preemption)). Shards
+started with a person's or a booking's token can be preempted that way; their unfinished flows
+then run again on another device ([details](maestro.md#when-a-shard-is-preempted)).
 
 ## Recordings of failures
 
@@ -115,7 +123,9 @@ is still going can't be rerun.
 [examples/workflows/hangar-nightly.yml](../../examples/workflows/hangar-nightly.yml) runs every
 flow at 03:00 UTC with two retries, and has a manual "Run workflow" form on the Actions tab
 that reruns one flow of a past run, optionally updating a pull request's comment. Copy it to
-`.github/workflows/` and change the build steps to match your app.
+`.github/workflows/` and change the build steps to match your app. To run it inside a booking's window, make its
+token with `hangar connect <booking>`, which also prints the cron for the window in UTC
+([Night QA](night-qa.md#tokens-for-a-booking)).
 
 ## Flaky tests
 

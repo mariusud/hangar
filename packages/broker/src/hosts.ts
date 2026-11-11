@@ -1,6 +1,6 @@
 
 import { randomUUID } from 'node:crypto';
-import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type Platform, type StreamCodec } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type ImageBuildState, type Platform, type StreamCodec } from '@hangar/protocol';
 
 export type HostLink = {
   send(message: BrokerMessage): void;
@@ -17,6 +17,8 @@ export type Host = {
   connected: boolean;
   lostAt: number | null;
   link: HostLink;
+  // The host's last word on each image declaration it builds, by image id.
+  images: Map<string, { state: ImageBuildState; message?: string }>;
 };
 
 export class HostError extends Error {
@@ -60,6 +62,7 @@ export class Hosts {
             connected: true,
             lostAt: null,
             link,
+            images: existing?.images ?? new Map(),
           };
           this.hosts.set(host.id, host);
           link.send({ type: 'welcome', hostId: host.id });
@@ -74,6 +77,8 @@ export class Hosts {
           this.onTunnel(m);
         } else if (m.type === 'stream.failed') {
           this.onStreamFailed(m.leaseId, m.codec, m.message);
+        } else if (m.type === 'images.status' && host) {
+          host.images.set(m.id, m.message ? { state: m.state, message: m.message.slice(0, 4000) } : { state: m.state });
         } else if (m.type === 'response') {
           const p = this.pending.get(m.id);
           if (p) {

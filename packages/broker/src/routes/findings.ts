@@ -22,6 +22,22 @@ route('GET', '/v1/findings/:id', (req, res, ctx) => {
   json(res, 200, findingView(ctx.db, ctx.recordings.findings.get(me(req, ctx), req.params.id ?? ''), ctx.publicUrl()));
 });
 
+route('POST', '/v1/findings/:id/open-again', async (req, res, ctx) => {
+  const p = me(req, ctx);
+  const { waitSeconds } = await body<{ waitSeconds?: unknown }>(req);
+  json(res, 201, await ctx.recordings.findings.openAgain(p, req.params.id ?? '', ctx.publicUrl(), { waitMs: waitMsOf(waitSeconds) }));
+});
+
+function waitMsOf(v: unknown): number {
+  if (v === undefined || v === null) {
+    return 300_000;
+  }
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > 3600) {
+    throw new ApiError(400, 'BAD_WAIT', '`waitSeconds` is a number of seconds from 1 to 3600, or left out for 300.');
+  }
+  return v * 1000;
+}
+
 route('GET', '/v1/findings/:id/screenshot.png', async (req, res, ctx) => {
   const finding = ctx.recordings.findings.get(me(req, ctx), req.params.id ?? '');
   const file = finding.data.screenshot ? await ctx.store.open(ctx.recordings.findings.screenshotKey(finding.id)) : null;

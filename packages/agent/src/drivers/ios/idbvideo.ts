@@ -3,6 +3,7 @@ import { connect as connectSocket } from 'node:net';
 import { AnnexBFrames } from './annexb.ts';
 import { bytesField } from './hid.ts';
 import type { ScreenStream } from './index.ts';
+import { Mp4Recorder } from './mp4.ts';
 
 // The last NAL unit of a frame is only known to be whole once the next one starts. idb writes a
 // frame in one burst, so a short quiet gap after data also ends it.
@@ -65,13 +66,28 @@ export function videoBytes(message: Buffer): Buffer {
 
 /**
  * idb_companion's H.264 video stream over its gRPC socket, as frame records. idb cannot force a
- * keyframe, so `keyframe()` opens a new stream, which starts with one. Recording is not supported.
+ * keyframe, so `keyframe()` opens a new stream, which starts with one. `record()` writes the same
+ * H.264 to an MP4 from the next keyframe on.
  */
 export async function idbVideoStream(socket: string, onFrame: (record: Buffer) => void, opts: { fps?: number } = {}): Promise<ScreenStream> {
   const session: ClientHttp2Session = connect('http://localhost', { createConnection: () => connectSocket(socket) });
   session.on('error', () => {});
   let stopping = false;
   let current: ClientHttp2Stream | null = null;
+  let recorder: Mp4Recorder | null = null;
+  // A new stream starts with a keyframe. Until it sends one, opening yet another stream gains
+  // nothing, and stopping and starting streams in quick succession leaves idb sending no frames.
+  let awaitingFirst = true;
+  const emit = (record: Buffer): void => {
+    awaitingFirst = false;
+    recorder?.push(record);
+    onFrame(record);
+  };
+  const stopRecording = async (): Promise<void> => {
+    const r = recorder;
+    recorder = null;
+    await r?.finish();
+  };
   let finish: (err: string | null) => void = () => {};
   const exited = new Promise<string | null>((resolve) => {
     finish = resolve;
@@ -80,7 +96,11 @@ export async function idbVideoStream(socket: string, onFrame: (record: Buffer) =
 
   const open = (): Promise<void> =>
     new Promise((resolve, reject) => {
-      const frames = new AnnexBFrames(onFrame);
+      const frames = new AnnexBFrames((record) => {
+        if (current === req) {
+          emit(record);
+        }
+      });
       let timer: NodeJS.Timeout | null = null;
       const messages = new GrpcMessages((m) => {
         const data = videoBytes(m);
@@ -127,6 +147,7 @@ export async function idbVideoStream(socket: string, onFrame: (record: Buffer) =
       });
       const previous = current;
       current = req;
+      awaitingFirst = true;
       previous?.end(STOP_REQUEST);
       previous?.close();
       req.write(startRequest(Math.max(1, Math.min(opts.fps ?? 30, 60))));
@@ -138,17 +159,22 @@ export async function idbVideoStream(socket: string, onFrame: (record: Buffer) =
     session.destroy();
     throw err;
   }
+  const keyframe = (): void => {
+    if (!stopping && !awaitingFirst) {
+      open().catch((err: Error) => {
+        finish(err.message);
+        session.destroy();
+      });
+    }
+  };
   return {
-    keyframe: () => {
-      if (!stopping) {
-        open().catch((err: Error) => {
-          finish(err.message);
-          session.destroy();
-        });
-      }
+    keyframe,
+    record: (path) => {
+      void stopRecording().catch(() => {});
+      recorder = new Mp4Recorder(path);
+      keyframe();
     },
-    record: () => {},
-    stopRecording: () => Promise.resolve(),
+    stopRecording,
     stop: async () => {
       stopping = true;
       current?.end(STOP_REQUEST);
@@ -156,6 +182,7 @@ export async function idbVideoStream(socket: string, onFrame: (record: Buffer) =
       session.close();
       await exited;
       clearTimeout(timer);
+      await stopRecording();
     },
     exited,
   };

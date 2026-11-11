@@ -170,7 +170,8 @@ export type AgentMessage =
   | { type: 'tunnel.open'; leaseId: string; conn: number }
   | TunnelData
   | { type: 'response'; id: number; ok: true; result?: unknown; binary?: string }
-  | { type: 'response'; id: number; ok: false; error: { code: string; message: string } };
+  | { type: 'response'; id: number; ok: false; error: { code: string; message: string } }
+  | ImagesStatus;
 
 export type ErrorBody = { error: { code: string; message: string; hint?: string } };
 
@@ -209,3 +210,8 @@ export * from './findings.ts';
 export * from './devicetools.ts';
 export * from './images.ts';
 export * from './capture.ts';
+
+export type ImageBuildState = 'building' | 'ready' | 'failed';
+
+/** How a host's build of one image declaration went. `image` is the image name, `id` its declaration id. */
+export type ImagesStatus = { type: 'images.status'; image: string; id: string; state: ImageBuildState; message?: string };

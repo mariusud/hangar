@@ -50,7 +50,23 @@ Everything Hangar does today, with links to the guides.
   step or a log line and the video jumps there. The video is the stream's own H.264 written to
   an MP4 on the Mac, so recording costs no second encode. Recordings are kept for 14 days. A
   view-only link lets someone without an account watch one for 7 days
-  ([guide](guides/recordings.md)).
+  ([guide](guides/recordings.md)). A recording also keeps the app's log lines and network
+  requests from the device tools.
+- `hangar run maestro --hold 30m` keeps the device a flow failed on as the test left it, and
+  `hangar held <run-id> <flow>` leases it to a person on the run's team. A shard whose device was
+  taken for a higher-priority lease runs its unfinished flows again, up to three times
+  ([guide](guides/maestro.md)). Tested against fake hosts only.
+- Bookings: `hangar book night --devices 4 --from 21:00 --to 06:00 --days mon-fri` holds devices
+  for a team in a window, in the broker's time zone, and `hangar connect night` makes a token that
+  leases only from it. Each Mac keeps a CI floor that bookings never take. Leases have a priority
+  (`ci`, `interactive`, `booked`); a `ci` request can end a lower one with two minutes' notice,
+  and booked leases get ten minutes' notice before their window closes (`lease_ending`)
+  ([guide](guides/night-qa.md)). Tested against a simulated fleet only.
+- Findings and nights: the `report_finding` MCP tool files a bug with a span of the recording, the
+  steps, the app log, the network requests and a screenshot. A booking's window end closes its
+  night, and `hangar night report <booking>` prints the report in Markdown or JSON, or posts it to
+  a Slack webhook from the machine that runs it. Tested against a fake host; no finding has been
+  filed from a real simulator.
 - Prometheus metrics at `/metrics`: devices, leases and hosts by state, time to get a device,
   how leases ended, device op timings, frames sent and dropped per codec. Counts and timings
   only, no names or ids, so it needs no token.
@@ -86,7 +102,8 @@ Device images keep simulators ready with your app installed and a locale and app
 ([guide](guides/device-images.md)). An image can also grant permissions to its apps
 (`--grant`) and run a Maestro sign-in flow once (`--sign-in`), with the account's values from
 the broker's secret store or the Mac's environment. Grants and sign-in are tested with fakes
-only.
+only. `hangar image refresh norsk --app ./MyApp.app` builds the image again with a new build
+while leases on the old one keep running; tested with a fake host only.
 
 `hangar run android` builds, installs and runs your app on a leased emulator, connected to Metro
 here.

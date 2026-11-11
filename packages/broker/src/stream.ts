@@ -83,14 +83,15 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
     }
   };
 
-  leases.events.on('any', (lease: { id: string; state: string }) => {
+  leases.events.on('any', (lease: { id: string; state: string; hostLeaseId?: string }) => {
     if (lease.state === 'ended') {
-      for (const v of viewers.get(lease.id) ?? []) {
+      const hostId = lease.hostLeaseId ?? lease.id;
+      for (const v of viewers.get(hostId) ?? []) {
         v.ws.close(4000, 'lease ended');
       }
-      viewers.delete(lease.id);
-      devices.delete(lease.id);
-      lastKeyRequest.delete(lease.id);
+      viewers.delete(hostId);
+      devices.delete(hostId);
+      lastKeyRequest.delete(hostId);
     }
   });
 
@@ -116,18 +117,19 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
       return true;
     }
     const principal = p;
+    const hostId = leases.hostLeaseId(leases.get(p, leaseId));
     const device = deviceId;
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.binaryType = 'nodebuffer';
-      const set = viewers.get(leaseId) ?? new Set<Viewer>();
-      viewers.set(leaseId, set);
-      devices.set(leaseId, device);
+      const set = viewers.get(hostId) ?? new Set<Viewer>();
+      viewers.set(hostId, set);
+      devices.set(hostId, device);
       const viewer: Viewer = { ws, codec, needsKey: true };
       set.add(viewer);
-      if (count(leaseId, codec) === 1) {
-        hosts.notify(device, { type: 'stream.start', leaseId, codec });
+      if (count(hostId, codec) === 1) {
+        hosts.notify(device, { type: 'stream.start', leaseId: hostId, codec });
       } else if (codec === 'h264') {
-        askKeyframe(leaseId);
+        askKeyframe(hostId);
       }
 
       ws.on('message', (data, isBinary) => {
@@ -142,7 +144,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
         }
         if (input.type === 'keyframe') {
           viewer.needsKey = true;
-          askKeyframe(leaseId);
+          askKeyframe(hostId);
           return;
         }
         const action = toAction(input);
@@ -156,11 +158,11 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
 
       ws.on('close', () => {
         set.delete(viewer);
-        if (count(leaseId, viewer.codec) === 0 && viewers.has(leaseId)) {
-          hosts.notify(device, { type: 'stream.stop', leaseId, codec: viewer.codec });
+        if (count(hostId, viewer.codec) === 0 && viewers.has(hostId)) {
+          hosts.notify(device, { type: 'stream.stop', leaseId: hostId, codec: viewer.codec });
         }
         if (set.size === 0) {
-          viewers.delete(leaseId);
+          viewers.delete(hostId);
         }
       });
     });

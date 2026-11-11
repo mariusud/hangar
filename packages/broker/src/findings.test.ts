@@ -9,7 +9,7 @@ import type { NightRow } from './db.ts';
 import { parseFinding, STARTED_WITH_FINDING, videoSpan } from './findings.ts';
 import { startBroker, type Broker } from './index.ts';
 import { newLease, type Lease } from './leases/machine.ts';
-import { buildReport, nightMembers, OPEN_AGAIN_NOTE, reportMarkdown } from './reports.ts';
+import { buildReport, nightMembers, reportMarkdown } from './reports.ts';
 import { boundLine, boundRequest, LOG_LIMIT, NETWORK_LIMIT } from './recordings.ts';
 import type { Run } from './runs.ts';
 
@@ -114,7 +114,7 @@ test('the report counts by severity, lists the worst first and renders as Markdo
   );
   assert.deepEqual(report.summary, { leases: 1, findings: 2, bySeverity: { low: 1, medium: 0, high: 0, critical: 1 }, runs: 1, failedFlows: 1, flakyFlows: 1 });
   assert.deepEqual(report.findings.map((f) => f.id), ['b', 'a']);
-  assert.deepEqual(report.notes, [OPEN_AGAIN_NOTE]);
+  assert.deepEqual(report.notes, []);
   const md = reportMarkdown(report);
   assert.match(md, /^# nightly: night report\n/);
   assert.match(md, /- 2 findings \(1 critical, 1 low\)/);
@@ -125,7 +125,7 @@ test('the report counts by severity, lists the worst first and renders as Markdo
   assert.match(md, /Fatal '''boom'''/);
   assert.match(md, /  - checkout failed: Assertion is false/);
   assert.match(md, /- agent, image signed-in, iPhone 17, iOS 26\.5, 60 min, ended: expired/);
-  assert.ok(md.includes(OPEN_AGAIN_NOTE));
+  assert.ok(!md.includes('Open again'));
   assert.ok(!/TODO/i.test(md));
 });
 
@@ -256,7 +256,7 @@ test('a finding carries the video span, steps, app log, network and a screenshot
     assert.ok(ops.filter((o) => o === 'appLog').length > before, 'the finding reads the newest log lines');
     assert.equal(f.network[0]?.status, 500);
     assert.deepEqual(f.notes, []);
-    assert.equal(f.openAgainUrl, null);
+    assert.match(f.openAgainUrl ?? '', new RegExp(`/v1/findings/${f.id}/open-again$`));
     const shot = await fetch(new URL(f.screenshot ?? '').pathname.replace(/^/, broker.url), { headers: { authorization: `Bearer ${qaToken}` } });
     assert.equal(shot.status, 200);
     assert.equal(await shot.text(), 'fakepng');

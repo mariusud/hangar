@@ -38,10 +38,11 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
     }
   };
 
-  leases.events.on('any', (lease: { id: string; state: string }) => {
+  leases.events.on('any', (lease: { id: string; state: string; hostLeaseId?: string }) => {
     if (lease.state === 'ended') {
-      clients.get(lease.id)?.close(4000, 'lease ended');
-      clients.delete(lease.id);
+      const hostId = lease.hostLeaseId ?? lease.id;
+      clients.get(hostId)?.close(4000, 'lease ended');
+      clients.delete(hostId);
     }
   });
 
@@ -66,11 +67,12 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
       return true;
     }
     const deviceId = device;
+    const hostId = leases.hostLeaseId(leases.get(p, leaseId));
     wss.handleUpgrade(req, socket, head, (ws) => {
-      clients.get(leaseId)?.close(4001, 'replaced by a newer tunnel');
-      clients.set(leaseId, ws);
+      clients.get(hostId)?.close(4001, 'replaced by a newer tunnel');
+      clients.set(hostId, ws);
       hosts
-        .request(deviceId, (id) => ({ type: 'tunnel.start', id, leaseId }), 10_000)
+        .request(deviceId, (id) => ({ type: 'tunnel.start', id, leaseId: hostId }), 10_000)
         .then((res) => {
           if (!res.ok) {
             ws.close(4002, res.error.message.slice(0, 120));
@@ -86,15 +88,15 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
         }
         const conn = data.readUInt32BE(1);
         if (data[0] === KIND.data) {
-          hosts.notify(deviceId, { type: 'tunnel.data', leaseId, conn, data: data.subarray(5) });
+          hosts.notify(deviceId, { type: 'tunnel.data', leaseId: hostId, conn, data: data.subarray(5) });
         } else if (data[0] === KIND.close) {
-          hosts.notify(deviceId, { type: 'tunnel.close', leaseId, conn });
+          hosts.notify(deviceId, { type: 'tunnel.close', leaseId: hostId, conn });
         }
       });
       ws.on('close', () => {
-        if (clients.get(leaseId) === ws) {
-          clients.delete(leaseId);
-          hosts.notify(deviceId, { type: 'tunnel.stop', leaseId });
+        if (clients.get(hostId) === ws) {
+          clients.delete(hostId);
+          hosts.notify(deviceId, { type: 'tunnel.stop', leaseId: hostId });
         }
       });
     });

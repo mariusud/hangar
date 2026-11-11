@@ -1,5 +1,6 @@
 import { pipeline } from 'node:stream/promises';
 import * as auth from '../auth.ts';
+import { followUpload } from '../images.ts';
 import { ApiError } from '../leases/service.ts';
 import { saveUpload } from './uploads.ts';
 import { json, me, query, route } from './util.ts';
@@ -9,7 +10,16 @@ route('POST', '/v1/builds', async (req, res, ctx) => {
   if (!p.scopes.includes('install:upload')) {
     throw new ApiError(403, 'UPLOAD_NOT_ALLOWED', 'Uploading a build needs the install:upload permission.');
   }
-  json(res, 201, await saveUpload(req, ctx, query(req).get('name') ?? 'upload'));
+  const build = await saveUpload(req, ctx, query(req).get('name') ?? 'upload');
+  // Images declared with follow take this build in place of their app with the same name.
+  const images = followUpload(ctx.db, build);
+  for (const name of images) {
+    ctx.db.audit(`image.refresh ${name}`, p.accountId, null);
+  }
+  if (images.length) {
+    ctx.publishImages();
+  }
+  json(res, 201, { ...build, images });
 });
 
 route('GET', '/v1/builds', (_req, res, ctx) => {

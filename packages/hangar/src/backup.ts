@@ -20,7 +20,7 @@ export async function exportData(file: string): Promise<void> {
     const db = new Db(join(dir, 'hangar.db'));
     db.sql.prepare('vacuum into ?').run(join(tmp, 'hangar.db'));
     db.sql.close();
-    const parts = ['builds', 'recordings'].filter((p) => existsSync(join(dir, p)));
+    const parts = ['builds', 'recordings', 'image-secrets.key', 'view-link.key'].filter((p) => existsSync(join(dir, p)));
     await run('tar', ['-cf', resolve(file), '-C', tmp, 'hangar.db', ...parts.flatMap((p) => ['-C', dir, p])]);
   } finally {
     await rm(tmp, { recursive: true, force: true });

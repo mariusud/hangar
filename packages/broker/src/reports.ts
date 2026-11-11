@@ -10,9 +10,6 @@ import type { WindowClosed } from './schedule.ts';
 
 const BOOKING_LIMIT = 80;
 
-export const OPEN_AGAIN_NOTE =
-  'Open again is not available yet. Each finding keeps the steps taken before it, so a later version of Hangar can replay them on a fresh lease of the same image and fill in the link.';
-
 export function parseBooking(v: unknown): string {
   const booking = typeof v === 'string' ? v.trim() : '';
   if (!booking || booking.length > BOOKING_LIMIT || !/^[\w .:-]+$/.test(booking)) {
@@ -140,9 +137,6 @@ export function buildReport(parts: { night: Night; leases: NightLease[]; finding
   if (parts.night.state === 'open') {
     notes.push('The night is still open, so this report can change.');
   }
-  if (findings.some((f) => f.openAgainUrl === null)) {
-    notes.push(OPEN_AGAIN_NOTE);
-  }
   return {
     night: parts.night,
     generatedAt: now,
@@ -192,6 +186,9 @@ export function reportMarkdown(r: NightReport): string {
     }
     if (f.screenshot) {
       out.push(`- Screenshot: ${f.screenshot}`);
+    }
+    if (f.openAgainUrl) {
+      out.push(`- Open again: \`POST ${f.openAgainUrl}\` or \`open_again\` in MCP replays the steps on a fresh device.`);
     }
     for (const note of f.notes) {
       out.push(`- ${note}`);

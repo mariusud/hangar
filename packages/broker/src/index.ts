@@ -5,7 +5,7 @@ import type { AgentMessage } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import { Db } from './db.ts';
 import { Hosts, type HostLink } from './hosts.ts';
-import { imagesMessage } from './images.ts';
+import { imagesMessage, sealStoredSecrets } from './images.ts';
 import { handle, type Ctx } from './http.ts';
 import { Leases } from './leases/service.ts';
 import { Metrics } from './metrics.ts';
@@ -54,6 +54,7 @@ export type Broker = {
 export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   await mkdir(opts.dataDir, { recursive: true });
   const db = new Db(join(opts.dataDir, 'hangar.db'));
+  sealStoredSecrets(db);
   const hosts = new Hosts();
   const leases = new Leases(db, hosts);
   hosts.onChange = () => void leases.tick();
@@ -61,7 +62,9 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   hosts.onHello = (held, link) => {
     for (const leaseId of held) {
       const lease = db.getLease(leaseId);
-      if (!lease || lease.state === 'ended') {
+      // A held device sits on its run lease, which has ended; the hold decides when it is wiped.
+      const isHeld = db.holds().some((h) => h.hostLeaseId === leaseId);
+      if (!isHeld && (!lease || lease.state === 'ended')) {
         link.send({ type: 'lease.end', leaseId });
       }
     }

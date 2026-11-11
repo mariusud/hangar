@@ -35,7 +35,7 @@ export type Finding = {
   network: NetworkEntry[];
   screenshot: string | null;
   notes: string[];
-  // A link that replays the steps on a fresh lease of the same image. Null until Hangar can do that.
+  // POST here to lease a fresh device of the same image and replay the actions taken before the finding.
   openAgainUrl: string | null;
 };
 
@@ -86,5 +86,27 @@ export type NightReport = {
   findings: Finding[];
   leases: NightLease[];
   runs: NightRun[];
+  notes: string[];
+};
+
+// How a replayed tap or swipe found its place: the element with the recorded label on the new screen, or the recorded point.
+export type OpenAgainBy = 'label' | 'coordinates';
+
+export type OpenAgainStep = {
+  what: string;
+  status: 'ok' | 'skipped' | 'failed';
+  by: OpenAgainBy | null;
+  // Why a step was skipped or failed, or how it was replayed when that differs from the recording.
+  note: string | null;
+};
+
+export type OpenAgain = {
+  finding: string;
+  leaseId: string;
+  // The console page of the new lease.
+  url: string;
+  // The console page of the recording of the replay, or null when Hangar could not record it.
+  recording: string | null;
+  steps: OpenAgainStep[];
   notes: string[];
 };

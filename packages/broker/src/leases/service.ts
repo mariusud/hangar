@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Booking, BookingWindow, DeviceClass, DeviceState, Hold, LeaseEndReason, LeaseEnding, LeaseLimits, Op, Platform, Priority } from '@hangar/protocol';
 import type { Principal } from '../auth.ts';
-import type { Db } from '../db.ts';
+import type { Db, TokenPriorityRow } from '../db.ts';
 import type { Hosts } from '../hosts.ts';
+import { imageFailure } from '../images.ts';
 import { brokerTimeZone, closedWindows, DEFAULT_CI_FLOOR, holdsDue, MAX_HOLD_MS, mayTakeHold, nextWindow, plan, windowClosed, type PlanDevice } from '../schedule.ts';
 import { leaseLimits } from './limits.ts';
 import * as m from './machine.ts';
@@ -99,8 +100,10 @@ export class Leases {
     this.events.setMaxListeners(0);
   }
 
-  create(p: Principal, asked: DeviceClass, opts: { ttlSeconds?: number | null; maxSeconds?: number; idleSeconds?: number; via?: string; shard?: boolean } = {}): m.Lease {
-    const { priority, bookingId } = priorityOf(this.db, p);
+  create(p: Principal, asked: DeviceClass, opts: { ttlSeconds?: number | null; maxSeconds?: number; idleSeconds?: number; via?: string; shard?: boolean; bookingId?: string } = {}): m.Lease {
+    // A run started with --booking leases its shards inside that booking; the run checked the team.
+    const own: TokenPriorityRow = opts.bookingId ? { priority: 'booked', bookingId: opts.bookingId } : priorityOf(this.db, p);
+    const { priority, bookingId } = own;
     const booking = bookingId ? this.db.bookings().find((b) => b.id === bookingId) : undefined;
     if (bookingId && !booking) {
       throw new ApiError(410, 'BOOKING_GONE', 'The booking this token was made for no longer exists.', 'Make a new booking with `hangar book`, then a token for it with `hangar connect <booking>`.');
@@ -124,6 +127,10 @@ export class Leases {
     const offers = this.hosts.offers();
     const declared = this.db.images().find((i) => i.name.toLowerCase() === cls.image?.toLowerCase());
     if (declared) {
+      const failed = imageFailure(this.db, [...this.hosts.hosts.values()], declared.name);
+      if (failed) {
+        throw failed;
+      }
       for (const o of this.hosts.offers()) {
         if ((o.platform ?? 'ios-simulator') === 'ios-simulator' && !o.image) {
           offers.push({ ...o, image: declared.name });

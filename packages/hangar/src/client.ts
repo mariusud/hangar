@@ -30,6 +30,7 @@ export const CLIENT_HELP = `Client
   hangar tests                             each test's passes, flaky passes and failures
   hangar images                            device images every Mac keeps ready
   hangar image set <name> [--app A]... [--locale nb_NO] [--appearance dark]
+  hangar image refresh <name> --app A...
                  [--grant photos,location] [--sign-in flow.yaml [--env NAME]...]
                                            declare an image (operators); --app is a path or build;
                                            the sign-in flow runs once per Mac, reading each --env
@@ -329,7 +330,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
     }
     case 'images': {
       const client = await Hangar.fromEnv();
-      const images = await client.json<{ name: string; id: string; apps: string[]; locale?: string; appearance?: string; grants?: string[]; signIn?: { env: string[] } }[]>('GET', '/v1/images');
+      const images = await client.json<{ name: string; id: string; apps: string[]; locale?: string; appearance?: string; grants?: string[]; signIn?: { env: string[] }; state?: string; hosts?: { host: string; state: string; message?: string }[] }[]>('GET', '/v1/images');
       for (const i of images) {
         const settings = [`${i.apps.length} app${i.apps.length === 1 ? '' : 's'}`];
         if (i.locale) {
@@ -344,7 +345,12 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         if (i.signIn) {
           settings.push(i.signIn.env.length ? `signs in with ${i.signIn.env.join(', ')}` : 'signs in');
         }
-        console.log(`${i.name.padEnd(24)} ${settings.join(', ')}`);
+        console.log(`${i.name.padEnd(24)} ${settings.join(', ')}${i.state ? `, ${i.state}` : ''}`);
+        for (const h of i.hosts ?? []) {
+          if (h.state === 'failed') {
+            console.log(`  ${h.host}: failed${h.message ? `: ${h.message}` : ''}`);
+          }
+        }
       }
       if (!images.length) {
         console.log('No images. Declare one with `hangar image set <name> --app ./MyApp.app`.');
@@ -353,8 +359,8 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
     }
     case 'image': {
       const [sub, name, ...rest] = args;
-      if ((sub !== 'set' && sub !== 'rm' && sub !== 'secret') || !name) {
-        throw new HangarError(0, 'USAGE', 'Usage: hangar image set <name> [--app A]... [--locale nb_NO] [--appearance dark] [--grant photos,location] [--sign-in flow.yaml --env NAME...], hangar image secret <NAME> [--rm], or hangar image rm <name>');
+      if ((sub !== 'set' && sub !== 'rm' && sub !== 'secret' && sub !== 'refresh') || !name) {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar image set <name> [--app A]... [--follow] [--locale nb_NO] [--appearance dark] [--grant photos,location] [--sign-in flow.yaml --env NAME...], hangar image refresh <name> --app A..., hangar image secret <NAME> [--rm], or hangar image rm <name>');
       }
       const client = await Hangar.fromEnv();
       if (sub === 'secret') {
@@ -376,6 +382,19 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         console.log(`Stored ${name}. Images whose sign-in flow reads it get it the next time they build.`);
         return true;
       }
+      if (sub === 'refresh') {
+        const { values } = parseArgs({ args: rest, options: { app: { type: 'string', multiple: true } } });
+        if (!values.app?.length) {
+          throw new HangarError(0, 'USAGE', 'Usage: hangar image refresh <name> --app build/App.app');
+        }
+        const apps: string[] = [];
+        for (const app of values.app) {
+          apps.push(await buildRef(client, app));
+        }
+        await client.json('POST', `/v1/images/${encodeURIComponent(name)}/refresh`, { apps });
+        console.log(`Refreshing ${name}. Leases on the old build keep running; new leases get the new build once each Mac has built it.`);
+        return true;
+      }
       if (sub === 'rm') {
         await client.request('DELETE', `/v1/images/${encodeURIComponent(name)}`);
         console.log(`Removed ${name}. Each Mac deletes its copy.`);
@@ -383,8 +402,11 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       }
       const { values } = parseArgs({
         args: rest,
-        options: { app: { type: 'string', multiple: true }, locale: { type: 'string' }, appearance: { type: 'string' }, grant: { type: 'string', multiple: true }, 'sign-in': { type: 'string' }, env: { type: 'string', multiple: true } },
+        options: { app: { type: 'string', multiple: true }, follow: { type: 'boolean' }, locale: { type: 'string' }, appearance: { type: 'string' }, grant: { type: 'string', multiple: true }, 'sign-in': { type: 'string' }, env: { type: 'string', multiple: true } },
       });
+      if (values.follow && !values.app?.length) {
+        throw new HangarError(0, 'USAGE', '--follow refreshes the image when a build of one of its apps is uploaded. Add --app App.app.');
+      }
       if (values.env && !values['sign-in']) {
         throw new HangarError(0, 'USAGE', '--env names variables for the sign-in flow. Add --sign-in flow.yaml.');
       }
@@ -394,8 +416,11 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       }
       const grants = (values.grant ?? []).flatMap((g) => g.split(',')).map((g) => g.trim()).filter(Boolean);
       const signIn = values['sign-in'] ? { flow: await readFile(values['sign-in'], 'utf8'), env: values.env ?? [] } : undefined;
-      await client.json('PUT', `/v1/images/${encodeURIComponent(name)}`, { apps, locale: values.locale, appearance: values.appearance, grants, signIn });
+      await client.json('PUT', `/v1/images/${encodeURIComponent(name)}`, { apps, locale: values.locale, appearance: values.appearance, grants, signIn, follow: Boolean(values.follow) });
       console.log(`Declared ${name}. Each Mac builds it once; lease it with \`hangar lease --image ${name}\`.`);
+      if (values.follow) {
+        console.log(`Uploading a new build under the same name as one of its apps refreshes ${name}.`);
+      }
       return true;
     }
     case 'lease': {

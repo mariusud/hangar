@@ -1,5 +1,5 @@
 import type { ImageSpec } from '../db.ts';
-import { imageBuilds, imageHosts, imageView, isEnvName, loadImageSetup, MAX_FLOW_BYTES, parseImageSetup, refreshApps, saveImageSetup } from '../images.ts';
+import { imageBuilds, imageHosts, imageId, imageSecretList, imageView, isEnvName, loadImageSetup, MAX_FLOW_BYTES, parseImageSetup, refreshApps, saveImageSecret, saveImageSetup } from '../images.ts';
 import { ApiError } from '../leases/service.ts';
 import { body, json, me, operator, route } from './util.ts';
 
@@ -9,7 +9,10 @@ route('GET', '/v1/images', (req, res, ctx) => {
   json(
     res,
     200,
-    ctx.db.images().map((spec) => ({ ...imageView(spec, loadImageSetup(ctx.db, spec.name)), builds: imageBuilds(ctx.db, spec), ...imageHosts(spec.name, hosts) })),
+    ctx.db.images().map((spec) => {
+      const setup = loadImageSetup(ctx.db, spec.name);
+      return { ...imageView(spec, setup), builds: imageBuilds(ctx.db, spec), ...imageHosts(spec.name, hosts, imageId(spec, setup)) };
+    }),
   );
 });
 
@@ -50,7 +53,7 @@ route('PUT', '/v1/images/:name', async (req, res, ctx) => {
   if (!/^[a-z0-9][a-z0-9._-]{0,62}$/i.test(name)) {
     throw new ApiError(400, 'BAD_IMAGE_NAME', 'Image names are letters, digits, dots, dashes and underscores, up to 63 characters.');
   }
-  const b = await body<{ apps?: string[]; locale?: string; appearance?: string; grants?: unknown; signIn?: unknown }>(req, MAX_FLOW_BYTES * 2);
+  const b = await body<{ apps?: string[]; locale?: string; appearance?: string; grants?: unknown; signIn?: unknown; follow?: unknown }>(req, MAX_FLOW_BYTES * 2);
   const apps: string[] = [];
   for (const ref of b.apps ?? []) {
     const build = ctx.db.getBuild(ref);
@@ -68,6 +71,9 @@ route('PUT', '/v1/images/:name', async (req, res, ctx) => {
   const setup = parseImageSetup(b);
   if (setup.grants && !apps.length) {
     throw new ApiError(400, 'GRANTS_NEED_APPS', 'Permissions are granted to the image\'s apps, and this image has none.', 'Add an app with --app.');
+  }
+  if (setup.follow && !apps.length) {
+    throw new ApiError(400, 'FOLLOW_NEEDS_APPS', 'An image follows uploads of its apps, and this image has none.', 'Add an app with --app.');
   }
   const spec: ImageSpec = { name, apps };
   if (b.locale) {
@@ -95,7 +101,7 @@ route('DELETE', '/v1/images/:name', (req, res, ctx) => {
 // Values for the names a sign-in flow reads. Only names and times ever come back.
 route('GET', '/v1/image-secrets', (req, res, ctx) => {
   operator(req, ctx);
-  json(res, 200, ctx.db.imageSecrets());
+  json(res, 200, imageSecretList(ctx.db));
 });
 
 route('PUT', '/v1/image-secrets/:name', async (req, res, ctx) => {
@@ -108,7 +114,7 @@ route('PUT', '/v1/image-secrets/:name', async (req, res, ctx) => {
   if (typeof b.value !== 'string' || !b.value) {
     throw new ApiError(400, 'BAD_SECRET', 'Send the value as {"value": "..."}.');
   }
-  ctx.db.saveImageSecret(name, b.value, Date.now());
+  saveImageSecret(ctx.db, name, b.value, Date.now());
   ctx.db.audit(`image-secret.set ${name}`, p.accountId, null);
   ctx.publishImages();
   res.writeHead(204).end();

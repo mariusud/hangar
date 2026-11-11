@@ -23,3 +23,21 @@ export function canRotate(platform: string): boolean;
 export const LIMIT_FIELDS: LimitField[];
 export function capSeconds(value: string, field: LimitField): number | null;
 export function capValue(ms: number, field: LimitField): string;
+
+export type ConsoleWindow = { from: number; to: number };
+export type ConsoleBooking = { open: ConsoleWindow | null; next: ConsoleWindow | null };
+export type BookingFields = Partial<Record<'name' | 'devices' | 'days' | 'from' | 'to' | 'image' | 'platform' | 'model' | 'os', string>>;
+export type BookingBody = Partial<Record<'name' | 'days' | 'from' | 'to' | 'image' | 'platform' | 'model' | 'os', string>> & { devices: number };
+export type ConsoleEnding = { reason: 'preempted' | 'window_closed'; at: number };
+
+export function daysText(days: string[]): string;
+export function windowStatus(booking: ConsoleBooking, now: number): { open: boolean; text: string };
+export function bookingBody(fields: BookingFields): BookingBody;
+export function mcpSettings(mcpUrl: string, token: string): { json: string; claude: string };
+export function countdown(ms: number): string;
+export function endingText(ending: ConsoleEnding, now: number): string;
+export function heldText(until: number, now: number): string;
+export function logTail<T>(lines: T[], count?: number): T[];
+export function openAgainTarget(result: unknown): string | null;
+export function openAgainError(err: { code?: string; message: string }): string;
+export function linkPath(url: string): string;

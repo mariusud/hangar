@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hangar": {
+      "type": "http",
+      "url": "${HANGAR_URL}/mcp",
+      "headers": { "Authorization": "Bearer ${HANGAR_TOKEN}" }
+    }
+  }
+}

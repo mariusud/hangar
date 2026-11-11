@@ -1,12 +1,14 @@
 
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import type { DeviceClass, MaestroResult, TestCase, TestResult } from '@hangar/protocol';
+import type { Booking, DeviceClass, MaestroResult, TestCase, TestResult } from '@hangar/protocol';
 import * as auth from './auth.ts';
 import type { Db, RunSuite } from './db.ts';
 import { ApiError, type Leases } from './leases/service.ts';
+import { priorityOf } from './leases/tokens.ts';
 import type { Recordings } from './recordings.ts';
-import { MAX_HOLD_MS } from './schedule.ts';
+import { findBooking } from './leases/bookings.ts';
+import { MAX_HOLD_MS, nextWindow, windowAt } from './schedule.ts';
 
 export type FlowResult = {
   flow: string;
@@ -39,6 +41,8 @@ export type Run = {
   endedAt: number | null;
   // How long a shard's device is held when one of its flows fails; none is wiped as usual.
   holdMs?: number;
+  // The booking whose devices the shards lease, ahead of the booking's agents. Reruns lease as usual.
+  booking?: { id: string; name: string };
 };
 
 export type RunRequest = {
@@ -49,6 +53,7 @@ export type RunRequest = {
   retries?: number;
   env?: Record<string, string>;
   holdSeconds?: number;
+  booking?: string;
 };
 
 export function failedCases(junit: string): Set<string> {
@@ -285,6 +290,7 @@ export class Runs {
     if (!Number.isFinite(holdSeconds) || holdSeconds < 0 || holdSeconds * 1000 > MAX_HOLD_MS) {
       throw new ApiError(400, 'BAD_HOLD', `\`holdSeconds\` is how long to keep a failed flow's device, up to ${MAX_HOLD_MS / 3_600_000} hours.`);
     }
+    const booking = req.booking === undefined || req.booking === '' ? null : this.bookingFor(p, String(req.booking));
     const shards = Math.max(1, Math.min(Math.floor(Number(req.shards ?? 1)) || 1, flows.length));
     const assigned = assignShards(flows, shards, this.pastSeconds(kind));
     const run: Run = {
@@ -303,6 +309,7 @@ export class Runs {
       createdAt: Date.now(),
       endedAt: null,
       ...(holdSeconds > 0 ? { holdMs: Math.round(holdSeconds * 1000) } : {}),
+      ...(booking ? { booking: { id: booking.id, name: booking.name } } : {}),
     };
     const env = req.env ?? {};
     const stored: RunSuite = { sha256: build.sha256, testSha256: testBuild?.sha256 ?? '', archive: req.suite?.archive ?? '', envKeys: Object.keys(env).sort() };
@@ -350,6 +357,25 @@ export class Runs {
     this.db.audit('run.rerun', p.accountId, null);
     this.rerunFlow(p, id, before, run.state, { ...stored, env }).catch(() => {});
     return next;
+  }
+
+  // A run inside a booking needs a caller on the booking's team and an open window.
+  private bookingFor(p: auth.Principal, name: string): Booking {
+    const booking = findBooking(this.db, name);
+    if (this.db.teamOf(p.accountId) !== booking.teamId) {
+      throw new ApiError(403, 'NOT_YOUR_BOOKING', `Booking ${booking.name} belongs to another team.`, 'Run without --booking, or ask someone on that team to start the run.');
+    }
+    const own = priorityOf(this.db, p);
+    if (own.bookingId && own.bookingId !== booking.id) {
+      throw new ApiError(403, 'NOT_YOUR_BOOKING', `This token leases from another booking, not ${booking.name}.`, 'Use a token made for this booking, or a CI token.');
+    }
+    const now = Date.now();
+    if (!windowAt(booking, now, this.leases.timeZone)) {
+      const next = nextWindow(booking, now, this.leases.timeZone);
+      const when = next ? ` It opens at ${new Date(next.from).toISOString().replace('T', ' ').slice(0, 16)} UTC.` : '';
+      throw new ApiError(409, 'BOOKING_CLOSED', `Booking ${booking.name} is not open now.${when}`, 'Start the run inside the window, or run without --booking.');
+    }
+    return booking;
   }
 
   get(id: string): Run {
@@ -499,7 +525,7 @@ export class Runs {
       const current = this.db.getRun(id);
       return current?.holdMs ? (flows.find((f) => current.flows.find((x) => x.flow === f)?.status === 'failed') ?? null) : null;
     };
-    return this.withLease(p, id, via, suite, failAll, { keep }, async (leaseId, exec) => {
+    return this.withLease(p, id, via, suite, failAll, { keep, booked: true }, async (leaseId, exec) => {
       for (const f of flows) {
         this.setFlow(id, f, { status: 'running', attempts: 1 });
       }
@@ -570,9 +596,11 @@ export class Runs {
   }
 
   // Runs fn on a fresh lease and returns the lease id. `keep` names a failed flow whose device stays held.
-  private async withLease(p: auth.Principal, id: string, via: string, suite: Suite, fail: (message: string) => void, opts: { keep?: () => string | null }, fn: (leaseId: string, exec: Exec) => Promise<void>): Promise<string> {
+  private async withLease(p: auth.Principal, id: string, via: string, suite: Suite, fail: (message: string) => void, opts: { keep?: () => string | null; booked?: boolean }, fn: (leaseId: string, exec: Exec) => Promise<void>): Promise<string> {
     const run = this.db.getRun(id)!;
-    const lease = this.leases.create(p, run.class, { via, shard: true });
+    // Only a run's own shards lease inside its booking; a rerun later leases like any other request.
+    const bookingId = opts.booked && run.booking ? run.booking.id : undefined;
+    const lease = this.leases.create(p, run.class, { via, shard: true, ...(bookingId ? { bookingId } : {}) });
     this.holders.set(lease.id, p);
     this.update(id, (r) => ({ leaseIds: [...r.leaseIds, lease.id] }));
     const renew = setInterval(() => {

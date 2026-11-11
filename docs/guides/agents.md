@@ -8,11 +8,13 @@ are signed in with `hangar login`:
 hangar connect claude    # adds Hangar to Claude Code, or prints the command if claude is not here
 hangar connect cursor    # prints the .cursor/mcp.json block
 hangar connect codex     # prints the block for ~/.codex/config.toml
+hangar connect night     # a token that leases only from the booking "night", in its window
 ```
 
 Each makes an agent token labelled with the target and this computer's name (see "How long a
 lease lasts" below). You can also make a token in the console on the Connect page; it shows the
-exact command with the token, but that token has the ordinary limits.
+exact command with the token, but that token has the ordinary limits. A token for a booking is
+described in [Night QA](night-qa.md#tokens-for-a-booking).
 
 ## Claude Code
 
@@ -58,7 +60,9 @@ http_headers = { Authorization = "Bearer hgr_member_..." }
 | `install_build`, `launch_app`, `terminate_app`, `open_url` | Apps and deep links. |
 | `react_native` | Open the dev menu, or reload the bundle. |
 | `send_push`, `set_permission`, `set_location`, `set_appearance`, `set_app_language` | Device presets. |
-| `record` | Start or stop a recording. Stop returns a link with the video, the timeline of actions and the app log. |
+| `record` | Start or stop a recording. Stop returns a link with the video, the timeline of actions, the app log and the network requests. |
+| `report_finding` | File a bug with a title, a description and a severity. Hangar attaches the last two minutes of the recording, the steps, the app log, the network requests and a screenshot, and the finding goes into the night report. |
+| `bookings` | The device bookings and whether their windows are open, the broker's time zone, and your token's priority and booking. |
 | `app_log` | The app's own log lines, newest last. |
 | `js_evaluate`, `js_console` | Evaluate a JavaScript expression in the React Native app, and read its console messages and uncaught exceptions. |
 | `network_requests` | HTTP requests the React Native app made: method, URL, status, duration. |
@@ -95,6 +99,16 @@ token made with `POST /v1/tokens` takes `agent: true`, `idleSeconds`, `maxSecond
 An agent that will be quiet for a while calls `keepalive` (or `POST /v1/leases/:id/keepalive`,
 or `hangar keepalive`). It counts as activity and renews the TTL, and it does not touch the
 device.
+
+## When a lease is about to end
+
+A lease can be told it will end early: two minutes before a higher-priority request takes its
+device (reason `preempted`), or ten minutes before its booking's window closes (reason
+`window_closed`). The lease then has `ending: { "reason": ..., "at": <ms> }`. A client that
+follows `GET /v1/leases/:id/events` gets a `lease_ending` event with the lease; MCP has no push,
+so the lease tools (`keepalive`, `list_leases`, `renew_lease`) return the lease with `ending`
+filled in. An agent that sees it should file what it found and release the device. What the
+lease recorded is kept either way. [Night QA](night-qa.md#priority-and-preemption) has the rules.
 
 ## Reattach after a restart
 

@@ -37,7 +37,10 @@ export async function simctl(...args: string[]): Promise<string> {
 
 // idb's own auto-spawned companions go stale across reboots and return an empty accessibility tree.
 const companions = new Map<string, { proc: ChildProcess; socket: string }>();
-const SOCKET_DIR = join(tmpdir(), 'hangar-idb');
+/** Hangar owns the simulators whose names start with this. HANGAR_SIM_PREFIX gives the smoke test its own set. */
+export const NAME_PREFIX = process.env.HANGAR_SIM_PREFIX || 'hangar-';
+// Socket paths are capped at 104 bytes, so another prefix gets a short directory of its own.
+const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'hangar-' ? 'hangar-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
 
 export async function startCompanion(udid: string): Promise<void> {
   if (companions.has(udid)) {
@@ -121,8 +124,6 @@ export async function remove(udid: string): Promise<void> {
   forgetCapture(udid);
   await simctl('delete', udid);
 }
-
-export const NAME_PREFIX = 'hangar-';
 
 export async function listOwned(): Promise<{ udid: string; name: string; state: string }[]> {
   const json = JSON.parse(await simctl('list', 'devices', '-j')) as {

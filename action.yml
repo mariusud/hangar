@@ -28,6 +28,12 @@ inputs:
   junit:
     description: Where to write the JUnit report.
     default: hangar-maestro.xml
+  hold:
+    description: Keep a failed flow's device as it was for this long, such as 30m, for people on your team. The comment links to it.
+    default: ''
+  booking:
+    description: Lease the shards inside this booking of your team while its window is open, ahead of the booking's agents.
+    default: ''
   rerun:
     description: The id of a finished Hangar run. With rerun-flow, runs that one flow again on a fresh device instead of the whole suite.
     default: ''
@@ -71,6 +77,8 @@ runs:
         INPUT_JUNIT: ${{ inputs.junit }}
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_ENV: ${{ inputs.env }}
+        INPUT_HOLD: ${{ inputs.hold }}
+        INPUT_BOOKING: ${{ inputs.booking }}
         INPUT_RERUN: ${{ inputs.rerun }}
         INPUT_RERUN_FLOW: ${{ inputs.rerun-flow }}
         INPUT_COMMENT: ${{ inputs.comment }}
@@ -80,6 +88,8 @@ runs:
         else
           args=(run maestro "$INPUT_FLOWS" --app "$INPUT_APP" --shards "$INPUT_SHARDS" --retries "$INPUT_RETRIES" --junit "$INPUT_JUNIT")
           if [ -n "$INPUT_MODEL" ]; then args+=(--model "$INPUT_MODEL"); fi
+          if [ -n "$INPUT_HOLD" ]; then args+=(--hold "$INPUT_HOLD"); fi
+          if [ -n "$INPUT_BOOKING" ]; then args+=(--booking "$INPUT_BOOKING"); fi
         fi
         while IFS= read -r line; do
           if [ -n "$line" ]; then args+=(-e "$line"); fi

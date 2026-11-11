@@ -1,0 +1,90 @@
+# Night QA: at 21:00 UTC an agent tests the app on devices from the Hangar booking "night", and
+# after the window closes a second job posts the night's report to Slack. Hangar starts nothing
+# and calls nothing outside your network; this workflow does both. Copy it to .github/workflows/
+# and brief.md and hangar.json to night-qa/ in your app's repository.
+#
+# The booking this expects (in the broker's time zone; here the broker runs on UTC):
+#   hangar book night --devices 4 --from 21:00 --to 06:00 --days mon-fri --image nightly
+#   hangar connect night        # prints the token and the cron for the window in UTC
+#
+# Secrets:
+#   HANGAR_URL          the Hangar address as the tailnet sees it, such as https://studio-mini.example.ts.net
+#   HANGAR_TOKEN        the token `hangar connect night` printed
+#   TS_OAUTH_CLIENT_ID  a Tailscale OAuth client that can add devices tagged tag:ci
+#   TS_OAUTH_SECRET
+#   ANTHROPIC_API_KEY   for the agent CLI below; use your own agent's key instead
+#   SLACK_WEBHOOK       a Slack incoming webhook URL, for the report
+#
+# <owner>/hangar is wherever your copy of the Hangar repository lives on GitHub.
+name: night qa
+
+on:
+  schedule:
+    # When the window opens. Use the cron `hangar connect night` prints, and check it after a
+    # daylight saving change: GitHub reads cron in UTC.
+    - cron: '0 21 * * 1-5'
+    # After the window closes at 06:00 the next morning, so the night is closed and complete.
+    - cron: '15 6 * * 2-6'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: agent or report
+        default: report
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    if: ${{ github.event.schedule == '0 21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.job == 'agent') }}
+    runs-on: ubuntu-latest
+    # GitHub's hosted runners stop a job after 6 hours, before a 9-hour window ends. The booking
+    # still ends the agent's leases at 06:00; a self-hosted runner can run the whole window.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # Any agent CLI that speaks MCP over HTTP works here. This one is Claude Code in print mode,
+      # which reads night-qa/hangar.json and fills in HANGAR_URL and HANGAR_TOKEN from the
+      # environment. It may use only the hangar server's tools.
+      - name: Run the QA agent
+        env:
+          HANGAR_URL: ${{ secrets.HANGAR_URL }}
+          HANGAR_TOKEN: ${{ secrets.HANGAR_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npx --yes @anthropic-ai/claude-code -p "$(cat night-qa/brief.md)" \
+            --mcp-config night-qa/hangar.json --strict-mcp-config \
+            --allowedTools mcp__hangar
+
+  report:
+    if: ${{ github.event.schedule == '15 6 * * 2-6' || (github.event_name == 'workflow_dispatch' && inputs.job == 'report') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # Hangar is not on npm yet, so the CLI runs from your copy of the repository, as the
+      # Hangar action does.
+      - uses: actions/checkout@v4
+        with:
+          repository: <owner>/hangar
+          path: hangar
+      - run: corepack enable && pnpm --dir hangar install --frozen-lockfile --prod
+      # Prints the report of the booking's newest night and posts it from this runner.
+      - name: Post the night report
+        env:
+          HANGAR_URL: ${{ secrets.HANGAR_URL }}
+          HANGAR_TOKEN: ${{ secrets.HANGAR_TOKEN }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: pnpm --dir hangar hangar night report night --slack-webhook "$SLACK_WEBHOOK"

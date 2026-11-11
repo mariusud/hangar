@@ -69,7 +69,7 @@ route('GET', '/v1/leases/:id/events', (req, res, ctx) => {
   const lease = ctx.leases.get(p, req.params.id ?? '');
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
   const send = (l: import('../leases/machine.ts').Lease): void => {
-    res.write(`event: ${l.state}\ndata: ${JSON.stringify(ctx.leases.view(l))}\n\n`);
+    res.write(`event: ${l.state === 'active' && l.ending ? 'lease_ending' : l.state}\ndata: ${JSON.stringify(ctx.leases.view(l))}\n\n`);
     if (l.state === 'ended') {
       res.end();
     }

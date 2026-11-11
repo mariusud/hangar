@@ -47,6 +47,8 @@ export type MaestroOptions = {
   device?: DeviceClass;
   /** Keep a failed flow's device as it was for this many seconds, for people on your team. */
   holdSeconds?: number;
+  /** Lease the shards inside this booking of your team, ahead of the booking's agents. */
+  booking?: string;
   log?: (line: string) => void;
 };
 
@@ -69,9 +71,16 @@ export async function buildRef(hangar: Hangar, app: string): Promise<string> {
     return app;
   }
   const name = encodeURIComponent(basename(app));
-  const body = s.isFile() ? createReadStream(app) : spawn('tar', ['-cf', '-', '-C', dirname(app), basename(app)], { stdio: ['ignore', 'pipe', 'inherit'] }).stdout;
-  const res = await hangar.request('POST', `/v1/builds?name=${name}`, body, { 'content-type': s.isFile() ? 'application/octet-stream' : 'application/x-tar' });
-  return ((await res.json()) as { sha256: string }).sha256;
+  const tar = s.isFile() ? null : spawn('tar', ['-cf', '-', '-C', dirname(app), basename(app)], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const body = tar ? tar.stdout : createReadStream(app);
+  try {
+    const res = await hangar.request('POST', `/v1/builds?name=${name}`, body, { 'content-type': s.isFile() ? 'application/octet-stream' : 'application/x-tar' });
+    return ((await res.json()) as { sha256: string }).sha256;
+  } finally {
+    // A refused upload leaves tar blocked on a full pipe, which would keep the command from exiting.
+    tar?.kill();
+    body.destroy();
+  }
 }
 
 /** Runs Maestro flows on leased devices and follows the run until it ends. */
@@ -91,6 +100,7 @@ export async function runMaestro(hangar: Hangar, opts: MaestroOptions): Promise<
     retries: opts.retries ?? 1,
     env: opts.env ?? {},
     ...(opts.holdSeconds ? { holdSeconds: opts.holdSeconds } : {}),
+    ...(opts.booking ? { booking: opts.booking } : {}),
   });
 }
 
@@ -101,6 +111,7 @@ export type XcuitestOptions = {
   shards?: number;
   retries?: number;
   device?: DeviceClass;
+  booking?: string;
   log?: (line: string) => void;
 };
 
@@ -128,7 +139,7 @@ export async function runXcuitest(hangar: Hangar, opts: XcuitestOptions): Promis
   }
   log(`uploading ${basename(opts.products)}`);
   const build = await buildRef(hangar, opts.products);
-  return follow(hangar, log, '/v1/runs', { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
+  return follow(hangar, log, '/v1/runs', { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1, ...(opts.booking ? { booking: opts.booking } : {}) });
 }
 
 /** Options for an Espresso run. */
@@ -138,6 +149,7 @@ export type EspressoOptions = {
   tests?: string[];
   shards?: number;
   retries?: number;
+  booking?: string;
   log?: (line: string) => void;
 };
 
@@ -147,7 +159,7 @@ export async function runEspresso(hangar: Hangar, opts: EspressoOptions): Promis
   const build = await buildRef(hangar, opts.app);
   const testBuild = await buildRef(hangar, opts.testApp);
   const tests = opts.tests?.length ? opts.tests : ['all'];
-  return follow(hangar, log, '/v1/runs', { build, suite: { kind: 'espresso', testBuild, tests }, shards: opts.shards ?? 1, retries: opts.retries ?? 1 });
+  return follow(hangar, log, '/v1/runs', { build, suite: { kind: 'espresso', testBuild, tests }, shards: opts.shards ?? 1, retries: opts.retries ?? 1, ...(opts.booking ? { booking: opts.booking } : {}) });
 }
 
 /** Runs one flow of a finished run again on a fresh device, recorded, and follows the run until it ends. */

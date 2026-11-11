@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { DeviceImage, ImageSignIn, PrivacyService } from '@hangar/protocol';
+import type { DeviceImage, ImageSignIn, ImagesStatus, PrivacyService } from '@hangar/protocol';
 import { appearance, boot, DriverError, NAME_PREFIX, privacy, shutdown, simctl } from './index.ts';
 
 const run = promisify(execFile);
@@ -156,13 +156,15 @@ export function goldenImageName(imageId: string, model: string, os: string): str
 }
 
 // golden is the udid of the built golden device for `image`, or null until it is built.
-export type ImageSlot = { image: DeviceImage; golden: string | null; failed: boolean };
+// message says why the last build failed.
+export type ImageSlot = { image: DeviceImage; golden: string | null; failed: boolean; message?: string };
 
 // drop: images whose warm clones must go now. retire: goldens to delete once no device cloned from them is left.
 export type ImagePlan = { slots: Map<string, ImageSlot>; drop: string[]; retire: string[] };
 
 // A new declaration of an image (a new build, setup or locale) gets a new id and a new golden.
 // Leases on clones of the old golden keep running; new leases wait for the new one.
+// A failed build is tried again each time the broker sends images, for example after a secret is set.
 export function planImages(current: ReadonlyMap<string, ImageSlot>, wanted: DeviceImage[]): ImagePlan {
   const byName = new Map(wanted.map((i) => [i.name, i]));
   const slots = new Map<string, ImageSlot>();
@@ -171,7 +173,7 @@ export function planImages(current: ReadonlyMap<string, ImageSlot>, wanted: Devi
   for (const [name, slot] of current) {
     const next = byName.get(name);
     if (next?.id === slot.image.id) {
-      slots.set(name, slot);
+      slots.set(name, slot.failed ? { image: next, golden: null, failed: false } : slot);
       continue;
     }
     drop.push(name);
@@ -201,4 +203,19 @@ export function retirable(retiring: readonly string[], cloneOf: ReadonlyMap<stri
 // A host offers an image only once the golden for its current declaration is built.
 export function readyImages(slots: ReadonlyMap<string, ImageSlot>): string[] {
   return [...slots.values()].filter((s) => s.golden !== null && !s.failed).map((s) => s.image.name).sort();
+}
+
+const MAX_STATUS_MESSAGE = 2000;
+
+// What the host tells the broker about a slot. A slot that waits for its turn says nothing.
+export function imageStatus(slot: ImageSlot, building: boolean): ImagesStatus | null {
+  const base: { type: 'images.status'; image: string; id: string } = { type: 'images.status', image: slot.image.name, id: slot.image.id };
+  if (slot.failed) {
+    const message = (slot.message ?? '').slice(-MAX_STATUS_MESSAGE);
+    return message ? { ...base, state: 'failed', message } : { ...base, state: 'failed' };
+  }
+  if (slot.golden !== null) {
+    return { ...base, state: 'ready' };
+  }
+  return building ? { ...base, state: 'building' } : null;
 }

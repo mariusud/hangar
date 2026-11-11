@@ -75,6 +75,7 @@ export class Agent {
   private retiring: string[] = [];
   private cloneOf = new Map<string, string>();
   private imageWork: Promise<void> = Promise.resolve();
+  private buildingImage: string | null = null;
   private filling = false;
   private streams = new Map<string, Stream>();
   private stopped = false;
@@ -126,6 +127,16 @@ export class Agent {
       devices: this.inventory(),
       leases: [...this.devices.values()].flatMap((d) => (d.leaseId ? [d.leaseId] : [])),
     });
+    for (const slot of this.images.values()) {
+      this.sendImageStatus(slot);
+    }
+  }
+
+  private sendImageStatus(slot: sim.ImageSlot): void {
+    const status = sim.imageStatus(slot, this.buildingImage === slot.image.name);
+    if (status) {
+      this.opts.send(status);
+    }
   }
 
   private resolve(path: string): string {
@@ -213,17 +224,26 @@ export class Agent {
         continue;
       }
       this.log(`Building image ${slot.image.name}.`);
-      const udid = await sim.clone(base.udid, name);
+      this.buildingImage = slot.image.name;
+      this.sendImageStatus(slot);
+      let udid: string | null = null;
       try {
+        udid = await sim.clone(base.udid, name);
         await sim.buildImage(udid, slot.image, sim.imageSteps((u, app) => this.install(u, app.url, app.sha256)));
         slot.golden = udid;
+        this.buildingImage = null;
         this.log(`Image ${slot.image.name} is ready.`);
         await this.hello();
         offered = JSON.stringify(this.imageOffers());
       } catch (err) {
         slot.failed = true;
-        this.log(`Image ${slot.image.name} failed to build: ${err instanceof Error ? err.message : err}`);
-        await sim.remove(udid).catch(() => {});
+        slot.message = err instanceof Error ? err.message : String(err);
+        this.buildingImage = null;
+        this.log(`Image ${slot.image.name} failed to build: ${slot.message}`);
+        this.sendImageStatus(slot);
+        if (udid) {
+          await sim.remove(udid).catch(() => {});
+        }
       }
     }
     if (JSON.stringify(this.imageOffers()) !== offered) {
@@ -463,8 +483,9 @@ export class Agent {
     if (this.recordings.has(leaseId)) {
       throw new OpError('ALREADY_RECORDING', 'This lease is already being recorded.');
     }
+    // The broker sends paths, which resolve against the address this Mac reached it at.
     for (const url of Object.values(uploads)) {
-      if (!/^https?:\/\//.test(url)) {
+      if (!/^https?:\/\//.test(this.resolve(url))) {
         throw new OpError('BAD_UPLOAD_URL', 'Upload URLs must be http or https.');
       }
     }

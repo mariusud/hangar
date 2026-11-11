@@ -1,3 +1,59 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "xcode": "26.6",
+      "build": "17F113",
+      "runtime": "26.5",
+      "passed": true,
+      "date": "2026-11-11",
+      "steps": [
+        {
+          "name": "boot",
+          "status": "passed",
+          "ms": 95097
+        },
+        {
+          "name": "clone",
+          "status": "passed",
+          "ms": 15
+        },
+        {
+          "name": "capture",
+          "status": "passed",
+          "ms": 247
+        },
+        {
+          "name": "tree",
+          "status": "passed",
+          "ms": 3169
+        },
+        {
+          "name": "tap",
+          "status": "passed",
+          "ms": 2410
+        },
+        {
+          "name": "record",
+          "status": "passed",
+          "ms": 4971
+        },
+        {
+          "name": "record on idb",
+          "status": "passed",
+          "ms": 5072
+        },
+        {
+          "name": "wipe",
+          "status": "passed",
+          "ms": 20305
+        },
+        {
+          "name": "maestro",
+          "status": "skipped",
+          "ms": 0,
+          "detail": "set HANGAR_SMOKE_APP to a built examples/hello .app"
+        }
+      ]
+    }
+  ]
 }

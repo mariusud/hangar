@@ -2,12 +2,24 @@
 // (or HANGAR_VERSIONS). It boots and clones real simulators. Run it on each new Xcode:
 //   pnpm bench:smoke
 // Set HANGAR_SMOKE_APP to a built examples/hello .app to also run its two Maestro flows.
+// It names its simulators hangar-smoke-* (or HANGAR_SIM_PREFIX), makes its own golden, and deletes
+// them all at the end, so it leaves the simulators of a running Hangar alone. HANGAR_SMOKE_LOG=1
+// prints the agent's log.
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runMaestro, type Lease } from 'hangar';
 import { currentXcode, recordSmoke, versionsFile, type SmokeEntry, type SmokeStep } from '../packages/hangar/src/versions.ts';
-import { start, type Harness } from '../e2e/harness.ts';
+import type { Harness } from '../e2e/harness.ts';
+
+// The driver reads the prefix when it loads, so the harness is imported after this.
+process.env.HANGAR_SIM_PREFIX ||= 'hangar-smoke-';
+const prefix = process.env.HANGAR_SIM_PREFIX;
+if (prefix === 'hangar-' || !prefix.startsWith('hangar-')) {
+  console.error('Set HANGAR_SIM_PREFIX to a name that starts with hangar- and is longer, such as hangar-smoke-, so the smoke test only touches its own simulators.');
+  process.exit(1);
+}
+const { start } = await import('../e2e/harness.ts');
 
 const run = promisify(execFile);
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -62,13 +74,13 @@ let runtime = 'unknown';
 const held: { harness: Harness | null } = { harness: null };
 try {
   const h = await step('boot', async () => {
-    const harness = await start(1, () => {});
+    const harness = await start(1, process.env.HANGAR_SMOKE_LOG ? (l) => console.error(`[agent] ${l}`) : () => {});
     held.harness = harness;
     await ready(harness, harness.client('boot').hangar);
     return harness;
   });
   if (h) {
-    const { hangar } = h.client('smoke');
+    const { hangar, token } = h.client('smoke');
     const lease: Lease | null = await step('clone', () => hangar.lease({}, { autoRenew: true }));
     runtime = lease?.info.device?.os ?? runtime;
     if (lease) {
@@ -92,6 +104,35 @@ try {
         const labels = (nodes: { label: string | null }[]): string => nodes.map((n) => n.label ?? '').join('\n');
         check(labels(after.nodes) !== labels(before.nodes), `tapping "${target?.label}" did not change the screen`);
       });
+      // Records a few seconds of Settings opening, and checks the MP4 has a video track.
+      const recorded = async (): Promise<void> => {
+        const started = await lease.record();
+        await sleep(1000);
+        await lease.terminate('com.apple.Preferences');
+        await sleep(1000);
+        await lease.launch('com.apple.Preferences');
+        await sleep(2000);
+        await lease.stopRecording();
+        let rec = await hangar.recording(started.id);
+        for (let i = 0; i < 300 && rec.state !== 'ready' && rec.state !== 'failed'; i++) {
+          await sleep(100);
+          rec = await hangar.recording(started.id);
+        }
+        check(rec.state === 'ready', `the recording is ${rec.state}: ${rec.error ?? 'no error'}`);
+        const res = await fetch(new URL(rec.files.video, h.broker.url), { headers: { authorization: `Bearer ${token}` } });
+        check(res.ok, `the video download failed (${res.status})`);
+        const types = mp4Boxes(Buffer.from(await res.arrayBuffer()));
+        check(types[0] === 'ftyp' && types.includes('mdat') && types.includes('moov'), `the video is not a whole MP4 (boxes: ${types.join(', ') || 'none'})`);
+      };
+      await step('record', recorded);
+      await step('record on idb', async () => {
+        process.env.HANGAR_CAPTURE = 'idb';
+        try {
+          await recorded();
+        } finally {
+          delete process.env.HANGAR_CAPTURE;
+        }
+      });
       await step('wipe', async () => {
         await lease.release();
         await ready(h, hangar);
@@ -113,6 +154,33 @@ try {
   }
 } finally {
   await held.harness?.stop();
+  await removeOwn();
+}
+
+function mp4Boxes(data: Buffer): string[] {
+  const types: string[] = [];
+  let at = 0;
+  while (at + 8 <= data.length) {
+    const size = data.readUInt32BE(at) === 1 && at + 16 <= data.length ? Number(data.readBigUInt64BE(at + 8)) : data.readUInt32BE(at);
+    if (size < 8) {
+      break;
+    }
+    types.push(data.toString('latin1', at + 4, at + 8));
+    at += size;
+  }
+  return types;
+}
+
+async function removeOwn(): Promise<void> {
+  const { stdout } = await run('xcrun', ['simctl', 'list', 'devices', '-j']).catch(() => ({ stdout: '{}' }));
+  const parsed: unknown = JSON.parse(stdout);
+  const groups = typeof parsed === 'object' && parsed !== null && 'devices' in parsed && typeof parsed.devices === 'object' && parsed.devices !== null ? Object.values(parsed.devices) : [];
+  for (const d of groups.flat()) {
+    if (typeof d === 'object' && d !== null && 'name' in d && 'udid' in d && typeof d.name === 'string' && typeof d.udid === 'string' && d.name.startsWith(prefix)) {
+      await run('xcrun', ['simctl', 'shutdown', d.udid]).catch(() => {});
+      await run('xcrun', ['simctl', 'delete', d.udid]).catch((err: Error) => console.error(`[smoke] could not delete ${d.name}: ${err.message}`));
+    }
+  }
 }
 
 const entry: SmokeEntry = {

@@ -392,9 +392,11 @@ up to `hangar:queueTimeout`.
 ### MCP
 
 The broker serves remote MCP over streamable HTTP at `/mcp` with the same tokens. Tools:
-`lease_device`, `renew_lease`, `release_device`, `list_leases`, `observe` (screenshot plus tree),
-`act` (batched actions), `install_build`, `launch_app`, `terminate_app`, `open_url`, `read_logs`,
-`start_run`, `get_run`. Device tools take `leaseId`, which can be left out when the MCP session
+`lease_device`, `renew_lease`, `release_device`, `list_leases`, `keepalive`, `reattach_lease`,
+`observe` (screenshot plus tree), `act` (batched actions), `install_build`, `launch_app`,
+`terminate_app`, `open_url`, `app_log`, `js_evaluate`, `js_console`, `network_requests`, `record`,
+`report_finding`, `bookings`, the device presets, and mobile-mcp's tool names
+([guide](guides/agents.md)). Device tools take `leaseId`, which can be left out when the MCP session
 holds exactly one lease. MCP does not upload files.
 
 ### Argent pass-through (milestone 2)
@@ -457,15 +459,16 @@ it held then goes through its own wipe.
             +----------+            +-----------+              +--------+
               |                       |      |                     |
               | cancel, queue         |      | host error          | release, expired, idle,
-              | timeout               |      | (retry up to 2x     | revoked, device_lost
-              v                       |      |  back to queued)    v
+              | timeout               |      | (retry up to 2x     | revoked, device_lost,
+              v                       |      |  back to queued)    v preempted, window_closed
             +-----------------------------------------------------------+
             |                    ended (reason)                         |
             +-----------------------------------------------------------+
 ```
 
 States: `queued`, `preparing`, `active`, `ended`. `ended` is terminal and carries one reason:
-`released`, `expired`, `idle`, `revoked`, `device_lost`, `failed`, `cancelled`, `queue_timeout`.
+`released`, `expired`, `idle`, `revoked`, `device_lost`, `failed`, `cancelled`, `queue_timeout`,
+`preempted`, `window_closed`.
 
 - Only `active` leases accept device ops. Anything else returns `LEASE_NOT_ACTIVE` with the state.
 - The deadline is `min(lastRenew + ttl, activatedAt + maxSeconds, lastActivity + idle)`, by the
@@ -474,6 +477,9 @@ States: `queued`, `preparing`, `active`, `ended`. `ended` is terminal and carrie
 - `idle` and `maxSeconds` come from the lease's token, under a cap per role (decision 0012).
   When the last event stream of a lease closes, the idle end waits at least the token's grace
   period (60 s by default) after the disconnect, so a client can reattach with the same token.
+- An `active` lease can carry `ending` (a reason and a time) when it will end early: two minutes
+  after a higher-priority request needs its device (`preempted`), or at its booking's window end,
+  told ten minutes before (`window_closed`). Its event stream sends `lease_ending`.
 - Renew on a lease that is not `active` fails. An ended lease never comes back.
 - `idempotencyKey` returns the existing lease for the same token and key for 24 hours.
 - The SDK and CLI renew at a third of the TTL.
@@ -482,9 +488,12 @@ States: `queued`, `preparing`, `active`, `ended`. `ended` is terminal and carrie
 
 ```
  provisioning -> ready -> reserved -> leased -> wiping -> ready
-                                                  |
-                                                  v
-                                             quarantined -> deleted
+                                       |          |
+                                       v          v
+                                     held     quarantined -> deleted
+                                       |
+                                       v
+                                     wiping
 ```
 
 - `ready` devices are in the warm pool, booted, with the class build installed if it names one.
@@ -495,6 +504,10 @@ States: `queued`, `preparing`, `active`, `ended`. `ended` is terminal and carrie
   in the phone's baseline and clear what the OS allows, since a full erase loses pairing. Only a
   verified device returns to `ready`.
 - A failed wipe or health check sends the device to `quarantined` until an operator acts.
+- `held` (decision 0012): a run started with `--hold` ends a failed shard's lease into a hold
+  instead of a wipe. The device keeps its app state until the hold time ends (at most 4 hours),
+  counts against the run's team quota, and can be leased only by a person on that team. When the
+  hold ends or that person's lease ends, the device is wiped as usual.
 
 ### Invariants
 
@@ -508,15 +521,29 @@ The unit and property tests check these under every interleaving:
    default), or its deadline.
 4. Ops on ended leases are refused at both the broker and the host.
 5. A team never holds more active leases than its quota.
+6. A device belongs to at most one booking at any moment.
+7. A `ci` request that arrives while a booking's agents hold every device gets a device within
+   two minutes and five seconds.
+8. A booked lease never outlives its window.
+9. A held device is wiped before anyone outside its run's team leases it.
 
 ### Scheduling
 
-Requests wait per class. When a device becomes `ready`, the scheduler picks among queued requests
-that match it and whose team is under its quota: the team with the fewest active leases relative
-to its quota first, then the principal with the fewest active leases, then the oldest request.
-Interactive leases (console, CLI) can be given priority over run shards per team, so a tester is
-not stuck behind a CI run. The scheduler is a pure function from queued requests, ready devices
-and counts to assignments, so it is tested without a clock or a database.
+Requests wait per class. Each lease has a priority from its token: `ci` above `interactive` above
+`booked`. When a device becomes `ready`, the scheduler picks among queued requests that match it
+and whose team is under its quota: the highest priority first, run shards before agent leases
+inside a booking, then the team with the fewest active leases relative to its quota, then the
+principal with the fewest active leases, then the oldest request.
+
+An open booking keeps free devices for itself up to its count, never a host's CI floor (1 device
+by default). Only the booking's own tokens lease from it, and only `ci` requests may take a device
+it keeps free. A `ci` request that finds nothing free waits for a device that is coming back;
+failing that, it tells the lowest-priority lease it could use, agent leases before run shards and
+newest first, to end in two minutes (`preempted`). An `interactive` request never ends a booked
+lease, so it waits. Booked leases are told ten minutes before their window closes. The scheduler is a pure function
+from queued requests, ready and returning devices, live leases, bookings, holds, quotas and the
+time to assignments, early endings and reserved devices, so it is tested without a clock or a
+database (decision 0012).
 
 Admission to boot a new simulator is by memory, not a fixed count: the host reports free memory
 and memory pressure, and the broker only asks it to boot when the class's measured footprint fits.

@@ -1,4 +1,4 @@
-import { LANGUAGES, LIMIT_FIELDS, canRerun, canRotate, capSeconds, capValue, deviceRows, duration, flowRecordings, isLanguageTag, leaseClass, limitsText, parseEnv, percent, viewExpiry, withView } from './lib.js';
+import { LANGUAGES, LIMIT_FIELDS, bookingBody, canRerun, canRotate, capSeconds, capValue, daysText, deviceRows, duration, endingText, flowRecordings, heldText, isLanguageTag, leaseClass, limitsText, linkPath, logTail, mcpSettings, openAgainError, openAgainTarget, parseEnv, percent, viewExpiry, windowStatus, withView } from './lib.js';
 
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
@@ -67,12 +67,12 @@ async function render() {
   }
   if (!me) return loginView();
   who.replaceChildren(`${me.name} · `, h('a', { href: '#', onclick: async (e) => { e.preventDefault(); await api('POST', '/v1/logout'); go('/'); } }, 'Sign out'));
-  const links = [['/', 'Devices'], ['/runs', 'Runs'], ['/tests/flaky', 'Flaky flows'], ['/recordings', 'Recordings'], ['/connect', 'Connect']];
+  const links = [['/', 'Devices'], ['/runs', 'Runs'], ['/tests/flaky', 'Flaky flows'], ['/recordings', 'Recordings'], ['/schedule', 'Schedule'], ['/nights', 'Nights'], ['/connect', 'Connect']];
   if (me.role === 'operator') {
     links.splice(1, 0, ['/fleet', 'Fleet']);
     links.push(['/people', 'People']);
   }
-  nav.replaceChildren(...links.map(([href, label]) => h('a', { href, 'data-link': true, class: path === href ? 'on' : '' }, label)));
+  nav.replaceChildren(...links.map(([href, label]) => h('a', { href, 'data-link': true, class: path === href || (href !== '/' && path.startsWith(`${href}/`)) ? 'on' : '' }, label)));
   const lease = path.match(/^\/leases\/([^/]+)$/);
   if (lease) return leaseView(lease[1]);
   if (recording) return recordingView(recording[1], view);
@@ -81,6 +81,10 @@ async function render() {
   if (run) return runView(run[1]);
   if (path === '/runs') return runsView();
   if (path === '/tests/flaky') return flakyView();
+  if (path === '/schedule') return scheduleView();
+  const night = path.match(/^\/nights\/([^/]+)$/);
+  if (night) return nightView(night[1]);
+  if (path === '/nights') return nightsView();
   if (path === '/connect') return connectView();
   if (path === '/cli-login') return cliLoginView();
   if (path === '/people') return peopleView();
@@ -389,6 +393,32 @@ async function leaseView(id) {
     ends.textContent = l.expiresAt ? `If nothing happens on it, it ends at ${new Date(l.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : '';
   };
   showEnd(lease);
+
+  // Preemption and window ends come as 'lease_ending' on the lease's event stream.
+  const warning = h('div', { class: 'ending', role: 'alert', hidden: true });
+  let ending = lease.ending;
+  const tickEnding = () => {
+    warning.hidden = !ending;
+    if (ending) warning.textContent = endingText(ending, Date.now());
+  };
+  tickEnding();
+  const countdownTimer = setInterval(tickEnding, 1000);
+  const events = new EventSource(`/v1/leases/${id}/events`);
+  events.addEventListener('lease_ending', (e) => {
+    ending = JSON.parse(e.data).ending;
+    tickEnding();
+  });
+  events.addEventListener('ended', (e) => {
+    events.close();
+    ending = null;
+    tickEnding();
+    const l = JSON.parse(e.data);
+    warning.hidden = false;
+    warning.textContent = `This lease has ended (${l.reason}).`;
+  });
+  const heldCard = h('div', { class: 'card', hidden: true });
+  const q = new URLSearchParams(location.search);
+  if (q.get('run') && q.get('flow')) void heldContext(q.get('run'), q.get('flow'), heldCard);
   // An open, visible tab counts as use. The checkbox lets a hidden tab count too, up to the longest-lease limit.
   const background = h('input', { type: 'checkbox' });
   const renew = setInterval(() => {
@@ -398,6 +428,8 @@ async function leaseView(id) {
   }, 60_000);
   cleanup = () => {
     clearInterval(renew);
+    clearInterval(countdownTimer);
+    events.close();
     ws.close();
   };
 
@@ -427,7 +459,10 @@ async function leaseView(id) {
     return `${bundleId} now runs in ${language}.`;
   });
 
+  const tags = [`Priority ${lease.priority ?? 'interactive'}`];
+  if (lease.booking) tags.push(`booking ${lease.booking}`);
   app.replaceChildren(
+    warning,
     h('div', { class: 'lease' },
       h('div', {},
         screen,
@@ -440,8 +475,10 @@ async function leaseView(id) {
         ),
       ),
       h('div', { class: 'side' },
+        heldCard,
         h('div', { class: 'card' },
           h('h1', { style: 'margin-bottom:4px' }, system(lease.device)),
+          h('p', { class: 'muted', style: 'margin-top:0;margin-bottom:4px' }, tags.join(', ')),
           h('p', { class: 'muted', style: 'margin-top:0;margin-bottom:4px' }, limitsText(lease.limits)),
           ends,
           h('label', { class: 'check', title: `Keeps the device while you work in another tab. It still ends ${duration(lease.limits.maxMs)} after you got it, and soon after you close this tab.` },
@@ -929,6 +966,23 @@ async function runView(id) {
     envBox.hidden = false;
     text.focus();
   };
+  const takeHeld = async (flow) => {
+    status.textContent = `Getting the device ${flow} failed on…`;
+    try {
+      const lease = await api('POST', `/v1/runs/${id}/flows/${encodeURIComponent(flow)}/hold-lease`);
+      go(`/leases/${lease.id}?run=${encodeURIComponent(id)}&flow=${encodeURIComponent(flow)}`);
+    } catch (x) {
+      status.textContent = x.message;
+    }
+  };
+  const releaseHeld = async (flow) => {
+    try {
+      show(await api('DELETE', `/v1/runs/${id}/flows/${encodeURIComponent(flow)}/hold`));
+      status.textContent = `Released the device ${flow} failed on. Hangar wipes it and puts it back in the pool.`;
+    } catch (x) {
+      status.textContent = x.message;
+    }
+  };
   const show = (r) => {
     const cancel = r.state === 'running' && (r.owner === me.name || me.role === 'operator')
       ? h('button', { onclick: () => api('DELETE', `/v1/runs/${id}`).then(show) }, 'Cancel run')
@@ -942,7 +996,7 @@ async function runView(id) {
       h('table', {},
         h('tr', {}, h('th', {}, 'Flow'), h('th', {}, 'Shard'), h('th', {}, 'Attempts'), h('th', {}, 'State'), h('th', {}, '')),
         ...r.flows.map((f) => h('tr', {},
-          h('td', {}, f.flow, f.message ? h('div', { class: 'muted' }, f.message) : ''),
+          h('td', {}, f.flow, f.message ? h('div', { class: 'muted' }, f.message) : '', f.held ? h('div', { class: 'state held' }, heldText(f.held.until, Date.now())) : ''),
           h('td', {}, f.shard + 1),
           h('td', {}, f.attempts),
           h('td', { class: `state ${f.status}` }, f.status),
@@ -950,6 +1004,8 @@ async function runView(id) {
             h('div', { class: 'row' },
               ...flowRecordings(f).map((l) => h('a', { href: l.href, 'data-link': true }, l.label)),
               canRerun(r, f) ? h('button', { title: 'Run this flow again on a fresh device, recorded', onclick: () => rerun(f.flow) }, 'Rerun') : '',
+              f.held ? h('button', { class: 'primary', title: 'Lease the device this flow failed on, as the flow left it', onclick: () => takeHeld(f.flow) }, 'Take the device') : '',
+              f.held ? h('button', { title: 'Let the device go. Hangar wipes it and puts it back in the pool.', onclick: () => releaseHeld(f.flow) }, 'Release') : '',
             ),
           ),
         )),
@@ -998,5 +1054,280 @@ async function flakyView() {
               h('td', {}, h('div', { class: 'row' }, h('a', { href: `/runs/${g.lastRunId}`, 'data-link': true }, 'Last run'), g.recording ? recordingLink(g.recording) : '')),
             )),
           )),
+  );
+}
+
+const when = (t) => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
+
+const stepList = (steps) =>
+  steps.length
+    ? h('div', { class: 'steps' }, steps.map((s) => h('div', { class: s.failed ? 'step error' : 'step' }, h('span', { class: 'muted' }, seconds(s.at)), ' ', s.what, s.failed ? ` (failed: ${s.failed})` : '')))
+    : h('p', { class: 'muted' }, 'No steps were recorded.');
+
+// Beside the stream of a held device: what the flow did and how it failed.
+async function heldContext(runId, flow, card) {
+  const run = await api('GET', `/v1/runs/${runId}`).catch(() => null);
+  const f = run?.flows.find((x) => x.flow === flow);
+  if (!run || !f) return;
+  const recording = f.recording ?? f.firstRecording;
+  const recordingId = recording ? /\/recordings\/([^/?#]+)/.exec(linkPath(recording))?.[1] : null;
+  let steps = null;
+  if (recordingId) {
+    const rec = await api('GET', `/v1/recordings/${recordingId}`).catch(() => null);
+    steps = rec?.files?.timeline ? await fetch(rec.files.timeline).then((r) => (r.ok ? r.json() : null), () => null) : null;
+  }
+  card.replaceChildren(
+    h('h2', { style: 'margin-top:0' }, `${f.flow} ${f.status === 'flaky' ? 'was flaky' : 'failed'} here`),
+    h('p', { class: 'muted', style: 'margin-top:0' }, `Run of ${run.build}, started by ${run.owner}. `, f.held ? heldText(f.held.until, Date.now()) : 'The hold has ended.'),
+    f.message ? h('code', { class: 'code error' }, f.message) : '',
+    h('h2', {}, 'Steps'),
+    steps ? stepList(steps) : h('p', { class: 'muted' }, 'This flow kept no recording, so its steps are not known.'),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('a', { href: `/runs/${runId}`, 'data-link': true }, 'Back to the run'),
+      recordingId ? h('a', { href: `/recordings/${recordingId}`, 'data-link': true }, 'Recording') : '',
+    ),
+    h('p', { class: 'muted' }, 'Release below ends this lease, and Hangar wipes the device.'),
+  );
+  card.hidden = false;
+}
+
+async function scheduleView() {
+  const [data, floors, images] = await Promise.all([api('GET', '/v1/bookings'), api('GET', '/v1/ci-floors').catch(() => []), api('GET', '/v1/images').catch(() => [])]);
+  const status = h('p', { class: 'muted' });
+  const tokenBox = h('div', { class: 'card', hidden: true });
+  const now = Date.now();
+  const makeToken = async (b) => {
+    try {
+      const t = await api('POST', `/v1/bookings/${encodeURIComponent(b.name)}/tokens`, { label: `booking ${b.name} from the console`, agent: true });
+      const s = mcpSettings(t.mcp, t.token);
+      tokenBox.replaceChildren(
+        h('h2', { style: 'margin-top:0' }, `Token for ${b.name}`),
+        h('p', { class: 'muted' }, `It leases only from ${b.name}, only while its window is open. A lease asked for early waits for the window. Copy it now; it is shown only once.`),
+        h('code', { class: 'code' }, t.token),
+        h('h2', {}, 'MCP settings for an agent'),
+        h('p', { class: 'muted' }, 'For Cursor, or any client that reads mcpServers.'),
+        h('pre', { class: 'code' }, s.json),
+        h('h2', {}, 'Claude Code'),
+        h('code', { class: 'code' }, s.claude),
+        h('button', { onclick: () => (tokenBox.hidden = true) }, 'Done'),
+      );
+      tokenBox.hidden = false;
+      tokenBox.scrollIntoView({ block: 'nearest' });
+    } catch (x) {
+      status.textContent = x.message;
+    }
+  };
+  const remove = async (b) => {
+    if (!confirm(`Remove the booking ${b.name}? Leases from it end now.`)) return;
+    try {
+      await api('DELETE', `/v1/bookings/${encodeURIComponent(b.name)}`);
+      await scheduleView();
+    } catch (x) {
+      status.textContent = x.message;
+    }
+  };
+  const describeClass = (c) => [c.image ? `image ${c.image}` : '', c.model ?? '', c.os ? `OS ${c.os}` : '', c.platform === 'android-emulator' ? 'Android' : ''].filter(Boolean).join(', ');
+
+  const fields = {
+    name: h('input', { type: 'text', placeholder: 'nightly-qa', 'aria-label': 'Name', required: true }),
+    devices: h('input', { type: 'number', min: 1, value: '1', 'aria-label': 'Devices' }),
+    days: h('input', { type: 'text', placeholder: 'weekdays, mon-thu or daily', value: 'weekdays', 'aria-label': 'Days' }),
+    from: h('input', { type: 'time', value: '18:00', 'aria-label': 'From' }),
+    to: h('input', { type: 'time', value: '07:00', 'aria-label': 'To' }),
+    image: h('select', { 'aria-label': 'Image' }, h('option', { value: '' }, 'None: clean devices'), ...images.map((i) => h('option', { value: i.name }, i.name))),
+  };
+  const formError = h('p', { class: 'error' });
+  const form = h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    formError.textContent = '';
+    try {
+      const body = bookingBody(Object.fromEntries(Object.entries(fields).map(([k, el]) => [k, el.value])));
+      await api('POST', '/v1/bookings', body);
+      await scheduleView();
+    } catch (x) {
+      formError.textContent = x.message;
+    }
+  } },
+    h('div', { class: 'grid' },
+      h('div', {}, h('label', {}, 'Name'), fields.name),
+      h('div', {}, h('label', {}, 'Devices'), fields.devices),
+      h('div', {}, h('label', {}, 'Days'), fields.days),
+      h('div', {}, h('label', {}, 'From'), fields.from),
+      h('div', {}, h('label', {}, 'To'), fields.to),
+      images.length ? h('div', {}, h('label', {}, 'Image'), fields.image) : '',
+    ),
+    h('p', { class: 'muted' }, `Times are in the broker’s time zone, ${data.timeZone}. A window that ends before it starts runs past midnight.`),
+    h('button', { class: 'primary', type: 'submit' }, 'Book'),
+    formError,
+  );
+
+  const floorRows = floors.map((f) => {
+    const input = h('input', { type: 'number', min: 0, value: String(f.floor), 'aria-label': `CI floor for ${f.host}`, style: 'width:6em', disabled: me.role !== 'operator' });
+    const save = h('button', { onclick: async () => {
+      try {
+        const text = input.value.trim();
+        const next = await api('PUT', `/v1/ci-floors/${encodeURIComponent(f.host)}`, { floor: text === '' ? null : Number(text) });
+        input.value = String(next.floor);
+        status.textContent = `Saved. Bookings leave ${next.floor} device${next.floor === 1 ? '' : 's'} on ${f.host} for CI.`;
+      } catch (x) {
+        status.textContent = x.message;
+      }
+    } }, 'Save');
+    return h('tr', {}, h('td', {}, f.host, f.connected ? '' : h('span', { class: 'muted' }, ' (not connected)')), h('td', {}, f.devices), h('td', {}, input), me.role === 'operator' ? h('td', {}, save) : '');
+  });
+
+  app.replaceChildren(
+    h('h1', { style: 'margin-bottom:4px' }, 'Schedule'),
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'A booking holds devices for a team on given days, such as a night for the nightly suite and QA agents. Only tokens made for a booking lease from it, and CI goes first.'),
+    data.bookings.length === 0
+      ? h('p', { class: 'card muted' }, 'No bookings yet.')
+      : h('div', { class: 'card' },
+          h('table', {},
+            h('tr', {}, h('th', {}, 'Booking'), h('th', {}, 'Team'), h('th', {}, 'Devices'), h('th', {}, 'When'), h('th', {}, 'Window'), h('th', {}, 'Leases'), h('th', {})),
+            ...data.bookings.map((b) => {
+              const w = windowStatus(b, now);
+              return h('tr', {},
+                h('td', {}, h('strong', {}, b.name)),
+                h('td', {}, b.team),
+                h('td', {}, b.devices, describeClass(b.class) ? h('div', { class: 'muted' }, describeClass(b.class)) : ''),
+                h('td', {}, `${daysText(b.days)}, ${b.from} to ${b.to}`),
+                h('td', { class: w.open ? 'state active' : 'state' }, w.text, !w.open && b.next ? h('div', { class: 'muted' }, when(b.next.from)) : ''),
+                h('td', {}, b.leases),
+                h('td', {}, h('div', { class: 'row' },
+                  h('button', { title: 'A token for agents that leases only from this booking', onclick: () => makeToken(b) }, 'Make a token'),
+                  h('button', { class: 'danger', onclick: () => remove(b) }, 'Remove'))),
+              );
+            }),
+          )),
+    status,
+    tokenBox,
+    h('h2', {}, 'Book devices'),
+    h('div', { class: 'card' }, form),
+    h('h2', {}, 'CI floor'),
+    h('div', { class: 'card' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, 'How many devices on each Mac bookings never take, so CI always finds one. The floor and the bookings together may not be more than a Mac has.'),
+      floors.length
+        ? h('table', {}, h('tr', {}, h('th', {}, 'Mac'), h('th', {}, 'Devices'), h('th', {}, 'Floor'), me.role === 'operator' ? h('th', {}) : ''), ...floorRows)
+        : h('p', { class: 'muted' }, 'No Mac is connected yet.'),
+      me.role === 'operator' ? '' : h('p', { class: 'muted' }, 'Only an operator can change the floor.'),
+    ),
+  );
+}
+
+async function nightsView() {
+  const list = await api('GET', '/v1/nights');
+  app.replaceChildren(
+    h('h1', {}, 'Nights'),
+    list.length === 0
+      ? h('p', { class: 'card muted' }, 'No nights yet. A night opens with `hangar night open <booking>` and closes when the booking’s window closes.')
+      : h('div', { class: 'card' },
+          h('table', {},
+            h('tr', {}, h('th', {}, 'Opened'), h('th', {}, 'Booking'), h('th', {}, 'Team'), h('th', {}, 'Closed'), h('th', {}, 'State')),
+            ...list.map((n) => h('tr', {},
+              h('td', {}, h('a', { href: `/nights/${n.id}`, 'data-link': true }, when(n.openedAt))),
+              h('td', {}, n.booking),
+              h('td', {}, n.team),
+              h('td', {}, when(n.closedAt)),
+              h('td', { class: `state ${n.state === 'open' ? 'active' : 'ended'}` }, n.state),
+            )),
+          )),
+  );
+}
+
+async function nightView(id) {
+  const [night, report] = await Promise.all([api('GET', `/v1/nights/${id}`), api('GET', `/v1/nights/${id}/report`)]).catch((x) => [{ error: x.message }, null]);
+  if (night.error || !report) {
+    app.replaceChildren(h('p', { class: 'error' }, night.error ?? 'No report.'), h('a', { href: '/nights', 'data-link': true }, 'All nights'));
+    return;
+  }
+  const s = report.summary;
+  const severities = ['critical', 'high', 'medium', 'low'].filter((k) => s.bySeverity[k]).map((k) => `${s.bySeverity[k]} ${k}`);
+  app.replaceChildren(
+    h('h1', { style: 'margin-bottom:4px' }, `${night.booking}, ${when(night.openedAt)}`),
+    h('p', { class: 'muted', style: 'margin-top:0' },
+      `${night.team} · opened by ${night.openedBy} · `,
+      night.state === 'open' ? h('span', { class: 'state active' }, 'open') : `closed ${when(night.closedAt)}${night.closedBy ? ` by ${night.closedBy}` : ''}`),
+    h('div', { class: 'card' },
+      h('p', { style: 'margin-top:0' },
+        `${s.findings} finding${s.findings === 1 ? '' : 's'}${severities.length ? ` (${severities.join(', ')})` : ''}, ${s.leases} lease${s.leases === 1 ? '' : 's'}, ${s.runs} run${s.runs === 1 ? '' : 's'} with ${s.failedFlows} failed and ${s.flakyFlows} flaky flow${s.flakyFlows === 1 ? '' : 's'}.`),
+      ...report.notes.map((n) => h('p', { class: 'muted' }, n)),
+      h('a', { class: 'button', href: linkPath(night.url), download: `night-${night.booking}.md` }, 'Report as Markdown'),
+    ),
+    h('h2', {}, 'Findings'),
+    report.findings.length ? h('div', { class: 'findings' }, report.findings.map(findingCard)) : h('p', { class: 'card muted' }, 'Nothing was reported.'),
+    h('h2', {}, 'Runs'),
+    night.runs.length
+      ? h('div', { class: 'card' }, h('table', {},
+          h('tr', {}, h('th', {}, 'Run'), h('th', {}, 'Passed'), h('th', {}, 'Flaky'), h('th', {}, 'Failed'), h('th', {}, 'State')),
+          ...night.runs.map((r) => h('tr', {},
+            h('td', {}, h('a', { href: linkPath(r.url), 'data-link': true }, r.id.slice(0, 8)),
+              ...r.failures.map((f) => h('div', { class: 'muted' }, `${f.flow}: ${f.message ?? 'failed'} `, f.recording ? h('a', { href: linkPath(f.recording), 'data-link': true }, 'Recording') : ''))),
+            h('td', {}, r.passed),
+            h('td', {}, r.flaky),
+            h('td', {}, r.failed),
+            h('td', { class: `state ${r.state}` }, r.state),
+          ))))
+      : h('p', { class: 'card muted' }, 'No runs used this booking.'),
+    h('h2', {}, 'Leases'),
+    night.leases.length
+      ? h('div', { class: 'card' }, h('table', {},
+          h('tr', {}, h('th', {}, 'Who'), h('th', {}, 'Device'), h('th', {}, 'From'), h('th', {}, 'To'), h('th', {}, 'Ended'), h('th', {})),
+          ...night.leases.map((l) => h('tr', {},
+            h('td', {}, l.owner),
+            h('td', {}, l.device ?? '', l.image ? h('div', { class: 'muted' }, `image ${l.image}`) : ''),
+            h('td', {}, when(l.activatedAt)),
+            h('td', {}, when(l.endedAt)),
+            h('td', { class: 'muted' }, l.reason ?? (l.endedAt ? '' : 'still active')),
+            h('td', {}, l.recording ? h('a', { href: linkPath(l.recording), 'data-link': true }, 'Recording') : ''),
+          ))))
+      : h('p', { class: 'card muted' }, 'No leases in this night.'),
+  );
+}
+
+function findingCard(f) {
+  const out = h('p', { class: 'muted' });
+  const openAgain = h('button', { title: 'Replay the steps on a fresh device with the same image', onclick: async () => {
+    openAgain.disabled = true;
+    out.textContent = 'Getting a fresh device…';
+    try {
+      const target = openAgainTarget(await api('POST', `/v1/findings/${f.id}/open-again`));
+      if (target) {
+        go(target);
+        return;
+      }
+      out.textContent = 'Hangar started it, but did not say where. Look under Devices.';
+    } catch (x) {
+      out.textContent = openAgainError(x);
+    } finally {
+      openAgain.disabled = false;
+    }
+  } }, 'Open again');
+  const log = logTail(f.log);
+  return h('div', { class: 'card finding' },
+    h('div', { class: 'row', style: 'justify-content:space-between' },
+      h('h2', { style: 'margin:0' }, h('span', { class: `sev ${f.severity}` }, f.severity), ' ', f.title),
+      h('span', { class: 'muted' }, `${f.by} · ${when(f.createdAt)}`)),
+    f.device ? h('p', { class: 'muted', style: 'margin:4px 0 0' }, f.device) : '',
+    f.description ? h('p', { class: 'description' }, f.description) : '',
+    h('div', { class: 'evidence' },
+      f.screenshot ? h('a', { href: linkPath(f.screenshot), target: '_blank' }, h('img', { class: 'shot', src: linkPath(f.screenshot), alt: `Screenshot for ${f.title}`, loading: 'lazy' })) : '',
+      h('div', {},
+        f.video
+          ? h('p', { style: 'margin-top:0' },
+              h('a', { href: linkPath(f.video.video), target: '_blank' }, `Video from ${seconds(f.video.fromMs)} to ${seconds(f.video.toMs)}`),
+              ' · ',
+              h('a', { href: linkPath(f.video.url), 'data-link': true }, 'the whole recording'))
+          : h('p', { class: 'muted', style: 'margin-top:0' }, 'No video was recording.'),
+        h('h3', {}, 'Steps before it'),
+        stepList(f.steps),
+        h('h3', {}, 'App log'),
+        log.length
+          ? h('div', { class: 'log' }, log.map((l) => h('div', { class: `step ${l.level === 'error' || l.level === 'fault' ? 'error' : ''}` }, h('span', { class: 'muted' }, new Date(l.time).toLocaleTimeString()), ' ', l.message)))
+          : h('p', { class: 'muted' }, f.logError ?? 'The app logged nothing.'),
+        ...f.notes.map((n) => h('p', { class: 'muted' }, n)),
+        h('div', { class: 'row' }, openAgain),
+        out,
+      ),
+    ),
   );
 }

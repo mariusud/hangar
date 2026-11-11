@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { MaestroRun } from './client/index.ts';
-import { commentBody, commentKey } from './run.ts';
+import { commentBody, commentKey, heldLink } from './run.ts';
 
 const result: MaestroRun = {
   id: '6f1c2e8a-1b2c-4d5e-8f90-123456789abc',
@@ -38,6 +38,16 @@ test('a run with nothing failing gets a short comment without a rerun hint', () 
   assert.match(body, /### XCUITest on Hangar: passed/);
   assert.doesNotMatch(body, /\| Flow \|/);
   assert.doesNotMatch(body, /--rerun/);
+});
+
+test('a held flow gets a link to its device on the run page, and the CLI command to take it', () => {
+  const until = Date.UTC(2026, 10, 11, 14, 30);
+  const flows = result.flows.map((f) => (f.flow === 'pay|card.yaml' ? { ...f, held: { until } } : f));
+  const lines = commentBody({ ...result, flows }, 'k').split('\n');
+  const row = lines.find((l) => l.includes('open the device'));
+  assert.equal(row, '- pay\\|card.yaml: [open the device](https://hangar.test/runs/6f1c2e8a-1b2c-4d5e-8f90-123456789abc?flow=pay%7Ccard.yaml), held until 14:30 UTC, or `hangar held 6f1c2e8a-1b2c-4d5e-8f90-123456789abc pay|card.yaml`');
+  assert.equal(heldLink('https://hangar.test/runs/r', 'a b.yaml'), 'https://hangar.test/runs/r?flow=a%20b.yaml');
+  assert.doesNotMatch(commentBody(result, 'k'), /open the device/);
 });
 
 test('the comment key depends on the workflow, the job and the comment-key input only', () => {

@@ -173,6 +173,8 @@ Split the files every stream would otherwise edit:
 
 Done when the diff moves code without changing behaviour and every test passes.
 
+Status: done. `http.ts` went from 906 lines to 58 and `mcp.ts` from 272 to 68, with no change in behaviour.
+
 ### Who owns what
 
 | Stream | Owns |
@@ -193,10 +195,14 @@ a fixed 5 minutes). A longest-lease cap, 8 hours by default. A keepalive MCP too
 lease id after a disconnect, with a grace period before the wipe. Done when an agent that
 restarts mid-task gets its device back, in the property tests and on the office Mac mini.
 
+Status: built and covered by property tests (token limits, keepalive, reattach with a 60 s grace, `hangar attach`). Not yet run on the office Mac mini. A dropped MCP connection is not detected, so an MCP client gets no grace period.
+
 **B1. Better test runs.** Record the first failed attempt, not only the retry. Rerun one flow
 (`POST /v1/runs/:id/flows/:flow/rerun`). One pull request comment from `action.yml` with passed,
 flaky and failed flows and a video link for each failure, plus a nightly cron example. Flake rate
 per flow and failures grouped by error, from the history `GET /v1/tests` already keeps.
+
+Status: built and tested with fakes. The PR comment, the rerun and the nightly example have not run on a real GitHub runner. The first-attempt video covers the whole shard pass.
 
 **D1. Device tools agents ask for.** The app log through `simctl spawn ... log stream` filtered to
 the app, and `adb logcat` on Android. JavaScript evaluate and console through the Metro and Hermes
@@ -204,9 +210,13 @@ inspector the tunnel already carries. Network requests through the CDP Network d
 Native 0.83 and later, and a `fetch`/XHR patch before that. Two-finger HID for pinch and rotate if
 the idb companion sends two contacts; check first. Orientation.
 
+Status: app log, JavaScript evaluate and console, and network requests are built. The iOS app log ran on a real simulator; the JavaScript and network tools have not run against a real React Native app. Android rotation is built. Pinch and rotate gestures, and iOS rotation, answer `UNSUPPORTED`.
+
 **E1. Images with a signed-in user.** `hangar image set --sign-in <file>` runs a sign-in Maestro
 flow once on the golden device, with the account's secrets from the environment, never from the
 repo. Permissions granted in the image with `simctl privacy`.
+
+Status: built and tested with fakes. Secrets are stored in plain text in the broker's database, and a sign-in flow's subflows are not uploaded.
 
 **F1. A Mac that runs alone.** A LaunchDaemon or a background `hangar` user, checked through a
 real reboot with nobody logged in. `hangar doctor` fixes the idb companion when Homebrew refuses
@@ -215,46 +225,70 @@ clone, capture, tree, tap, two Maestro flows, wipe) that writes `hosts/versions.
 that won't schedule on an Xcode that hasn't passed. A fallback when the IOSurface capture breaks:
 `idb video-stream`, then JPEG screenshots.
 
+Status: the LaunchDaemon plist, the doctor check, `pnpm bench:smoke` and the opt-in version gate are built. The daemon hasn't been through a real reboot. `pnpm bench:smoke` passed on this laptop (Xcode 26.6, iOS 26.5) with its own `hangar-smoke-*` simulators; it is a pass or fail check, and its step times are diagnostics, not numbers for the docs. Recordings now work on the idb capture path too, through a small MP4 muxer, checked on a real simulator. A recording loses the part before a capture path switch. The capture fallback landed in wave 2: on one iOS 26.5 simulator the IOSurface path, the idb path and the switch between them produced H.264 that decoded cleanly.
+
 **G1. Console wiring for what exists.** An image picker when leasing, buttons for locale, dark
 mode and rotation (the presets exist in the API), and a view-only link to one lease or recording.
+
+Status: the image picker, the appearance and locale buttons, and signed view-only links to recordings are built. A view-only link to a live lease is not.
 
 **H1. Docs that can be written now.** `docs/licensing.md`, which links Apple's terms and claims
 nothing. Remove the README line saying XCUITest and Espresso work the same way until B3 runs them
 for real. Update `docs/comparison.md` so it makes no claims about other tools' security and uses
 no "unique".
 
+Status: done.
+
 ### Wave 2: needs wave 1
 
 **A2. Held devices** (needs A1). A lease can end in a held state instead of a wipe, with its own
 time limit that counts against the quota, and a person can take it over.
 
+Status: built in the broker and the CLI (`hangar held <run> <flow>`), with property tests. The console stream and the Metro tunnel reach a held device. Tested against fake hosts only.
+
 **A3. Bookings, priority and preemption** (needs A1 and decision 0012). A booking has a name, a
-device count, days, a window, an image and a report target. CI keeps a floor that bookings can't
+device count, days, a window and an image. CI keeps a floor that bookings can't
 take. A lease from a lower priority gets a warning and ends two minutes later when a higher one
 needs the device, with the reason recorded; an interrupted CI shard reruns. Property tests: an
 agent that overruns its window never starves morning CI, and two bookings never hold one device.
 `hangar book` and `hangar connect night`, which makes a token that works only inside a booking.
 
+Status: bookings, the CI floor, priorities, preemption with a 2-minute notice (`lease_ending` on the event stream) and window ends with a 10-minute notice are built, with property tests for invariants 6 to 9. `hangar book`, `hangar bookings` and `hangar connect <booking>` work. Tested against a simulated fleet only. The "ci within 2 min 5 s" guarantee assumes a wipe of a few seconds, which hasn't been measured. Any member can make a ci-priority token.
+
 **B2. Hold on failure** (needs A2). `hangar run maestro --hold 30m` keeps the failed shard's device,
 and the pull request comment links to it.
+
+Status: `--hold` keeps a failed shard's device, and an interrupted shard reruns its unfinished flows up to 3 times. The pull request comment doesn't link to the held device yet.
 
 **C1. Findings and the morning report** (needs D1 for logs and network, A3 for the window end).
 Every lease's record gains the app log and network requests. A `report_finding` MCP tool files a
 title and description with the last two minutes of video, the taps, the log and a screenshot. A
-night run groups a booking's leases and findings, and when the window closes Hangar posts the
-report to a Slack webhook or a GitHub issue. Build it against a manual "end the night" call first,
-so it doesn't wait for A3.
+night run groups a booking's leases and findings, and closes when the window closes. Hangar
+makes no calls outside the network, so the team's scheduler posts the report:
+`hangar night report <booking> --slack-webhook $URL` runs on the CI runner.
+
+Status: findings, nights and the report (JSON and Markdown) are built, and a booking's window end closes its night. Tested against a fake host. No finding has been filed on a real simulator. A finding's video is a time span in the full recording, not a two-minute clip. A GitHub issue target is not built.
 
 **G2. Console for wave 2.** The Schedule page, the held-device page with the flow's steps beside the
 stream and a rerun button, flake rate on the Runs page, and a page per night with its findings.
 
+Status: built. Rerun per flow, first-attempt links, a Flaky flows page, the lease's real limits and operator caps, the Schedule page (bookings, booking tokens, CI floors), Take the device and Release on held flows with the flow's steps beside the stream, a countdown banner on `lease_ending`, and the Nights and night pages with findings and Open again. Checked in a headless browser against a broker with a fake host. The console doesn't yet show image state, and the run page doesn't open a flow from the pull request's held-device link.
+
 **E2. Image refresh.** Rebuild an image when a new app build lands, without ending active leases.
+
+Wave 3 follow-up: image secrets are encrypted at rest (AES-256-GCM, key file next to the database, included in `hangar export`), `hangar image set --follow` refreshes an image when a build with the same name is uploaded, and hosts report each image as building, ready or failed, so a failed image refuses new leases with `IMAGE_FAILED`. `hangar images` shows the state. Tested with fakes only. Leases already waiting on an image that then fails keep waiting.
+
+Status: `hangar image refresh <name> --app A` and `POST /v1/images/:name/refresh` build a new golden while leases on the old one keep running. Tested with a fake host only. A refresh doesn't start on its own when a build is uploaded, a failed build shows as pending, and Android has no images yet.
 
 ### Wave 3: proof and launch
 
 **C2. Open again.** Replay a finding's taps on a fresh lease of the same image.
 
+Status: `POST /v1/findings/:id/open-again` and the `open_again` MCP tool lease a fresh device like the finding's for the caller's team, record it, and replay the actions taken before the finding. Each step reports ok, skipped or failed, and whether it went by label or by coordinates. Tested against a fake host only. A tap replays by label only when the caller read the screen before tapping. Typed text is kept in plain text in the finding so it can be replayed.
+
 **B3. XCUITest and Espresso for real**, against a real UI test target and a real test APK.
+
+Status: XCUITest ran for real. `hangar run xcuitest` ran a small SwiftUI fixture (`e2e/fixtures/xcuitest`) on an iOS 26.5 simulator, and the JUnit showed a passing class and a failing test with its message. It ran against a test host, not a full agent with golden devices and wipes. Espresso hasn't run: this Mac has no Gradle cache or Espresso artifacts, and getting them is a download. `--booking` on runs and a held-device link in the pull request comment are built and tested with a fake host.
 
 **F2. Numbers on a quiet Mac mini.** The office suite serially, then on 2 and 3 shards; flake rate
 over 100 runs from the same golden device; lease, clone and wipe times. These need the office Mac
@@ -263,6 +297,8 @@ mini and the maintainer's go-ahead, since they are benchmark runs.
 **H2. Launch.** `examples/night-qa` with a brief and an MCP settings file. Guides for Maestro,
 night QA and device images. The README from `.agents/README-target.md` once everything in it
 exists, with the measured numbers. A new header image and GIF. npm under Apache-2.0.
+
+Status: the night QA and Maestro guides and `examples/night-qa` are written and checked against the code. The example hasn't run on a GitHub runner. The README swap waits for F2's numbers and for the release gates; the header, the GIF and npm wait for the maintainer.
 
 ### Using it for real
 

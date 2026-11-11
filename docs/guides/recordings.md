@@ -39,6 +39,8 @@ that reproduces a bug can hand a person something to check.
 | `video.mp4` | The screen, written from the live stream's own H.264 frames, so recording does not encode twice. Frames come only when the screen changes. A rotation during a recording leaves out the frames after it. |
 | `timeline.json` | `[{ "at": ms, "what": "Tap \"Sign in\"", "failed"?: "..." }]`, from the actions the broker carried. Typed text shows only its length, since tests type passwords. Screenshots and tree reads are left out. |
 | `log.ndjson` | `log stream` output for apps installed on the device, up to 16 MB. React Native release builds log `console` output here. |
+| `applog.json` | The app's own log lines, as `app_log` returns them, collected every 10 seconds while recording; the newest 5000 lines are kept. |
+| `network.json` | The app's network requests, as `network_requests` returns them; the newest 2000 are kept. Empty without the Metro tunnel. |
 | `screenshot.png` | The screen when the recording stopped, at full resolution. |
 
 ## A link for someone without an account
