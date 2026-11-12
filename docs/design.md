@@ -575,8 +575,12 @@ purpose.
 | `operator` | Everything everywhere: hosts, teams, quotas, classes, revoking leases, the audit log. |
 | `host` | Connect at `/v1/agent/connect` as one specific host. Nothing else. |
 
-Scopes narrow tokens further. `install:upload` allows uploading app and test bundles, and is off
-by default for member tokens.
+Scopes narrow tokens further. A bearer token acts with its account's role only when it carries
+the `operator` scope, so a token an operator makes for an agent or CI job is a member's. Agent
+tokens never carry it. `install:upload` allows uploading app and test bundles under any name, and
+`install:upload:<prefix>` only builds whose name starts with the prefix. Both are off by default,
+and only operators can grant them. The operator's own CLI token from `hangar up` or `hangar login`
+carries `operator` and `install:upload`.
 
 People sign in one of three ways, and all of them end in an HttpOnly, SameSite=Lax session cookie:
 

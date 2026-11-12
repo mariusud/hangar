@@ -8,6 +8,10 @@ and a token in a secret.
 1. An operator makes a token on the console's Connect page with "Can upload apps" ticked,
    because the action uploads the app it tests. Save it as the `HANGAR_TOKEN` secret, and the
    Mac's address as `HANGAR_URL`.
+   An image declared with `--follow` takes any upload under its app's build name, so a job that
+   runs a pull request's code should get a token limited to a name prefix instead:
+   `hangar connect ci pr-` uploads only builds named `pr-...`. Keep the full token for jobs on
+   the main branch, for example in a GitHub environment that only `main` can deploy to.
 2. Build a Release simulator app, so the JavaScript is in the app and no Metro is needed. Any
    macOS runner, EAS or Bazel can build it; the example below builds on the runner.
 

@@ -59,7 +59,7 @@ test('a signed-in image sends its flow and secrets to hosts, and the API returns
     const messages: BrokerMessage[] = [];
     const handlers = broker.attach({ send: (m) => messages.push(m), close: () => {} });
     handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5' }], devices: [], leases: [] });
-    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id, scopes: ['operator', 'install:upload'] });
     const qa = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'qa', 'member').id });
     broker.db.insertBuild('abc123', 'App.app', join(dir, 'nothing'), 1);
     const call = async (token: string, method: string, path: string, body?: unknown): Promise<{ status: number; text: string }> => {

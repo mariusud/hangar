@@ -125,7 +125,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     joinToken: () => mintHostToken(db),
     adminToken: (label) => {
       const admin = db.accounts().find((a) => a.role === 'operator') ?? auth.createAccount(db, 'admin', 'operator');
-      return auth.mintToken(db, 'member', { accountId: admin.id, label });
+      return auth.mintToken(db, 'member', { accountId: admin.id, label, scopes: ['operator', 'install:upload'] });
     },
     welcomeLink: () => {
       const admin = db.accounts().find((a) => a.role === 'operator') ?? auth.createAccount(db, 'admin', 'operator');

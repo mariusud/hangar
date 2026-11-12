@@ -57,7 +57,7 @@ test('refreshing an image sends hosts a new image id and shows its builds and st
       handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers, devices: [], leases: [] });
     };
     hello([{ model: 'iPhone 17', os: '26.5' }]);
-    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id, scopes: ['operator', 'install:upload'] });
     const qa = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'qa', 'member').id });
     broker.db.insertBuild('a'.repeat(64), 'App.app', join(dir, 'nothing'), 1);
     broker.db.insertBuild('b'.repeat(64), 'App.app', join(dir, 'nothing'), 1);

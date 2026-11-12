@@ -206,6 +206,10 @@ export class Db {
     this.sql = new DatabaseSync(path);
     this.sql.exec('pragma journal_mode = wal; pragma busy_timeout = 5000;');
     this.sql.exec(SCHEMA);
+    // Tokens once took their account's role. The operator's own CLI tokens keep it; every other token becomes a member's.
+    this.sql.exec(`update tokens set scopes = trim(scopes || ' operator install:upload')
+      where kind = 'member' and (label like 'hangar up on %' or label like 'CLI on %') and ' ' || scopes || ' ' not like '% operator %'
+      and account_id in (select id from accounts where role = 'operator')`);
   }
 
 

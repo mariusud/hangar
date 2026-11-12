@@ -48,12 +48,18 @@ export function mintMemberToken(db: Db, p: auth.Principal, b: TokenRequest, book
   return { ...minted, priority };
 }
 
+// operator, install:upload, or install:upload:<prefix> for build names that start with the prefix.
+const TOKEN_SCOPE = /^(operator|install:upload(:[\w.-]+)?)$/;
+
 function mintPlainToken(db: Db, p: auth.Principal, b: TokenRequest): { token: string; limits: TokenLimits } {
-  const scopes = Array.isArray(b.scopes) ? b.scopes.filter((s) => s === 'install:upload') : [];
+  const scopes = Array.isArray(b.scopes) ? b.scopes.filter((s): s is string => typeof s === 'string' && TOKEN_SCOPE.test(s)) : [];
   if (scopes.length && p.role !== 'operator') {
-    throw new ApiError(403, 'FORBIDDEN', 'Only operators can make tokens that upload apps.');
+    throw new ApiError(403, 'FORBIDDEN', 'Only operators can make tokens that upload apps or act as an operator.');
   }
   const agent = b.agent === true;
+  if (agent && scopes.includes('operator')) {
+    throw new ApiError(400, 'BAD_SCOPE', 'An agent token cannot act as an operator.', 'Leave out the operator scope; agents lease and drive devices as members.');
+  }
   const ask: Ask = { idleMs: seconds(b.idleSeconds, 'idleSeconds'), maxMs: seconds(b.maxSeconds, 'maxSeconds'), graceMs: seconds(b.graceSeconds, 'graceSeconds') };
   const limits = tokenLimits(ask, capFor(roleOf(p.role, agent), overrides(db)), agent);
   const token = auth.mintToken(db, 'member', { accountId: p.accountId, label: typeof b.label === 'string' ? b.label : null, scopes });

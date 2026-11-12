@@ -7,10 +7,11 @@ import { json, me, query, route } from './util.ts';
 
 route('POST', '/v1/builds', async (req, res, ctx) => {
   const p = me(req, ctx);
-  if (!p.scopes.includes('install:upload')) {
-    throw new ApiError(403, 'UPLOAD_NOT_ALLOWED', 'Uploading a build needs the install:upload permission.');
+  const name = query(req).get('name') ?? 'upload';
+  if (!auth.canUpload(p, name)) {
+    throw new ApiError(403, 'UPLOAD_NOT_ALLOWED', `This token cannot upload a build named ${name}.`, 'Uploading needs the install:upload permission, or install:upload:<prefix> for names that start with the prefix.');
   }
-  const build = await saveUpload(req, ctx, query(req).get('name') ?? 'upload');
+  const build = await saveUpload(req, ctx, name);
   // Images declared with follow take this build in place of their app with the same name.
   const images = followUpload(ctx.db, build);
   for (const name of images) {

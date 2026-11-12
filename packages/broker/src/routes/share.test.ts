@@ -25,7 +25,7 @@ test('someone without an account opens a shared recording, and can do nothing el
     const member = (name: string): string => auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, name, 'member').id });
     const alice = member('alice');
     const admin = auth.createAccount(broker.db, 'ops', 'operator');
-    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id, scopes: ['operator'] });
     await fetch(`${broker.url}/v1/teams`, { method: 'POST', headers: { authorization: `Bearer ${op}`, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Other' }) });
     const outsider = member('mallory');
     await fetch(`${broker.url}/v1/people/mallory/team`, { method: 'PUT', headers: { authorization: `Bearer ${op}`, 'content-type': 'application/json' }, body: JSON.stringify({ team: 'other' }) });

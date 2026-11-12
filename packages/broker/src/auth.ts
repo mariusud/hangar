@@ -110,9 +110,10 @@ export function authenticate(
       return null;
     }
     const account = db.getAccount(token.accountId);
-    const scopes = account?.role === 'operator' ? ['install:upload', ...token.scopes] : token.scopes;
+    // A token acts as an operator only when it was made for that, so an agent's or CI's token stays a member's.
+    const role = account?.role === 'operator' && token.scopes.includes('operator') ? 'operator' : 'member';
     const limits = db.tokenLimits(token.hash) ?? { agent: false, idleMs: null, maxMs: null, graceMs: null };
-    return account ? { accountId: account.id, name: account.name, role: account.role, scopes, token: { hash: token.hash, ...limits } } : null;
+    return account ? { accountId: account.id, name: account.name, role, scopes: token.scopes, token: { hash: token.hash, ...limits } } : null;
   }
   const session = readCookie(headers.cookie, SESSION_COOKIE);
   if (session) {
@@ -123,4 +124,9 @@ export function authenticate(
     return account ? { accountId: account.id, name: account.name, role: account.role, scopes } : null;
   }
   return null;
+}
+
+// install:upload allows any build name; install:upload:<prefix> only names that start with the prefix.
+export function canUpload(p: Principal, name: string): boolean {
+  return p.scopes.some((s) => s === 'install:upload' || (s.startsWith('install:upload:') && name.startsWith(s.slice('install:upload:'.length))));
 }

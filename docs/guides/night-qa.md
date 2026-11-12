@@ -71,8 +71,8 @@ booking token go before agent leases from it. The token is an agent token, so it
 30 minutes without use and 8 hours at most, under the operator's caps (see
 [How long a lease lasts](agents.md#how-long-a-lease-lasts)).
 
-A booking token uploads builds only when an operator made it. For a member's token, upload the
-app first with an operator's token or put it in the booking's image.
+A booking token is an agent token and does not upload builds. Upload the app first with a CI
+token from `hangar connect ci`, or put it in the booking's image.
 
 ## Priority and preemption
 

@@ -461,7 +461,7 @@ test('a team at its quota waits for a free device until the quota is raised', as
   try {
     fakeAgent(broker);
     const admin = auth.createAccount(broker.db, 'ops', 'operator');
-    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id, scopes: ['operator', 'install:upload'] });
     const qa = token('tester');
     const team = await call(broker, op, 'POST', '/v1/teams', { name: 'QA', quota: 0 });
     assert.equal(team.status, 201);
@@ -487,7 +487,7 @@ test('a device image goes to every host, and only a request for it gets its devi
   try {
     const { messages, handlers } = fakeAgent(broker);
     const admin = auth.createAccount(broker.db, 'ops', 'operator');
-    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id, scopes: ['operator', 'install:upload'] });
     const qa = token('tester');
     broker.db.insertBuild('abc123', 'App.app', join(dir, 'nothing'), 1);
 
@@ -532,7 +532,7 @@ test('runs and recordings are visible to their team and operators only', async (
   try {
     fakeAgent(broker);
     const admin = auth.createAccount(broker.db, 'ops', 'operator');
-    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id, scopes: ['operator', 'install:upload'] });
     const qa = token('tester');
     const other = token('someone');
     await call(broker, op, 'POST', '/v1/teams', { name: 'QA' });
@@ -569,7 +569,7 @@ test('the fleet shows how each lease was taken and what its holder did; watching
   try {
     fakeAgent(broker);
     const admin = auth.createAccount(broker.db, 'ops', 'operator');
-    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: admin.id, scopes: ['operator', 'install:upload'] });
     const qa = token('tester');
     const lease = (await call(broker, qa, 'POST', '/v1/leases?wait=5', { via: 'checking the login flow' })).json;
     await call(broker, qa, 'POST', `/v1/leases/${lease.id}/actions`, { actions: [{ type: 'tap', element: { label: 'Sign in' } }] });

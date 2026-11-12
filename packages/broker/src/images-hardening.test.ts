@@ -55,7 +55,7 @@ test('plaintext secrets are encrypted when the broker starts, and hosts still ge
     assert.deepEqual(broker.db.imageSecrets(), [{ name: 'USER_PASSWORD', updatedAt: 1000 }], 'migrating keeps the time it was set');
 
     const call = caller(broker);
-    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id, scopes: ['operator', 'install:upload'] });
     broker.db.insertBuild('a'.repeat(64), 'App.app', join(dir, 'nothing'), 1);
     assert.equal((await call(op, 'PUT', '/v1/image-secrets/USER_EMAIL', { value: 'qa@example.com' })).status, 204);
     assert.ok(!(broker.db.imageSecretValues(['USER_EMAIL']).USER_EMAIL ?? '').includes('qa@example.com'), 'new values are stored encrypted');
@@ -89,7 +89,7 @@ test('an image declared with follow takes a new upload of its app, and other ima
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const call = caller(broker);
-    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id, scopes: ['operator', 'install:upload'] });
     const messages: BrokerMessage[] = [];
     broker.attach({ send: (m) => messages.push(m), close: () => {} }).message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5' }], devices: [], leases: [] });
     const upload = async (name: string, body: string): Promise<{ sha256: string; images: string[] }> => {
@@ -153,7 +153,7 @@ test('a failed golden build is shown as failed and new leases on it get IMAGE_FA
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const call = caller(broker);
-    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id });
+    const op = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'ops', 'operator').id, scopes: ['operator', 'install:upload'] });
     const qa = auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, 'qa', 'member').id });
     broker.db.insertBuild('a'.repeat(64), 'App.app', join(dir, 'nothing'), 1);
     const messages: BrokerMessage[] = [];

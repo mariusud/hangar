@@ -11,6 +11,7 @@ export const CLIENT_HELP = `Client
   hangar login <url>                       sign in from this computer (opens the browser)
   hangar connect claude | cursor | codex | ci
                                            give an agent or a CI job its own token, ready to use
+  hangar connect ci <prefix>               a CI token that uploads only builds whose name starts with <prefix>
   hangar book <name> --devices N --from HH:MM --to HH:MM --days mon-thu [--image X] [--team T]
                                            hold devices for your team on those days and hours,
                                            in the broker's time zone
@@ -108,7 +109,7 @@ async function currentLease(client: Hangar, explicit: string | undefined): Promi
   );
 }
 
-export async function connect(target: string | undefined): Promise<void> {
+export async function connect(target: string | undefined, prefix?: string): Promise<void> {
   const targets = ['claude', 'cursor', 'codex', 'ci'];
   if (!target) {
     throw new HangarError(0, 'USAGE', `Usage: hangar connect ${targets.join(' | ')} | <booking>`);
@@ -122,7 +123,7 @@ export async function connect(target: string | undefined): Promise<void> {
   const forAgent = target !== 'ci';
   const { token, limits } = await client.json<{ token: string; limits?: TokenLimits }>('POST', '/v1/tokens', {
     label,
-    ...(forAgent ? { agent: true, idleSeconds: AGENT_IDLE_SECONDS, maxSeconds: AGENT_MAX_SECONDS } : { scopes: ['install:upload'], priority: 'ci' }),
+    ...(forAgent ? { agent: true, idleSeconds: AGENT_IDLE_SECONDS, maxSeconds: AGENT_MAX_SECONDS } : { scopes: [prefix ? `install:upload:${prefix}` : 'install:upload'], priority: 'ci' }),
   });
   const mcp = `${client.url}/mcp`;
   if (forAgent && limits) {
@@ -280,7 +281,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       await login(args[0]);
       return true;
     case 'connect':
-      await connect(args[0]);
+      await connect(args[0], args[1]);
       return true;
     case 'book':
       await book(args);

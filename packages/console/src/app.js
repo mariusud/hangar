@@ -657,7 +657,7 @@ function cliLoginView() {
       h('p', {}, `The hangar command on ${computer} wants to act as ${me.name}. Only approve this if you just ran \`hangar login\`.`),
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: async () => {
-          const t = await api('POST', '/v1/tokens', { label: `CLI on ${computer}` });
+          const t = await api('POST', '/v1/tokens', { label: `CLI on ${computer}`, ...(me.role === 'operator' ? { scopes: ['operator', 'install:upload'] } : {}) });
           callback.searchParams.set('token', t.token);
           location.href = callback.toString();
         } }, 'Approve'),
