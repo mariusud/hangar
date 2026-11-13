@@ -9,3 +9,9 @@ test('action points must be fractions of the screen', () => {
     assert.throws(() => onScreen(p), /POINT_OFF_SCREEN|off the screen/);
   }
 });
+
+test('a point that is not [x, y] says how to write one', () => {
+  for (const p of [{ x: 0.5, y: 0.8 }, [0.5], '0.5,0.8', null]) {
+    assert.throws(() => onScreen(p), { code: 'BAD_POINT' });
+  }
+});

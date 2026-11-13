@@ -48,8 +48,12 @@ type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> 
 
 type Recording = { dir: string; uploads: { video: string; log: string; screenshot: string }; log: sim.AppLog; finished: Promise<void> | null };
 
-export function onScreen(p: [number, number]): void {
-  if (!p.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
+export function onScreen(p: unknown): asserts p is [number, number] {
+  // A point arrives as JSON from a client, so an object such as {x, y} gets a clear answer too.
+  if (!Array.isArray(p) || p.length !== 2) {
+    throw new OpError('BAD_POINT', `A point is [x, y] as fractions of the screen, such as [0.5, 0.8], not ${JSON.stringify(p)}.`);
+  }
+  if (!p.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1)) {
     throw new OpError('POINT_OFF_SCREEN', `The point [${p.join(', ')}] is off the screen. Points are fractions of the screen from 0 to 1, such as [0.5, 0.8].`);
   }
 }
