@@ -110,6 +110,16 @@ after `simctl erase`, so the wipe is delete and re-clone. Running without a logg
 still untested. macOS VMs lose the hardware video encoder and are capped at two per Mac, so
 sandboxing starts with a separate macOS user, not a VM.
 
+A week on the office Mac mini, with a cloud service leasing over Tailscale with a member token,
+found four problems, now fixed: points sent as `{x, y}` crashed the agent (the broker now accepts
+both forms), a queued lease outlived the `?wait` request that made it (it now ends when that
+client disconnects), an image lease queued behind an idle plain device (a full host now wipes an
+idle warm device of another class when the broker says a lease waits for it), and signing in to
+an image needed a scripted flow (`hangar image capture` saves a device set up by hand). The
+console's viewer is now `/screen.js` with a `<hangar-screen>` element, and `proxyStream` passes
+a lease's stream through another server with the token added there. The pool swap and capture are
+tested with fake hosts; capture has not yet run on the mini.
+
 ## Hangar 2 (decision 0010)
 
 Done:

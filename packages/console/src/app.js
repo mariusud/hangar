@@ -1,3 +1,4 @@
+import { mountScreen, streamUrl } from './screen.js';
 import { LANGUAGES, LIMIT_FIELDS, bookingBody, canRerun, canRotate, capSeconds, capValue, daysText, deviceRows, duration, endingText, flowRecordings, heldText, isLanguageTag, leaseClass, limitsText, linkPath, logTail, mcpSettings, openAgainError, openAgainTarget, parseEnv, percent, viewExpiry, windowStatus, withView } from './lib.js';
 
 const app = document.getElementById('app');
@@ -231,68 +232,6 @@ const imageLabel = (i) => {
   return extras.length ? `${i.name} (${extras.join(', ')})` : i.name;
 };
 
-function h264View(canvas, askKeyframe) {
-  const ctx = canvas.getContext('2d');
-  const received = new Map();
-  const stats = (window.hangarStats = []);
-  let decoder = null;
-  let config = '';
-  const make = () =>
-    new VideoDecoder({
-      output: (frame) => {
-        if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-          canvas.width = frame.displayWidth;
-          canvas.height = frame.displayHeight;
-        }
-        ctx.drawImage(frame, 0, 0);
-        const capture = frame.timestamp / 1000;
-        stats.push({ capture, received: received.get(frame.timestamp), decoded: performance.timeOrigin + performance.now() });
-        received.delete(frame.timestamp);
-        if (stats.length > 2000) stats.splice(0, 1000);
-        frame.close();
-      },
-      error: () => {
-        decoder = null;
-        config = '';
-        askKeyframe();
-      },
-    });
-  return {
-    push(record, receivedAt) {
-      const view = new DataView(record.buffer, record.byteOffset, record.byteLength);
-      const key = (record[0] & 1) === 1;
-      const timestamp = Math.round(view.getFloat64(1) * 1000);
-      const data = record.subarray(13);
-      if (key) {
-        const codec = avcCodec(data);
-        const next = `${codec}/${view.getUint16(9)}x${view.getUint16(11)}`;
-        if (codec && next !== config) {
-          if (decoder?.state !== 'closed') decoder?.close();
-          decoder = make();
-          decoder.configure({ codec, optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' });
-          config = next;
-        }
-      }
-      if (!decoder || decoder.state !== 'configured') return;
-      received.set(timestamp, receivedAt);
-      decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp, data }));
-    },
-    close() {
-      if (decoder && decoder.state !== 'closed') decoder.close();
-    },
-  };
-}
-
-function avcCodec(data) {
-  for (let i = 0; i + 7 < data.length; i++) {
-    if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1 && (data[i + 3] & 0x1f) === 7) {
-      const hex = (b) => b.toString(16).padStart(2, '0');
-      return `avc1.${hex(data[i + 4])}${hex(data[i + 5])}${hex(data[i + 6])}`;
-    }
-  }
-  return null;
-}
-
 async function leaseView(id) {
   let lease = await api('GET', `/v1/leases/${id}`).catch((x) => ({ error: x.message }));
   if (lease.error) {
@@ -308,85 +247,15 @@ async function leaseView(id) {
     return;
   }
 
-  const img = h('img', { alt: `Live screen of ${lease.device.model}` });
-  const canvas = h('canvas', { role: 'img', 'aria-label': `Live screen of ${lease.device.model}`, hidden: true });
   const status = h('div', { class: 'hint' }, 'Connecting…');
-  const screen = h('div', { class: 'screen', tabindex: '0', title: 'Click to tap, drag to swipe, type to enter text' }, img, canvas, status);
+  const screen = h('div', { class: 'screen', tabindex: '0', title: 'Click to tap, drag to swipe, type to enter text', 'aria-label': `Live screen of ${lease.device.model}` }, status);
   const out = h('p', { class: 'muted' });
   const tree = h('div', { class: 'tree' });
-
-  // H.264 needs WebCodecs, which browsers only offer on HTTPS and localhost. Elsewhere: JPEG.
-  const codec = window.isSecureContext && 'VideoDecoder' in window ? 'h264' : 'jpeg';
-  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/leases/${id}/stream?codec=${codec}`);
-  ws.binaryType = 'arraybuffer';
-  const video = h264View(canvas, () => send({ type: 'keyframe' }));
-  let lastUrl = null;
-  let frames = 0;
-  ws.onmessage = (e) => {
-    if (typeof e.data === 'string') {
-      const m = JSON.parse(e.data);
-      if (m.type === 'error') out.textContent = m.message;
-      return;
-    }
-    const bytes = new Uint8Array(e.data);
-    if (bytes[0] === 2) {
-      canvas.hidden = false;
-      img.hidden = true;
-      video.push(bytes.subarray(1), performance.timeOrigin + performance.now());
-    } else {
-      canvas.hidden = true;
-      img.hidden = false;
-      const url = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: 'image/jpeg' }));
-      img.src = url;
-      if (lastUrl) URL.revokeObjectURL(lastUrl);
-      lastUrl = url;
-    }
-    if (++frames === 1) status.textContent = 'Click to tap, drag to swipe, type to enter text';
-  };
-  ws.onclose = (e) => {
-    video.close();
-    status.textContent = e.code === 4000 ? 'The lease ended.' : 'Disconnected. Reload to reconnect.';
-  };
-  const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
-
-  let down = null;
-  const norm = (e) => {
-    const r = screen.getBoundingClientRect();
-    return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
-  };
-  screen.addEventListener('pointerdown', (e) => {
-    screen.focus();
-    screen.setPointerCapture(e.pointerId);
-    down = { p: norm(e), t: performance.now() };
+  const ws = mountScreen(screen, streamUrl(location.origin, id), {
+    onStatus: (text) => (status.textContent = text),
+    onError: (text) => (out.textContent = text),
   });
-  screen.addEventListener('pointerup', (e) => {
-    if (!down) return;
-    const p = norm(e);
-    const moved = Math.hypot(p[0] - down.p[0], p[1] - down.p[1]);
-    if (moved < 0.02) send({ type: 'tap', point: p });
-    else send({ type: 'swipe', from: down.p, to: p, durationMs: Math.max(100, Math.round(performance.now() - down.t)) });
-    down = null;
-  });
-  let typed = '';
-  let typeTimer = null;
-  const flush = () => {
-    if (typed) send({ type: 'type', text: typed });
-    typed = '';
-  };
-  screen.addEventListener('keydown', (e) => {
-    const keys = { Enter: 'return', Backspace: 'backspace', Tab: 'tab', Escape: 'escape', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
-    if (e.metaKey || e.ctrlKey) return;
-    if (keys[e.key]) {
-      e.preventDefault();
-      flush();
-      send({ type: 'key', key: keys[e.key] });
-    } else if (e.key.length === 1) {
-      e.preventDefault();
-      typed += e.key;
-      clearTimeout(typeTimer);
-      typeTimer = setTimeout(flush, 150);
-    }
-  });
+  const send = ws.send;
 
   const ends = h('p', { class: 'muted', style: 'margin-top:0' });
   const showEnd = (l) => {

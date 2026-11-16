@@ -36,6 +36,7 @@ export const CLIENT_HELP = `Client
                                            declare an image (operators); --app is a path or build;
                                            the sign-in flow runs once per Mac, reading each --env
                                            name from the broker's secrets or the Mac's environment
+  hangar image capture <name> <lease-id>   save a leased device, set up by hand, as an image
   hangar image secret <NAME> [--rm]        store a value for a sign-in flow, read from stdin
   hangar image rm <name>
   hangar screenshot [-o file.png]
@@ -360,8 +361,8 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
     }
     case 'image': {
       const [sub, name, ...rest] = args;
-      if ((sub !== 'set' && sub !== 'rm' && sub !== 'secret' && sub !== 'refresh') || !name) {
-        throw new HangarError(0, 'USAGE', 'Usage: hangar image set <name> [--app A]... [--follow] [--locale nb_NO] [--appearance dark] [--grant photos,location] [--sign-in flow.yaml --env NAME...], hangar image refresh <name> --app A..., hangar image secret <NAME> [--rm], or hangar image rm <name>');
+      if ((sub !== 'set' && sub !== 'rm' && sub !== 'secret' && sub !== 'refresh' && sub !== 'capture') || !name) {
+        throw new HangarError(0, 'USAGE', 'Usage: hangar image set <name> [--app A]... [--follow] [--locale nb_NO] [--appearance dark] [--grant photos,location] [--sign-in flow.yaml --env NAME...], hangar image refresh <name> --app A..., hangar image capture <name> <lease-id>, hangar image secret <NAME> [--rm], or hangar image rm <name>');
       }
       const client = await Hangar.fromEnv();
       if (sub === 'secret') {
@@ -381,6 +382,15 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         }
         await client.request('PUT', path, { value });
         console.log(`Stored ${name}. Images whose sign-in flow reads it get it the next time they build.`);
+        return true;
+      }
+      if (sub === 'capture') {
+        const [leaseId] = rest;
+        if (!leaseId) {
+          throw new HangarError(0, 'USAGE', 'Usage: hangar image capture <name> <lease-id>. Lease a device, set it up by hand, then capture it.');
+        }
+        await client.json('POST', `/v1/images/${encodeURIComponent(name)}/capture`, { leaseId });
+        console.log(`Saved the device as ${name} and ended the lease. Lease it with --image ${name} on the same Mac.`);
         return true;
       }
       if (sub === 'refresh') {

@@ -49,13 +49,28 @@ type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> 
 type Recording = { dir: string; uploads: { video: string; log: string; screenshot: string }; log: sim.AppLog; finished: Promise<void> | null };
 
 export function onScreen(p: unknown): asserts p is [number, number] {
-  // A point arrives as JSON from a client, so an object such as {x, y} gets a clear answer too.
   if (!Array.isArray(p) || p.length !== 2) {
     throw new OpError('BAD_POINT', `A point is [x, y] as fractions of the screen, such as [0.5, 0.8], not ${JSON.stringify(p)}.`);
   }
   if (!p.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1)) {
     throw new OpError('POINT_OFF_SCREEN', `The point [${p.join(', ')}] is off the screen. Points are fractions of the screen from 0 to 1, such as [0.5, 0.8].`);
   }
+}
+
+export function spareDevice(
+  devices: { deviceId: string; state: string; image?: string | undefined; leaseId: string | null }[],
+  wanted: (string | undefined)[],
+  maxDevices: number,
+  canBuild: (image: string | undefined) => boolean,
+): string | null {
+  if (devices.length < maxDevices) {
+    return null;
+  }
+  const missing = wanted.filter((image) => canBuild(image) && !devices.some((d) => d.image === image && d.state !== 'busy'));
+  if (!missing.length) {
+    return null;
+  }
+  return devices.find((d) => d.state === 'ready' && !d.leaseId && !wanted.includes(d.image))?.deviceId ?? null;
 }
 
 export class OpError extends Error {
@@ -82,6 +97,8 @@ export class Agent {
   private buildingImage: string | null = null;
   private filling = false;
   private streams = new Map<string, Stream>();
+  private wanted: (string | undefined)[] = [];
+  private kept = new Set<string>();
   private stopped = false;
   private tunnels: Tunnels;
   private recordings = new Map<string, Recording>();
@@ -212,7 +229,7 @@ export class Agent {
     const owned = await sim.listOwned();
     const names = new Set([...this.images.values()].map((s) => sim.goldenImageName(s.image.id, base.model, base.os)));
     for (const d of owned) {
-      if (d.name.startsWith(`${sim.NAME_PREFIX}golden-image-`) && !names.has(d.name) && !this.retiring.includes(d.udid)) {
+      if (d.name.startsWith(`${sim.NAME_PREFIX}golden-image-`) && !names.has(d.name) && !this.retiring.includes(d.udid) && !this.kept.has(d.udid)) {
         await sim.remove(d.udid).catch(() => {});
       }
     }
@@ -224,7 +241,14 @@ export class Agent {
       const existing = owned.find((d) => d.name === name);
       if (existing) {
         slot.golden = existing.udid;
+        this.kept.delete(existing.udid);
         this.retiring = this.retiring.filter((u) => u !== existing.udid);
+        continue;
+      }
+      if (slot.image.captured) {
+        slot.failed = true;
+        slot.message = 'This image was captured from a device on another Mac. Only that Mac can hand it out.';
+        this.sendImageStatus(slot);
         continue;
       }
       this.log(`Building image ${slot.image.name}.`);
@@ -308,6 +332,7 @@ export class Agent {
             targets.push({ image: slot.image.name, golden: { ...this.golden, udid: slot.golden } });
           }
         }
+        targets.sort((a, b) => Number(this.wanted.includes(b.image)) - Number(this.wanted.includes(a.image)));
         const target = targets.find((t) => all.filter((d) => d.state === 'ready' && d.image === t.image).length < this.warm);
         if (!target) {
           break;
@@ -357,6 +382,9 @@ export class Agent {
       this.publish();
       this.opts.send({ type: 'response', id: m.id, ok: true });
       void this.fill();
+    } else if (m.type === 'pool') {
+      this.wanted = m.want.map((w) => w.image);
+      void this.makeRoom();
     } else if (m.type === 'images') {
       const images = m.images;
       this.imageWork = this.imageWork.then(() => this.setImages(images)).catch((err) => this.log(`Images: ${err instanceof Error ? err.message : err}`));
@@ -562,6 +590,20 @@ export class Agent {
     }
   }
 
+  private async makeRoom(): Promise<void> {
+    if (this.filling || this.stopped) {
+      return;
+    }
+    const spare = spareDevice([...this.devices.values()], this.wanted, this.maxDevices, (image) => image === undefined || Boolean(this.images.get(image)?.golden));
+    const d = spare ? this.devices.get(spare) : undefined;
+    if (!d) {
+      void this.fill();
+      return;
+    }
+    this.log(`Replacing an idle device to serve a waiting lease`);
+    await this.wipe(d);
+  }
+
   private async wipe(d: Device): Promise<void> {
     d.leaseId = null;
     d.state = 'wiping';
@@ -676,6 +718,25 @@ export class Agent {
         }
         await this.finishRecording(leaseId);
         return {};
+      case 'capture': {
+        if (!this.golden) {
+          throw new OpError('NO_GOLDEN', 'This Mac has no base device yet.');
+        }
+        this.tunnels.stop(leaseId);
+        this.tools.close(leaseId);
+        await this.endStreams(leaseId);
+        if (this.recordings.has(leaseId)) {
+          await this.finishRecording(leaseId);
+        }
+        this.devices.delete(udid);
+        this.cloneOf.delete(udid);
+        this.kept.add(udid);
+        this.publish();
+        await sim.shutdown(udid);
+        await sim.renameDevice(udid, sim.goldenImageName(body.imageId, this.golden.model, this.golden.os));
+        this.log(`Saved the device of lease ${leaseId} as an image.`);
+        return {};
+      }
       case 'appLog':
         return { result: await this.tools.appLog(leaseId, body, (bundleId) => sim.appLogSource(udid, bundleId)) };
       case 'jsEvaluate':

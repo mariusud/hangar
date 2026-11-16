@@ -1,9 +1,12 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { HangarError } from './client/index.ts';
 import { CLIENT_HELP, clientCommand } from './client.ts';
 import { RUN_HELP, runAndroid, runEspressoCommand, runIos, runMaestroCommand, runXcuitestCommand } from './run.ts';
-import { installService, serviceUpArgs, uninstallService } from './service.ts';
+import { daemonPath, installService, serviceUpArgs, uninstallService } from './service.ts';
 import { exportData, importData } from './backup.ts';
 import { brokerOnly, doctor, joinBroker, joinToken, printChecks, up } from './up.ts';
 
@@ -19,6 +22,7 @@ Server
                                                  nobody logged in (a LaunchDaemon)
   hangar up --uninstall [--system]               remove the service
   hangar doctor                                  check this Mac
+  hangar --version                               print the version
 
 More Macs
   hangar broker [--port 7420] [--url https://...] [--host 0.0.0.0]
@@ -35,8 +39,15 @@ ${RUN_HELP}
 ${CLIENT_HELP}`;
 
 async function main(): Promise<void> {
+  process.env.PATH = [...new Set([...(process.env.PATH ?? '').split(':').filter(Boolean), ...daemonPath(homedir(), dirname(process.execPath)).split(':')])].join(':');
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
+    case '--version':
+    case 'version': {
+      const pkg: unknown = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+      console.log(typeof pkg === 'object' && pkg !== null && 'version' in pkg ? String(pkg.version) : 'unknown');
+      return;
+    }
     case 'up': {
       const { values } = parseArgs({
         args: rest,

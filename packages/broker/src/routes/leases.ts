@@ -20,7 +20,17 @@ route('POST', '/v1/leases', async (req, res, ctx) => {
   }
   const wait = Number(query(req).get('wait') ?? 0);
   if (wait > 0) {
-    json(res, 201, ctx.leases.view(await waitFor(ctx, lease.id, Math.min(wait, 600) * 1000)));
+    const gone = (): void => {
+      if (!res.writableEnded && ctx.db.getLease(lease.id)?.state === 'queued') {
+        ctx.leases.release(p, lease.id);
+      }
+    };
+    res.on('close', gone);
+    const found = await waitFor(ctx, lease.id, Math.min(wait, 600) * 1000);
+    res.off('close', gone);
+    if (!res.destroyed) {
+      json(res, 201, ctx.leases.view(found));
+    }
     return;
   }
   json(res, 201, ctx.leases.view(lease));

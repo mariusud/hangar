@@ -20,6 +20,7 @@ export type DeviceImage = {
   appearance?: 'light' | 'dark';
   apps: { url: string; sha256: string }[];
   setup?: ImageSetup;
+  captured?: boolean;
 };
 
 export type DeviceInfo = {
@@ -60,6 +61,22 @@ export type ElementSelector = {
   role?: string;
   exact?: boolean;
 };
+
+export function toPoint(p: Point | { x: number; y: number }): Point {
+  return Array.isArray(p) ? p : [p.x, p.y];
+}
+
+export function normalizeActions(actions: Action[]): Action[] {
+  return actions.map((a) => {
+    if ('point' in a) {
+      return { ...a, point: toPoint(a.point) };
+    }
+    if (a.type === 'swipe') {
+      return { ...a, from: toPoint(a.from), to: toPoint(a.to) };
+    }
+    return a;
+  });
+}
 
 export type Action =
   | { type: 'tap'; point: Point }
@@ -104,6 +121,7 @@ export type Op =
   | { op: 'espresso'; app: { url: string; sha256: string }; testApp: { url: string; sha256: string }; tests: string[] }
   | { op: 'recordStart'; uploads: { video: string; log: string; screenshot: string } }
   | { op: 'recordStop' }
+  | { op: 'capture'; imageId: string }
   | DeviceToolOp;
 
 export type MaestroResult = { passed: boolean; junit: string; log: string; durationMs: number };
@@ -123,7 +141,7 @@ export type ActionResult = { ok: true } | { ok: false; error: { code: string; me
 export type BrokerMessage =
   | { type: 'welcome'; hostId: string }
   | { type: 'incompatible'; message: string }
-  | { type: 'pool'; targets: { model: string; os: string; count: number }[] }
+  | { type: 'pool'; want: { image?: string }[] }
   | { type: 'images'; images: DeviceImage[] }
   | { type: 'lease.prepare'; id: number; leaseId: string; deviceId: string; deadline: number }
   | { type: 'lease.end'; leaseId: string }

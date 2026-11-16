@@ -1,0 +1,11 @@
+{
+  "name": "hangar",
+  "owner": { "name": "Hangar" },
+  "plugins": [
+    {
+      "name": "hangar",
+      "source": "./plugins/hangar",
+      "description": "Lease iOS simulators and Android emulators from your own Hangar and drive them over MCP."
+    }
+  ]
+}

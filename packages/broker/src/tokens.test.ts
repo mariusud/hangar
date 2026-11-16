@@ -43,7 +43,7 @@ test("after the upgrade an operator's CLI token is still an operator's, and its 
   const first = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const ops = auth.createAccount(first.db, 'ops', 'operator');
   const cli = auth.mintToken(first.db, 'member', { accountId: ops.id, label: 'CLI on laptop' });
-  const bot = auth.mintToken(first.db, 'member', { accountId: ops.id, label: 'frode' });
+  const bot = auth.mintToken(first.db, 'member', { accountId: ops.id, label: 'support-bot' });
   await first.close();
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {

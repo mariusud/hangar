@@ -23,6 +23,15 @@ claude mcp add --transport http hangar http://studio-mini.local:7420/mcp \
   --header "Authorization: Bearer hgr_member_..."
 ```
 
+Or install the plugin from this repository, which reads the broker and token from the
+environment:
+
+```bash
+export HANGAR_URL=http://studio-mini.local:7420 HANGAR_TOKEN=hgr_member_...
+claude
+/plugin install hangar --marketplace mariusud/hangar
+```
+
 ## Cursor
 
 In `.cursor/mcp.json`:

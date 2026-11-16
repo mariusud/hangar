@@ -1,0 +1,11 @@
+{
+  "name": "hangar",
+  "version": "0.1.0",
+  "description": "Lease iOS simulators and Android emulators from your own Hangar and drive them over MCP. Reads HANGAR_URL and HANGAR_TOKEN.",
+  "author": {
+    "name": "Hangar contributors"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/mariusud/hangar",
+  "repository": "https://github.com/mariusud/hangar"
+}

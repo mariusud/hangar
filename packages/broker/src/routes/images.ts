@@ -3,6 +3,8 @@ import { imageBuilds, imageHosts, imageId, imageSecretList, imageView, isEnvName
 import { ApiError } from '../leases/service.ts';
 import { body, json, me, operator, route } from './util.ts';
 
+const IMAGE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/i;
+
 route('GET', '/v1/images', (req, res, ctx) => {
   me(req, ctx);
   const hosts = [...ctx.hosts.hosts.values()];
@@ -24,6 +26,9 @@ route('POST', '/v1/images/:name/refresh', async (req, res, ctx) => {
   const spec = ctx.db.images().find((i) => i.name.toLowerCase() === name.toLowerCase());
   if (!spec) {
     throw new ApiError(404, 'IMAGE_NOT_FOUND', `No image called ${name}.`, 'Declare it with `hangar image set`.');
+  }
+  if (spec.captured) {
+    throw new ApiError(409, 'CAPTURED_IMAGE', `${spec.name} was captured from a device and has no app to refresh.`, 'Capture it again with `hangar image capture`.');
   }
   const b = await body<{ apps?: unknown }>(req, 64 * 1024);
   if (b.apps !== undefined && !Array.isArray(b.apps)) {
@@ -47,10 +52,30 @@ route('POST', '/v1/images/:name/refresh', async (req, res, ctx) => {
   json(res, 200, { ...imageView(next, setup), builds: imageBuilds(ctx.db, next), changed });
 });
 
+route('POST', '/v1/images/:name/capture', async (req, res, ctx) => {
+  const p = operator(req, ctx);
+  const name = req.params.name ?? '';
+  if (!IMAGE_NAME.test(name)) {
+    throw new ApiError(400, 'BAD_IMAGE_NAME', 'Image names are letters, digits, dots, dashes and underscores, up to 63 characters.');
+  }
+  const b = await body<{ leaseId?: unknown }>(req, 4 * 1024);
+  if (typeof b.leaseId !== 'string' || !b.leaseId) {
+    throw new ApiError(400, 'NO_LEASE', 'leaseId is the lease whose device becomes the image.');
+  }
+  const spec: ImageSpec = { name, apps: [], captured: `${b.leaseId}:${Date.now()}` };
+  const view = imageView(spec, {});
+  await ctx.leases.capture(p, b.leaseId, view.id);
+  ctx.db.saveImage(spec);
+  saveImageSetup(ctx.db, name, {});
+  ctx.db.audit(`image.capture ${name}`, p.accountId, b.leaseId);
+  ctx.publishImages();
+  json(res, 200, view);
+});
+
 route('PUT', '/v1/images/:name', async (req, res, ctx) => {
   operator(req, ctx);
   const name = req.params.name ?? '';
-  if (!/^[a-z0-9][a-z0-9._-]{0,62}$/i.test(name)) {
+  if (!IMAGE_NAME.test(name)) {
     throw new ApiError(400, 'BAD_IMAGE_NAME', 'Image names are letters, digits, dots, dashes and underscores, up to 63 characters.');
   }
   const b = await body<{ apps?: string[]; locale?: string; appearance?: string; grants?: unknown; signIn?: unknown; follow?: unknown }>(req, MAX_FLOW_BYTES * 2);

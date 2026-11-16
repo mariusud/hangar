@@ -104,6 +104,12 @@ Device images keep simulators ready with your app installed and a locale and app
 the broker's secret store or the Mac's environment. Grants and sign-in are tested with fakes
 only. `hangar image refresh norsk --app ./MyApp.app` builds the image again with a new build
 while leases on the old one keep running; tested with a fake host only.
+`hangar image capture signed-in <lease-id>` saves a leased device that someone set up by hand,
+for sign-ins a script can't do, as an image on that Mac; tested with a fake host only.
+
+A page of your own can show a live device with the `<hangar-screen>` element from `/screen.js`,
+with `proxyStream` on your server adding the token
+([guide](guides/embed-screen.md)).
 
 `hangar run android` builds, installs and runs your app on a leased emulator, connected to Metro
 here.

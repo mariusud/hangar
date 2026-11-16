@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Booking, BookingWindow, DeviceClass, DeviceState, Hold, LeaseEndReason, LeaseEnding, LeaseLimits, Op, Platform, Priority } from '@hangar/protocol';
+import { normalizeActions } from '@hangar/protocol';
 import type { Principal } from '../auth.ts';
 import type { Db, TokenPriorityRow } from '../db.ts';
 import type { Hosts } from '../hosts.ts';
@@ -393,7 +394,8 @@ export class Leases {
     return this.end(this.get(p, id), 'released', p.accountId);
   }
 
-  async op(p: Principal, id: string, body: Op): Promise<{ result?: unknown; binary?: Buffer }> {
+  async op(p: Principal, id: string, sent: Op): Promise<{ result?: unknown; binary?: Buffer }> {
+    const body: Op = sent.op === 'actions' ? { ...sent, actions: normalizeActions(sent.actions) } : sent;
     const found = this.get(p, id);
     const isHolder = found.principalId === p.accountId;
     const lease = isHolder ? wrap(() => m.touch(found, this.now())) : found;
@@ -424,6 +426,15 @@ export class Leases {
       this.events.emit('op', lease.id, body, startedAt, res.result);
     }
     return { result: res.result, ...(res.binary ? { binary: Buffer.from(res.binary, 'base64') } : {}) };
+  }
+
+  async capture(p: Principal, id: string, imageId: string): Promise<m.Lease> {
+    const lease = this.holder(p, id);
+    if (lease.state !== 'active' || !lease.deviceId) {
+      throw new ApiError(409, 'LEASE_NOT_ACTIVE', `Lease ${id} is ${lease.state}.`);
+    }
+    await this.op(p, id, { op: 'capture', imageId });
+    return this.end(this.get(p, id), 'released', p.accountId);
   }
 
   deviceOf(p: Principal, id: string): string {
@@ -461,6 +472,8 @@ export class Leases {
     this.events.emit(lease.id, lease);
     this.events.emit('any', lease);
   }
+
+  private lastWant = '[]';
 
   async tick(): Promise<void> {
     if (this.ticking || this.stopped) {
@@ -535,6 +548,14 @@ export class Leases {
         if (lease) {
           this.prepare({ ...m.assign(lease, a.deviceId, now), windowEndsAt: a.windowEndsAt, preemptedAt: null });
         }
+      }
+      const assigned = new Set(result.assignments.map((a) => a.leaseId));
+      const want = [...new Set(queued.filter((l) => !assigned.has(l.id) && (l.class.platform ?? 'ios-simulator') === 'ios-simulator').map((l) => l.class.image ?? ''))]
+        .map((image) => (image ? { image } : {}));
+      const wantKey = JSON.stringify(want);
+      if (want.length || wantKey !== this.lastWant) {
+        this.lastWant = wantKey;
+        this.hosts.broadcast(() => ({ type: 'pool', want }));
       }
       for (const w of closedWindows(this.openWindows, result.open)) {
         this.db.audit(`booking.window_closed ${w.name}`, null, null);

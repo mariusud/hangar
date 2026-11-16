@@ -91,6 +91,26 @@ A changed secret is used the next time an image that reads it builds. An image t
 built keeps the account it signed in with; it signs in again when the declaration changes, for
 example with `hangar image refresh`, or when you remove it and declare it again.
 
+## Capture a device you set up by hand
+
+When a sign-in needs a code from a phone, a magic link or SSO, set the device up by hand and
+save it:
+
+```sh
+hangar lease --image my-app
+hangar watch                      # sign in on the live screen
+hangar image capture signed-in <lease-id>
+```
+
+The host shuts the device down and keeps it as the golden device of a new image called
+`signed-in`, and the broker ends the lease. Leases with `--image signed-in` get a clone of it,
+signed in, and the clone is wiped after the lease like any other device.
+
+A captured image lives on the Mac that held the lease. Other hosts list it as failed with the
+reason, and `hangar image refresh` refuses it, since it has no app to replace. To update it,
+lease it, change what you need and capture it again under the same name. Capturing replaces any
+image with that name.
+
 ## A new build of the app
 
 ```bash

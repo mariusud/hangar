@@ -173,7 +173,7 @@ create index if not exists nights_by_team on nights(team_id, opened_at);
 
 export const DEFAULT_TEAM = 'default';
 export type Team = { id: string; name: string; quota: number | null };
-export type ImageSpec = { name: string; apps: string[]; locale?: string; appearance?: 'light' | 'dark' };
+export type ImageSpec = { name: string; apps: string[]; locale?: string; appearance?: 'light' | 'dark'; captured?: string };
 
 export type Account = { id: string; name: string; role: 'member' | 'operator'; passwordHash: string | null };
 export type TokenRow = {

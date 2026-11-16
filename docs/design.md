@@ -233,7 +233,9 @@ on the same LAN can join a broker that still runs on the first Mac.
 - One Node 22 process per machine, running as a dedicated non-admin user `hangar`.
 - Connects out to the broker, reconnects with backoff, opens no listening TCP port.
 - Creates, boots, wipes and deletes devices, keeps the warm pool the broker asks for, and reports
-  health, capacity, memory pressure, versions and inventory.
+  health, capacity, memory pressure, versions and inventory. When leases queue, the broker sends
+  each host the classes they wait for, and a full host wipes an idle warm device of another
+  class to make room.
 - Runs test runners (Maestro, `xcodebuild test-without-building`) against leased devices.
 - Keeps its own lease table and refuses any op for a lease it does not hold (section 6).
 - A LaunchDaemon with `UserName=hangar` on macOS, a systemd unit on Linux. `hangar up` and
@@ -271,7 +273,7 @@ session cookie. Errors have one shape: `{ "error": { "code": "LEASE_NOT_ACTIVE",
 
 | Method and path | What it does |
 |---|---|
-| `POST /v1/leases` | Request a lease. Body: `class`, `ttlSeconds`, `maxSeconds`, `labels`, `record`, `idempotencyKey`. `?wait=120` blocks up to 120 s for `active`. |
+| `POST /v1/leases` | Request a lease. Body: `class`, `ttlSeconds`, `maxSeconds`, `labels`, `record`, `idempotencyKey`. `?wait=120` blocks up to 120 s for `active`; a lease still queued when that request's client disconnects ends. |
 | `GET /v1/leases/:id` | State, deadline, queue position, device info (model, OS, screen size, never a host id or UDID). |
 | `GET /v1/leases/:id/events` | Server-sent events: `queued`, `preparing`, `active`, `renewed`, `ended` with a reason. |
 | `POST /v1/leases/:id/renew` | Push the deadline to now plus `ttlSeconds`, capped by `maxSeconds`. |

@@ -129,3 +129,98 @@ test('keepalive and reattach_lease are MCP tools', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a queued lease ends when the client waiting for it leaves', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
+  try {
+    fakeHost(broker);
+    const admin = broker.adminToken('test');
+    const first = await call(broker, admin, 'POST', '/v1/leases?wait=5', { class: {} });
+    assert.equal(first.json.state, 'active');
+    const quit = new AbortController();
+    const asked = fetch(`${broker.url}/v1/leases?wait=30`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${admin}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ class: {}, via: 'test' }),
+      signal: quit.signal,
+    }).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 200));
+    quit.abort();
+    await asked;
+    await new Promise((r) => setTimeout(r, 200));
+    const leases = await call(broker, admin, 'GET', '/v1/leases');
+    const states = Object.values(leases.json).map((l) => (l as { state: string }).state).sort();
+    assert.deepEqual(states, ['active', 'ended']);
+  } finally {
+    await broker.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the broker tells its Macs which class a queued lease waits for', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
+  try {
+    const sent: unknown[] = [];
+    const devices: AgentDevice[] = [{ deviceId: 'dev-1', model: 'iPhone 17', os: '26.5', state: 'ready', platform: 'ios-simulator' }];
+    const handlers = broker.attach({
+      send: (m) => {
+        sent.push(m);
+        queueMicrotask(() => {
+          if (m.type === 'lease.prepare' || m.type === 'op') {
+            handlers.message({ type: 'response', id: m.id, ok: true, result: {} });
+          }
+        });
+      },
+      close: () => {},
+    });
+    handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5', platform: 'ios-simulator' }], devices, leases: [] });
+    const admin = broker.adminToken('test');
+    assert.equal((await call(broker, admin, 'POST', '/v1/leases?wait=5', { class: {} })).json.state, 'active');
+    assert.equal((await call(broker, admin, 'POST', '/v1/leases', { class: {} })).json.state, 'queued');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.ok(sent.some((m) => JSON.stringify(m) === JSON.stringify({ type: 'pool', want: [{}] })));
+  } finally {
+    await broker.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('capturing a lease saves its device as an image and ends the lease', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
+  try {
+    const sent: unknown[] = [];
+    const devices: AgentDevice[] = [{ deviceId: 'dev-1', model: 'iPhone 17', os: '26.5', state: 'ready', platform: 'ios-simulator' }];
+    const handlers = broker.attach({
+      send: (m) => {
+        sent.push(m);
+        queueMicrotask(() => {
+          if (m.type === 'lease.prepare' || m.type === 'op') {
+            handlers.message({ type: 'response', id: m.id, ok: true, result: {} });
+          }
+        });
+      },
+      close: () => {},
+    });
+    handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5', platform: 'ios-simulator' }], devices, leases: [] });
+    const admin = broker.adminToken('test');
+    const lease = await call(broker, admin, 'POST', '/v1/leases?wait=5', { class: {} });
+    assert.equal(lease.json.state, 'active');
+    const captured = await call(broker, admin, 'POST', '/v1/images/signed-in/capture', { leaseId: lease.json.id });
+    assert.equal(captured.status, 200);
+    const op = sent.find((m): m is { type: 'op'; body: { op: string; imageId: string } } => typeof m === 'object' && m !== null && 'type' in m && m.type === 'op');
+    assert.equal(op?.body.op, 'capture');
+    assert.equal(op?.body.imageId, captured.json.id);
+    const after = await call(broker, admin, 'GET', `/v1/leases/${String(lease.json.id)}`);
+    assert.equal(after.json.state, 'ended');
+    const images = sent.filter((m): m is { type: 'images'; images: { name: string; captured?: boolean }[] } => typeof m === 'object' && m !== null && 'type' in m && m.type === 'images').at(-1);
+    assert.deepEqual(images?.images.map((i) => [i.name, i.captured]), [['signed-in', true]]);
+    const refresh = await call(broker, admin, 'POST', '/v1/images/signed-in/refresh', { apps: [] });
+    assert.equal(refresh.json.error?.code, 'CAPTURED_IMAGE');
+  } finally {
+    await broker.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

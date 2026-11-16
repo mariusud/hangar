@@ -374,4 +374,5 @@ export async function openInBrowser(url: string): Promise<void> {
   await run(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]).catch(() => {});
 }
 
+export { proxyStream, type StreamTarget } from './proxy.ts';
 export { buildRef, runEspresso, runMaestro, runXcuitest, testTargets, type EspressoOptions, type FlowResult, type MaestroOptions, type MaestroRun, type RunInfo, type XcuitestOptions } from './maestro.ts';

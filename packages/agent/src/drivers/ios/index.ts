@@ -119,6 +119,10 @@ export async function shutdown(udid: string): Promise<void> {
   }
 }
 
+export async function renameDevice(udid: string, name: string): Promise<void> {
+  await simctl('rename', udid, name);
+}
+
 export async function remove(udid: string): Promise<void> {
   stopCompanion(udid);
   forgetCapture(udid);

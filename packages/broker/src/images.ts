@@ -26,6 +26,9 @@ export function imageId(spec: ImageSpec, setup: ImageSetupSpec = {}): string {
   if (setup.grants?.length || setup.signIn) {
     parts.push(setup.grants ?? [], setup.signIn ? [sha256(setup.signIn.flow), setup.signIn.env] : null);
   }
+  if (spec.captured) {
+    parts.push(spec.captured);
+  }
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
 }
 
@@ -129,6 +132,9 @@ export function imagesMessage(db: Db, internalUrl: string): BrokerMessage {
     }
     if (spec.appearance) {
       image.appearance = spec.appearance;
+    }
+    if (spec.captured) {
+      image.captured = true;
     }
     if (setup.grants || setup.signIn) {
       image.setup = {};

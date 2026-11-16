@@ -13,7 +13,7 @@ Maestro jobs, with or without the rest of EAS. Physical phones are on the [roadm
 - **Test every pull request.** The GitHub Action splits your Maestro flows over fresh devices,
   runs a failed flow once more, and writes one JUnit report with a video of each failure.
   XCUITest and Espresso runs are built but haven't run against a real test target yet.
-- **Let AI agents check their own work.** Claude Code, Cursor or any MCP client can take a device,
+- **Let AI agents check their own work.** Claude Code, Codex, Cursor or any MCP client can take a device,
   tap through your app and read what is on the screen.
 - **Try a build by hand.** Open a device in the browser, click and type on it, and send a
   recording of the bug as a link.
@@ -36,7 +36,8 @@ Open the link it prints to see the devices. Invite your team from the console's 
 
 | To use devices from | Run |
 |---|---|
-| Claude Code | `hangar connect claude` |
+| Claude Code | `hangar connect claude`, or the plugin: `/plugin install hangar --marketplace mariusud/hangar` with `HANGAR_URL` and `HANGAR_TOKEN` set |
+| Codex | `hangar connect codex` |
 | Cursor or another MCP client | `hangar connect cursor` |
 | Maestro in CI | `hangar connect ci`, then paste the two secrets and the step it prints |
 | Your React Native app, with Fast Refresh | `hangar run ios` or `hangar run android` in your app's folder |

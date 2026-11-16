@@ -104,7 +104,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
     const leaseId = decodeURIComponent(match[1]);
     const token = url.searchParams.get('token');
     const codec: StreamCodec = url.searchParams.get('codec') === 'h264' ? 'h264' : 'jpeg';
-    const p = auth.authenticate(db, { authorization: token ? `Bearer ${token}` : undefined, cookie: req.headers.cookie }, Date.now());
+    const p = auth.authenticate(db, { authorization: token ? `Bearer ${token}` : req.headers.authorization, cookie: req.headers.cookie }, Date.now());
     let deviceId: string | null = null;
     try {
       deviceId = p ? leases.deviceOf(p, leaseId) : null;
