@@ -111,7 +111,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
     } catch {
       deviceId = null;
     }
-    if (!p || !deviceId) {
+    if (!p || !deviceId || !auth.leaseTokenAllows(p, url.pathname)) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return true;

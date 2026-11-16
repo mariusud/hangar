@@ -341,7 +341,7 @@ export class Leases {
   // The same token that made the lease picks it up again after its client restarted or lost the connection.
   reattach(p: Principal, id: string): m.Lease {
     const lease = this.holder(p, id);
-    if (lease.tokenHash && lease.tokenHash !== p.token?.hash) {
+    if (lease.tokenHash && lease.tokenHash !== p.token?.hash && p.leaseId !== lease.id) {
       throw new ApiError(403, 'WRONG_TOKEN', 'This lease was made with another token.', 'Reattach with the token that made the lease.');
     }
     const next = wrap(() => m.reattach(lease, this.now()));

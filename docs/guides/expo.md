@@ -38,6 +38,29 @@ hangar run ios
 Edit a file and Fast Refresh updates the leased device, usually within 200 ms. Press Ctrl-C to
 release the device; Hangar wipes it.
 
+## Run without Xcode
+
+On Linux, or anywhere you don't want to build, install a build Hangar already has instead:
+
+```bash
+hangar run ios --build my-app-dev --port 8081 --port 4000
+```
+
+`--build` takes the name of a registered build (`GET /v1/builds` lists them), such as a
+development client your CI registers every night. The first `--port` is Metro; each other one is
+forwarded too, so the app reaches a server on this machine, such as a GraphQL server on 4000, at
+`localhost:4000`. On an iOS simulator that port can be taken by another lease on the same Mac;
+then Hangar picks another port and prints which one, and the app has to use that one. Android
+emulators always get the port you asked for.
+
+Every connection goes out from this machine to the broker, over the lease's tunnel socket, so it
+works from a container or a sandbox that nobody can connect in to. `hangar run android` takes the
+same options.
+
+To run on a lease made elsewhere, pass `--lease <id>` (or set `HANGAR_LEASE`). With a token made
+for that one lease (see [Connect an AI agent](agents.md#a-token-for-one-lease)), the sandbox can
+drive that device and nothing else. Ctrl-C then leaves the lease to whoever made it.
+
 ## Debug with React Native DevTools
 
 Once the app's JavaScript runs, `hangar run ios` prints a React Native DevTools link. It opens

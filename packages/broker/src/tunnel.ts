@@ -30,7 +30,8 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
       return;
     }
     if (m.type === 'tunnel.open') {
-      ws.send(frame(KIND.open, m.conn));
+      const port = m.port === undefined ? undefined : Buffer.from([m.port >> 8, m.port & 0xff]);
+      ws.send(frame(KIND.open, m.conn, port));
     } else if (m.type === 'tunnel.data') {
       ws.send(frame(KIND.data, m.conn, m.data));
     } else {
@@ -54,6 +55,12 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
     }
     const leaseId = decodeURIComponent(match[1]);
     const token = url.searchParams.get('token');
+    const ports = [...new Set((url.searchParams.get('ports') ?? '').split(',').filter(Boolean).map(Number))];
+    if (ports.length > 8 || ports.some((n) => !Number.isInteger(n) || n < 1 || n > 65535)) {
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+      socket.destroy();
+      return true;
+    }
     const p = auth.authenticate(db, { authorization: req.headers.authorization ?? (token ? `Bearer ${token}` : undefined), cookie: req.headers.cookie }, Date.now());
     let device: string | null = null;
     try {
@@ -61,7 +68,7 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
     } catch {
       device = null;
     }
-    if (!p || !device) {
+    if (!p || !device || !auth.leaseTokenAllows(p, url.pathname)) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return true;
@@ -72,13 +79,13 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
       clients.get(hostId)?.close(4001, 'replaced by a newer tunnel');
       clients.set(hostId, ws);
       hosts
-        .request(deviceId, (id) => ({ type: 'tunnel.start', id, leaseId: hostId }), 10_000)
+        .request(deviceId, (id) => ({ type: 'tunnel.start', id, leaseId: hostId, ports }), 10_000)
         .then((res) => {
           if (!res.ok) {
             ws.close(4002, res.error.message.slice(0, 120));
             return;
           }
-          ws.send(JSON.stringify({ type: 'ready', ...(res.result as { port: number }) }));
+          ws.send(JSON.stringify({ type: 'ready', ...(res.result as { port: number; ports?: Record<string, number> }) }));
         })
         .catch((err: Error) => ws.close(4002, err.message.slice(0, 120)));
 

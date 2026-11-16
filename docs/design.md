@@ -632,8 +632,17 @@ exception below.
 The tunnel's port is on the Mac's loopback, which every simulator on that Mac shares. Another
 lease's app on the same Mac could connect to it and reach the developer's Metro, which serves
 their app's source. Teams that do not trust each other's apps use separate Macs, as for app
-uploads below. The tunnel only ever reaches the lease holder's own machine, and only the port
-their CLI chose.
+uploads below. The tunnel only ever reaches the lease holder's own machine, and only the ports
+their CLI chose. Extra ports (`hangar run --port 4000`) are listened on at the same number when it
+is free and on a free port otherwise, since another lease on the Mac may hold it; on Android,
+`adb reverse` gives each emulator the number asked for.
+
+### Tokens for one lease
+
+A lease token (`POST /v1/leases/:id/tokens`) is a member token with the lease's id on it. The
+broker accepts it only for paths under that lease, its stream and its tunnel, never for
+`/tokens` or MCP, and only while the lease is active. It expires at the lease's longest-lease
+limit at the latest.
 
 ### Maestro flows
 

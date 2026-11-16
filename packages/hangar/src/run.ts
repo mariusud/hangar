@@ -12,10 +12,13 @@ const run = promisify(execFile);
 const children: ChildProcess[] = [];
 let stopped = false;
 
-export const RUN_HELP = `  hangar run ios [--app App.app] [--port 8081] [--scheme S] [--model M]
+export const RUN_HELP = `  hangar run ios [--app App.app | --build NAME] [--port 8081] [--port 4000]... [--scheme S] [--model M] [--lease ID]
                                            build, install and run your app on a leased
-                                           simulator, connected to Metro on this machine
-  hangar run android [--app app-debug.apk] [--port 8081]
+                                           simulator, connected to Metro on this machine;
+                                           --build installs a build Hangar already has,
+                                           without Xcode; more --port forwards those ports
+                                           too, as localhost:<port> on the device
+  hangar run android [--app app-debug.apk | --build NAME] [--port 8081]... [--lease ID]
                                            the same on a leased Android emulator
   hangar run maestro <flows-dir> --app <App.app | build> [--shards N] [--retries 1]
                      [--junit report.xml] [-e KEY=VALUE]... [--hold 30m] [--booking B]
@@ -370,17 +373,18 @@ async function buildApk(p: Project): Promise<string> {
 }
 
 export async function runAndroid(args: string[]): Promise<void> {
-  const { values } = parseArgs({ args, options: { app: { type: 'string' }, port: { type: 'string' }, lease: { type: 'string' } } });
+  const { values } = parseArgs({ args, options: { app: { type: 'string' }, build: { type: 'string' }, port: { type: 'string', multiple: true }, lease: { type: 'string' } } });
   const p = await project(process.cwd());
-  const port = Number(values.port ?? 8081);
+  const [port, ...extra] = ports(values.port);
+  const leaseId = values.lease ?? process.env.HANGAR_LEASE;
   const client = await Hangar.fromEnv();
   let lease: Lease | null = null;
-  stopOnCtrlC(() => (values.lease ? null : lease));
+  stopOnCtrlC(() => (leaseId ? null : lease));
 
-  const apk = await buildWithMetro(values.app ?? buildApk(p), metro(p, port));
-  lease = values.lease ? client.attach(values.lease) : await client.lease({ platform: 'android-emulator' }, { via: 'hangar run android' });
-  await lease.metroTunnel(port);
-  process.stderr.write(`Installing ${basename(apk)}...\n`);
+  const apk = await buildWithMetro(values.build ?? values.app ?? buildApk(p), metro(p, port));
+  lease = leaseId ? client.attach(leaseId) : await client.lease({ platform: 'android-emulator' }, { via: 'hangar run android' });
+  const tunnel = await lease.metroTunnel(port, extra);
+  process.stderr.write(`Installing ${values.build ?? basename(apk)}...\n`);
   const { bundleId } = await lease.install(apk);
   await lease.useMetro(bundleId);
   const slug = p.hasDevClient ? await expoSlug(p.root) : null;
@@ -391,14 +395,36 @@ export async function runAndroid(args: string[]): Promise<void> {
     await lease.launch(bundleId);
   }
   const url = `${client.url}/leases/${lease.id}`;
-  process.stderr.write(`\nRunning ${bundleId} on ${lease.info.device?.model ?? 'the leased emulator'}, connected to Metro on port ${port}.\nLive screen: ${url}\nEdit your code and Fast Refresh updates the device. Press Ctrl-C to release it.\n\n`);
+  process.stderr.write(`\nRunning ${bundleId} on ${lease.info.device?.model ?? 'the leased emulator'}, connected to Metro on port ${port}.\n${portLines(tunnel.ports)}Live screen: ${url}\nEdit your code and Fast Refresh updates the device. Press Ctrl-C to release it.\n\n`);
   await openInBrowser(url);
   await new Promise(() => {});
 }
 
 async function expoSlug(root: string): Promise<string | null> {
   const app = JSON.parse(await readFile(join(root, 'app.json'), 'utf8').catch(() => '{}')) as { expo?: { slug?: string } };
-  return app.expo?.slug ?? null;
+  if (app.expo?.slug) {
+    return app.expo.slug;
+  }
+  const config = await run('npx', ['expo', 'config', '--json', '--type', 'public'], { cwd: root, maxBuffer: 16 * 1024 * 1024 }).then(
+    ({ stdout }) => JSON.parse(stdout) as { slug?: string },
+    () => ({ slug: undefined }),
+  );
+  return config.slug ?? null;
+}
+
+function ports(values: string[] | undefined): [number, ...number[]] {
+  const list = (values ?? ['8081']).map(Number);
+  if (list.some((n) => !Number.isInteger(n) || n < 1 || n > 65535)) {
+    throw new HangarError(0, 'BAD_PORT', '--port takes a port number.');
+  }
+  const [metroPort = 8081, ...extra] = list;
+  return [metroPort, ...extra];
+}
+
+function portLines(ports: Record<string, number>): string {
+  return Object.entries(ports)
+    .map(([wanted, onDevice]) => (Number(wanted) === onDevice ? `Port ${wanted} on this machine is localhost:${wanted} on the device.\n` : `Port ${wanted} on this machine is localhost:${onDevice} on the device, because another lease on that Mac uses ${wanted}.\n`))
+    .join('');
 }
 
 async function plist(app: string, key: string, format: 'raw' | 'json'): Promise<string | null> {
@@ -412,28 +438,31 @@ async function plist(app: string, key: string, format: 'raw' | 'json'): Promise<
 export async function runIos(args: string[]): Promise<void> {
   const { values } = parseArgs({
     args,
-    options: { app: { type: 'string' }, port: { type: 'string' }, scheme: { type: 'string' }, model: { type: 'string' }, lease: { type: 'string' } },
+    options: { app: { type: 'string' }, build: { type: 'string' }, port: { type: 'string', multiple: true }, scheme: { type: 'string' }, model: { type: 'string' }, lease: { type: 'string' } },
   });
   const p = await project(process.cwd());
-  const port = Number(values.port ?? 8081);
+  const [port, ...extra] = ports(values.port);
+  const leaseId = values.lease ?? process.env.HANGAR_LEASE;
   const client = await Hangar.fromEnv();
   let lease: Lease | null = null;
-  stopOnCtrlC(() => (values.lease ? null : lease));
+  stopOnCtrlC(() => (leaseId ? null : lease));
 
   // The lease comes after the build: a long build would outlast the lease's idle timeout.
-  const app = await buildWithMetro(values.app ?? build(p, values.scheme), metro(p, port));
-  lease = values.lease ? client.attach(values.lease) : await client.lease(values.model ? { model: values.model } : {}, { via: 'hangar run ios' });
-  const bundleId = await plist(app, 'CFBundleIdentifier', 'raw');
-  if (!bundleId) {
+  const app = await buildWithMetro(values.build ?? values.app ?? build(p, values.scheme), metro(p, port));
+  lease = leaseId ? client.attach(leaseId) : await client.lease(values.model ? { model: values.model } : {}, { via: 'hangar run ios' });
+  const localId = values.build ? null : await plist(app, 'CFBundleIdentifier', 'raw');
+  if (!values.build && !localId) {
     throw new HangarError(0, 'NOT_AN_APP', `${app} has no bundle id. Pass a built simulator .app.`);
   }
 
-  const tunnel = await lease.metroTunnel(port);
-  process.stderr.write(`Installing ${basename(app)}...\n`);
-  await lease.install(app);
+  const tunnel = await lease.metroTunnel(port, extra);
+  process.stderr.write(`Installing ${values.build ?? basename(app)}...\n`);
+  const installed = await lease.install(app);
+  const bundleId = localId ?? installed.bundleId;
   await lease.useMetro(bundleId);
-  const schemes = (JSON.parse((await plist(app, 'CFBundleURLTypes', 'json')) ?? '[]') as { CFBundleURLSchemes?: string[] }[]).flatMap((t) => t.CFBundleURLSchemes ?? []);
-  const devClient = p.hasDevClient ? schemes.find((s) => s.startsWith('exp+')) : undefined;
+  const schemes = values.build ? [] : (JSON.parse((await plist(app, 'CFBundleURLTypes', 'json')) ?? '[]') as { CFBundleURLSchemes?: string[] }[]).flatMap((t) => t.CFBundleURLSchemes ?? []);
+  const slug = values.build && p.hasDevClient ? await expoSlug(p.root) : null;
+  const devClient = p.hasDevClient ? (slug ? `exp+${slug}` : schemes.find((s) => s.startsWith('exp+'))) : undefined;
   if (devClient) {
     await lease.openUrl(`${devClient}://expo-development-client/?url=${encodeURIComponent(`http://localhost:${tunnel.port}`)}`);
   } else {
@@ -441,7 +470,7 @@ export async function runIos(args: string[]): Promise<void> {
     await lease.launch(bundleId);
   }
   const url = `${client.url}/leases/${lease.id}`;
-  process.stderr.write(`\nRunning ${bundleId} on ${lease.info.device?.model ?? 'the leased simulator'}, connected to Metro on port ${port}.\nLive screen: ${url}\nEdit your code and Fast Refresh updates the device. Press Ctrl-C to release it.\n\n`);
+  process.stderr.write(`\nRunning ${bundleId} on ${lease.info.device?.model ?? 'the leased simulator'}, connected to Metro on port ${port}.\n${portLines(tunnel.ports)}Live screen: ${url}\nEdit your code and Fast Refresh updates the device. Press Ctrl-C to release it.\n\n`);
   await openInBrowser(url);
   void devtoolsUrl(port, bundleId).then((link) => link && process.stderr.write(`React Native DevTools: ${link}\n\n`));
   await new Promise(() => {});

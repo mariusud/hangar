@@ -133,6 +133,15 @@ seconds by default, the token's `graceSeconds` if set) during which it doesn't e
 even if its idle time has run out. The idle limit applies again after that. MCP sessions don't
 start a grace period; for them the idle limit is what counts.
 
+## A token for one lease
+
+An agent that hands a device to code it trusts less, such as a sandbox, can make a token for
+just that lease with `POST /v1/leases/:id/tokens` (`lease.token()` in the client library). It
+returns `{ token, leaseId, expiresAt }`. The token works only on that lease's routes, its screen
+stream and its tunnel. It can't make leases or tokens, upload builds, reach other devices or use
+MCP; those answer `LEASE_TOKEN`. It stops working when the lease ends. Only the holder of an
+active lease can make one.
+
 ## Logs, JavaScript and network
 
 `app_log` (`GET /v1/leases/:id/log`) returns the app's own log lines: `log stream` filtered to

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `POST /v1/leases/:id/tokens` makes a token that drives only that lease and ends with it.
+- `hangar run ios --build NAME` and `run android --build NAME` install a build Hangar already
+  has, so they run without Xcode or Gradle, for example on Linux. `--lease` (or `HANGAR_LEASE`)
+  runs on a lease made elsewhere.
+- `hangar run` takes more than one `--port`. The first is Metro; the others are forwarded over
+  the same tunnel and show up on the device as `localhost:<port>`.
+
 ## 0.1.0 (2026-11-15)
 
 The first tagged release. Hangar runs on one Mac or several, and has run for a week on a Mac

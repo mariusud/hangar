@@ -108,6 +108,18 @@ route('POST', '/v1/leases/:id/attach', (req, res, ctx) => {
   json(res, 200, ctx.leases.view(ctx.leases.reattach(me(req, ctx), req.params.id ?? '')));
 });
 
+route('POST', '/v1/leases/:id/tokens', (req, res, ctx) => {
+  const p = me(req, ctx);
+  const lease = ctx.leases.get(p, req.params.id ?? '');
+  if (lease.principalId !== p.accountId || lease.state !== 'active') {
+    throw new ApiError(403, 'NOT_YOUR_LEASE', 'Only the holder of an active lease can make a token for it.');
+  }
+  const expiresAt = lease.createdAt + lease.maxMs;
+  const token = auth.mintToken(ctx.db, 'member', { accountId: p.accountId, leaseId: lease.id, label: `lease ${lease.id}`, expiresAt });
+  ctx.db.audit('lease.token', p.accountId, lease.id);
+  json(res, 200, { token, leaseId: lease.id, expiresAt });
+});
+
 route('GET', '/v1/lease-limits', (req, res, ctx) => {
   const p = me(req, ctx);
   json(res, 200, { caps: caps(ctx.db), mine: limitsOf(ctx.db, p) });

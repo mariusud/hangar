@@ -11,6 +11,11 @@ import type { Result } from './tools/util.ts';
 
 export async function handleMcp(req: IncomingMessage, res: ServerResponse, db: Db, leases: Leases, recordings: Recordings, internalUrl: string, publicUrl: string): Promise<void> {
   const p = auth.authenticate(db, { authorization: req.headers.authorization, cookie: req.headers.cookie }, Date.now());
+  if (p?.leaseId) {
+    res.writeHead(403, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { code: 'LEASE_TOKEN', message: 'A token for one lease cannot use MCP. Use its lease routes under /v1/leases/:id.' } }));
+    return;
+  }
   if (!p) {
     res.writeHead(401, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'Pass Authorization: Bearer <token>. Make a token in the console under Connect.' } }));

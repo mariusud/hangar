@@ -149,7 +149,7 @@ export type BrokerMessage =
   | { type: 'stream.start'; leaseId: string; codec: StreamCodec }
   | { type: 'stream.stop'; leaseId: string; codec: StreamCodec }
   | { type: 'stream.keyframe'; leaseId: string }
-  | { type: 'tunnel.start'; id: number; leaseId: string }
+  | { type: 'tunnel.start'; id: number; leaseId: string; ports?: number[] }
   | { type: 'tunnel.stop'; leaseId: string }
   | TunnelData;
 
@@ -185,7 +185,7 @@ export type AgentMessage =
   | { type: 'inventory'; devices: AgentDevice[] }
   | { type: 'stream.frame'; leaseId: string; codec: StreamCodec; data: Uint8Array }
   | { type: 'stream.failed'; leaseId: string; codec: StreamCodec; message: string }
-  | { type: 'tunnel.open'; leaseId: string; conn: number }
+  | { type: 'tunnel.open'; leaseId: string; conn: number; port?: number }
   | TunnelData
   | { type: 'response'; id: number; ok: true; result?: unknown; binary?: string }
   | { type: 'response'; id: number; ok: false; error: { code: string; message: string } }

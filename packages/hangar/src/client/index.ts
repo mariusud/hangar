@@ -300,8 +300,18 @@ export class Lease {
     return this.client.json('POST', this.path('/metro'), { bundleId });
   }
 
-  metroTunnel(localPort: number): Promise<{ port: number; close: () => void }> {
-    const ws = new WebSocket(`${this.client.url.replace(/^http/, 'ws')}${this.path('/tunnel')}?token=${encodeURIComponent(this.client.token)}`);
+  /** A token that drives only this lease and ends with it. Give it to code you trust less than your own token. */
+  async token(): Promise<{ token: string; expiresAt: number }> {
+    return this.client.json('POST', this.path('/tokens'), {});
+  }
+
+  /**
+   * Forwards Metro on `localPort`, and each of `ports`, to the device. The result's `ports` says where each of
+   * `ports` is on the device: the same number unless another lease on that Mac already uses it.
+   */
+  metroTunnel(localPort: number, ports: number[] = []): Promise<{ port: number; ports: Record<string, number>; close: () => void }> {
+    const extra = ports.length ? `&ports=${ports.join(',')}` : '';
+    const ws = new WebSocket(`${this.client.url.replace(/^http/, 'ws')}${this.path('/tunnel')}?token=${encodeURIComponent(this.client.token)}${extra}`);
     ws.binaryType = 'arraybuffer';
     const sockets = new Map<number, Socket>();
     const frame = (kind: number, conn: number, data?: Buffer): void => {
@@ -317,9 +327,9 @@ export class Lease {
     return new Promise((resolve, reject) => {
       ws.onmessage = (e) => {
         if (typeof e.data === 'string') {
-          const m = JSON.parse(e.data) as { type: string; port: number };
+          const m = JSON.parse(e.data) as { type: string; port: number; ports?: Record<string, number> };
           if (m.type === 'ready') {
-            resolve({ port: m.port, close: () => ws.close() });
+            resolve({ port: m.port, ports: m.ports ?? {}, close: () => ws.close() });
           }
           return;
         }
@@ -327,7 +337,7 @@ export class Lease {
         const conn = b.readUInt32BE(1);
         if (b[0] === 1) {
           // localhost, so a Metro bound to ::1 or 127.0.0.1 both work.
-          const socket = connectSocket({ port: localPort, host: 'localhost', autoSelectFamily: true });
+          const socket = connectSocket({ port: b.length >= 7 ? b.readUInt16BE(5) : localPort, host: 'localhost', autoSelectFamily: true });
           sockets.set(conn, socket);
           socket.on('data', (d) => frame(2, conn, d));
           socket.on('error', () => {});

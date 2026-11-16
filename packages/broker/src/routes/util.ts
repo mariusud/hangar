@@ -62,7 +62,11 @@ export function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 export function principal(req: IncomingMessage, ctx: Ctx): auth.Principal | null {
-  return auth.authenticate(ctx.db, { authorization: req.headers.authorization, cookie: req.headers.cookie }, Date.now());
+  const p = auth.authenticate(ctx.db, { authorization: req.headers.authorization, cookie: req.headers.cookie }, Date.now());
+  if (p && !auth.leaseTokenAllows(p, new URL(req.url ?? '/', 'http://x').pathname)) {
+    throw new ApiError(403, 'LEASE_TOKEN', `This token works only for lease ${p.leaseId}.`, 'Use the token that made the lease for anything else.');
+  }
+  return p;
 }
 
 export function me(req: IncomingMessage, ctx: Ctx): auth.Principal {

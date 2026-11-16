@@ -224,3 +224,34 @@ test('capturing a lease saves its device as an image and ends the lease', async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a lease token drives only its own lease and stops working when the lease ends', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
+  try {
+    fakeHost(broker);
+    const admin = broker.adminToken('test');
+    const lease = await call(broker, admin, 'POST', '/v1/leases?wait=5', { class: {} });
+    assert.equal(lease.json.state, 'active');
+    const id = String(lease.json.id);
+    const made = await call(broker, admin, 'POST', `/v1/leases/${id}/tokens`, {});
+    assert.equal(made.status, 200);
+    const scoped = String(made.json.token);
+
+    assert.equal((await call(broker, scoped, 'GET', `/v1/leases/${id}`)).status, 200);
+    assert.equal((await call(broker, scoped, 'POST', `/v1/leases/${id}/keepalive`)).status, 200);
+    assert.equal((await call(broker, scoped, 'POST', `/v1/leases/${id}/attach`)).status, 200);
+    assert.equal((await call(broker, scoped, 'POST', `/v1/leases/${id}/apps`, { build: 'nope' })).json.error?.code, 'BUILD_NOT_FOUND');
+    for (const [method, path] of [['POST', '/v1/leases'], ['GET', '/v1/leases'], ['GET', '/v1/builds'], ['POST', '/v1/tokens'], ['POST', `/v1/leases/${id}/tokens`], ['GET', '/v1/leases/other']]) {
+      assert.equal((await call(broker, scoped, method ?? '', path ?? '', method === 'POST' ? {} : undefined)).json.error?.code, 'LEASE_TOKEN', `${method} ${path}`);
+    }
+    const mcp = await fetch(`${broker.url}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${scoped}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(mcp.status, 403);
+
+    assert.equal((await call(broker, admin, 'DELETE', `/v1/leases/${id}`)).status, 200);
+    assert.equal((await call(broker, scoped, 'GET', `/v1/leases/${id}`)).status, 401);
+  } finally {
+    await broker.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

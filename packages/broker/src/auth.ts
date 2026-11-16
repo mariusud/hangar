@@ -10,6 +10,7 @@ export type Principal = {
   name: string;
   role: Account['role'];
   scopes: string[];
+  leaseId?: string;
   // The bearer token, when there is one, and what it allows its leases.
   token?: { hash: string } & TokenLimitRow;
 };
@@ -109,11 +110,21 @@ export function authenticate(
     if (!token || token.kind !== 'member' || !token.accountId) {
       return null;
     }
+    if (token.leaseId && db.getLease(token.leaseId)?.state !== 'active') {
+      return null;
+    }
     const account = db.getAccount(token.accountId);
     // A token acts as an operator only when it was made for that, so an agent's or CI's token stays a member's.
     const role = account?.role === 'operator' && token.scopes.includes('operator') ? 'operator' : 'member';
     const limits = db.tokenLimits(token.hash) ?? { agent: false, idleMs: null, maxMs: null, graceMs: null };
-    return account ? { accountId: account.id, name: account.name, role, scopes: token.scopes, token: { hash: token.hash, ...limits } } : null;
+    if (!account) {
+      return null;
+    }
+    const p: Principal = { accountId: account.id, name: account.name, role, scopes: token.scopes, token: { hash: token.hash, ...limits } };
+    if (token.leaseId) {
+      p.leaseId = token.leaseId;
+    }
+    return p;
   }
   const session = readCookie(headers.cookie, SESSION_COOKIE);
   if (session) {
@@ -129,4 +140,13 @@ export function authenticate(
 // install:upload allows any build name; install:upload:<prefix> only names that start with the prefix.
 export function canUpload(p: Principal, name: string): boolean {
   return p.scopes.some((s) => s === 'install:upload' || (s.startsWith('install:upload:') && name.startsWith(s.slice('install:upload:'.length))));
+}
+
+// A lease token reaches only its own lease's routes, and cannot make more tokens.
+export function leaseTokenAllows(p: Principal, path: string): boolean {
+  if (!p.leaseId) {
+    return true;
+  }
+  const match = /^\/v1\/leases\/([^/]+)(\/.*)?$/.exec(path);
+  return Boolean(match?.[1]) && decodeURIComponent(match?.[1] ?? '') === p.leaseId && match?.[2] !== '/tokens';
 }

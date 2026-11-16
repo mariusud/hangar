@@ -394,7 +394,7 @@ export class Agent {
       this.stopStream(m.leaseId, m.codec);
     } else if (m.type === 'tunnel.start') {
       if ([...this.devices.values()].some((x) => x.leaseId === m.leaseId)) {
-        this.tunnels.start(m.id, m.leaseId);
+        this.tunnels.start(m.id, m.leaseId, m.ports);
       } else {
         this.respondError(m.id, 'LEASE_NOT_HELD', 'This Mac holds no device for that lease.');
       }

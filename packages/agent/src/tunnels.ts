@@ -1,7 +1,7 @@
 import { createServer, type Server, type Socket } from 'node:net';
 import type { AgentMessage } from '@hangar/protocol';
 
-type Tunnel = { server: Server; port: number; sockets: Map<number, Socket> };
+type Tunnel = { servers: Server[]; port: number; ports: Record<string, number>; sockets: Map<number, Socket> };
 
 export class Tunnels {
   private tunnels = new Map<string, Tunnel>();
@@ -15,36 +15,59 @@ export class Tunnels {
     return this.tunnels.get(leaseId)?.port;
   }
 
-  start(id: number, leaseId: string, onOpen?: (port: number) => Promise<void>): void {
+  start(id: number, leaseId: string, ports: number[] = [], onOpen?: (port: number, extra: Record<string, number>) => Promise<void>): void {
     const existing = this.tunnels.get(leaseId);
     if (existing) {
-      this.send({ type: 'response', id, ok: true, result: { port: existing.port } });
+      this.send({ type: 'response', id, ok: true, result: { port: existing.port, ports: existing.ports } });
       return;
     }
     const sockets = new Map<number, Socket>();
+    const servers: Server[] = [];
     let next = 1;
-    const server = createServer((socket) => {
-      const conn = next++;
-      sockets.set(conn, socket);
-      this.send({ type: 'tunnel.open', leaseId, conn });
-      socket.on('data', (data) => this.send({ type: 'tunnel.data', leaseId, conn, data }));
-      socket.on('error', () => {});
-      socket.on('close', () => {
-        if (sockets.delete(conn)) {
-          this.send({ type: 'tunnel.close', leaseId, conn });
-        }
+    const fail = (err: Error): void => {
+      for (const s of servers) {
+        s.close();
+      }
+      this.send({ type: 'response', id, ok: false, error: { code: 'TUNNEL_FAILED', message: err.message } });
+    };
+    const listen = (target: number | undefined, wanted: number): Promise<number> =>
+      new Promise((resolve, reject) => {
+        const server = createServer((socket) => {
+          const conn = next++;
+          sockets.set(conn, socket);
+          this.send(target === undefined ? { type: 'tunnel.open', leaseId, conn } : { type: 'tunnel.open', leaseId, conn, port: target });
+          socket.on('data', (data) => this.send({ type: 'tunnel.data', leaseId, conn, data }));
+          socket.on('error', () => {});
+          socket.on('close', () => {
+            if (sockets.delete(conn)) {
+              this.send({ type: 'tunnel.close', leaseId, conn });
+            }
+          });
+        });
+        servers.push(server);
+        const bound = (): void => {
+          const address = server.address();
+          resolve(typeof address === 'object' && address ? address.port : 0);
+        };
+        server.once('error', (err: NodeJS.ErrnoException) => {
+          if (err.code === 'EADDRINUSE' && wanted !== 0) {
+            server.listen(0, '127.0.0.1', bound);
+            return;
+          }
+          reject(err);
+        });
+        server.listen(wanted, '127.0.0.1', bound);
       });
-    });
-    server.on('error', (err) => this.send({ type: 'response', id, ok: false, error: { code: 'TUNNEL_FAILED', message: err.message } }));
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      this.tunnels.set(leaseId, { server, port, sockets });
-      void (onOpen?.(port) ?? Promise.resolve()).then(
-        () => this.send({ type: 'response', id, ok: true, result: { port } }),
-        (err: Error) => this.send({ type: 'response', id, ok: false, error: { code: 'TUNNEL_FAILED', message: err.message } }),
-      );
-    });
+    void (async () => {
+      const port = await listen(undefined, 0);
+      const extra: Record<string, number> = {};
+      for (const p of ports) {
+        extra[String(p)] = await listen(p, p);
+      }
+      await (onOpen?.(port, extra) ?? Promise.resolve());
+      this.tunnels.set(leaseId, { servers, port, ports: extra, sockets });
+      this.send({ type: 'response', id, ok: true, result: { port, ports: extra } });
+    })().catch(fail);
   }
 
   data(leaseId: string, conn: number, data: Uint8Array): void {
@@ -61,7 +84,9 @@ export class Tunnels {
       return;
     }
     this.tunnels.delete(leaseId);
-    t.server.close();
+    for (const server of t.servers) {
+      server.close();
+    }
     for (const socket of t.sockets.values()) {
       socket.destroy();
     }

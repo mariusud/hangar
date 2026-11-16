@@ -161,8 +161,12 @@ export class AndroidAgent {
         this.opts.send({ type: 'response', id: m.id, ok: false, error: { code: 'LEASE_NOT_HELD', message: 'This host holds no device for that lease.' } });
         return;
       }
-      this.tunnels.start(m.id, m.leaseId, async (port) => {
-        await run(join(android.sdkRoot() ?? '', 'platform-tools', 'adb'), ['-s', d.emulator.serial, 'reverse', 'tcp:8081', `tcp:${port}`]);
+      const adb = join(android.sdkRoot() ?? '', 'platform-tools', 'adb');
+      this.tunnels.start(m.id, m.leaseId, m.ports, async (port, extra) => {
+        await run(adb, ['-s', d.emulator.serial, 'reverse', 'tcp:8081', `tcp:${port}`]);
+        for (const [wanted, local] of Object.entries(extra)) {
+          await run(adb, ['-s', d.emulator.serial, 'reverse', `tcp:${wanted}`, `tcp:${local}`]);
+        }
       });
     } else if (m.type === 'tunnel.stop') {
       this.tunnels.stop(m.leaseId);
