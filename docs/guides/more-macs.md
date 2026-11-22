@@ -14,7 +14,7 @@ devicepool join-token
 On the new Mac, with Xcode and idb installed:
 
 ```bash
-devicepool join https://devicepool.example.com --token hgr_host_...
+devicepool join https://devicepool.example.com --token dp_host_...
 ```
 
 The Mac dials out over one WebSocket to `/v1/agent/connect`, so it needs no open port and works

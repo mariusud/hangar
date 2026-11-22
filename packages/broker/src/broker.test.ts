@@ -377,7 +377,7 @@ test('an agent on another machine joins over the socket with a host token', asyn
   const url = `${broker.url.replace('http', 'ws')}/v1/agent/connect`;
   try {
     const refused = await new Promise<number>((resolve) => {
-      const ws = new WebSocket(url, { headers: { authorization: 'Bearer hgr_host_nope' } });
+      const ws = new WebSocket(url, { headers: { authorization: 'Bearer dp_host_nope' } });
       ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
       ws.on('error', () => {});
     });

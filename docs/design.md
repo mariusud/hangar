@@ -38,7 +38,7 @@ itself as a service so it survives a reboot, and prints:
 Devicepool is running at http://studio-mini.local:7420
 
   Sign in as admin:   http://studio-mini.local:7420/welcome/7KQ2-XM4P   (one use, 30 min)
-  Add another Mac:    npx devicepool join http://studio-mini.local:7420/join/hgr_join_...
+  Add another Mac:    npx devicepool join http://studio-mini.local:7420/join/dp_join_...
   Connect an agent:   claude mcp add --transport http devicepool http://studio-mini.local:7420/mcp
 ```
 
@@ -597,8 +597,8 @@ People sign in one of three ways, and all of them end in an HttpOnly, SameSite=L
 
 ### Tokens
 
-Opaque: a prefix for the kind, then 32 random bytes in base32, for example `hgr_member_...`,
-`hgr_host_...`, `hgr_stream_...`, `hgr_join_...`. A join token is what the "Add another Mac" link
+Opaque: a prefix for the kind, then 20 random bytes in base64url, for example `dp_member_...`,
+`dp_host_...`, `dp_stream_...`, `dp_join_...`. A join token is what the "Add another Mac" link
 carries: it works once, within 24 hours, and the broker swaps it for a host token when the new
 host connects. The broker stores the SHA-256 hash, shows the token once, and
 checks it on every request, so revocation is immediate. Tokens have an owner (a person or a team),

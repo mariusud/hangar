@@ -27,8 +27,8 @@ device minutes.
 - It runs iOS simulators and Android emulators on Macs you own, so your unreleased app and your
   test accounts stay on your network.
 - It runs Maestro flows, XCUITest and Espresso, split over fresh devices, with retries and one
-  JUnit report. XCUITest and Espresso runs are built but haven't run against a real test target
-  yet.
+  JUnit report. XCUITest runs against a real UI test target in the end-to-end test. Espresso
+  runs are built but haven't run against a real test APK yet.
 - A person can open a device in the browser, click and type on it, and record a bug as a link.
 - AI agents use a device over MCP or REST.
 - Developers run their React Native app on a leased device with Fast Refresh

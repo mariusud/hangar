@@ -16,7 +16,8 @@ BrowserStack App Live, Appetize and Expo Simulators. Physical phones are on the
   work as they do locally.
 - **Test every pull request.** The GitHub Action splits your Maestro flows over fresh devices,
   runs a failed flow once more, and writes one JUnit report with a video of each failure.
-  XCUITest and Espresso runs are built but haven't run against a real test target yet.
+  XCUITest runs against a real UI test target in the end-to-end test. Espresso runs are built but
+  haven't run against a real test APK yet.
 - **Let AI agents check their own work.** Devicepool is an MCP server for iOS simulators and
   Android emulators. Claude Code, Codex, Cursor or any MCP client can take a device, tap through
   your app and read what is on the screen.

@@ -83,7 +83,8 @@ XCUITest runs: `devicepool run xcuitest <Build/Products>` uploads the products o
 `build-for-testing`, and the broker shards targets or classes over leases like Maestro flows,
 with the same retries, recordings and JUnit. The agent runs `xcodebuild test-without-building`
 on the leased simulator and reads results from its output. Tested against a fake agent and with
-recorded xcodebuild output; not yet run against a real UI test target.
+recorded xcodebuild output, and `e2e/xcuitest.test.ts` runs a real UI test target on a simulator
+(passed 2026-11-22).
 
 Espresso runs: `devicepool run espresso --app <apk> --test-apk <apk>` installs both on a fresh
 emulator per shard and runs `am instrument`, sharded by class with the same retries and JUnit.

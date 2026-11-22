@@ -10,7 +10,7 @@ import { daemonPath, installService, serviceUpArgs, uninstallService } from './s
 import { exportData, importData } from './backup.ts';
 import { brokerOnly, doctor, joinBroker, joinToken, printChecks, up } from './up.ts';
 
-const HELP = `devicepool: the open source device broker for React Native teams
+const HELP = `devicepool: the open source, self-hosted device farm
 
 Server
   devicepool up [--port 7420] [--warm 1] [--max N] [--url https://...] [--android <avd>] [--phones]

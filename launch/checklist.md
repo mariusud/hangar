@@ -40,7 +40,7 @@ Devicepool has no migration code for the old names. A new `devicepool up` on a M
 15. If the service ran with `HANGAR_HOME` set, the folder is wherever that pointed. The new variable is `DEVICEPOOL_HOME`.
 16. Install the new CLI (`npm install -g ./packages/devicepool`) and the service: `devicepool up --install`. The new label is `dev.devicepool.up`.
 17. Old simulators. The agent owns simulators whose names start with `devicepool-`. Before the rename the prefix was `hangar-`. The new agent will not clean up the old ones, so delete them by hand: list with `xcrun simctl list devices | grep hangar-` and remove each with `xcrun simctl delete <udid>`. I did not check how device images behave after the prefix change; lease one image after the move and see whether it has to be built again.
-18. Existing tokens keep working. Tokens still start with `hgr_` in the new code (`packages/broker/src/auth.ts`), and they are stored in the database you moved. Decide whether the prefix should change before launch; changing it later means users see two prefixes.
+18. Existing tokens keep working. Tokens are stored as hashes and nothing reads the prefix, so tokens that start with `hgr_` stay valid. New tokens start with `dp_`.
 19. Replace the environment variables everywhere they are set: CI secrets, shell profiles, the cloud service's config, Kubernetes values. Each `HANGAR_*` name became the same name with `DEVICEPOOL_`:
 
     | Old | New | Where it is usually set |

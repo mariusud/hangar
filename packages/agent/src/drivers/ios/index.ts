@@ -40,7 +40,7 @@ const companions = new Map<string, { proc: ChildProcess; socket: string }>();
 /** Devicepool owns the simulators whose names start with this. DEVICEPOOL_SIM_PREFIX gives the smoke test its own set. */
 export const NAME_PREFIX = process.env.DEVICEPOOL_SIM_PREFIX || 'devicepool-';
 // Socket paths are capped at 104 bytes, so another prefix gets a short directory of its own.
-const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'devicepool-' ? 'devicepool-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
+export const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'devicepool-' ? 'dp-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
 
 export async function startCompanion(udid: string): Promise<void> {
   if (companions.has(udid)) {

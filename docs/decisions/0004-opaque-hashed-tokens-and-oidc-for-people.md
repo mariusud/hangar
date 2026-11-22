@@ -11,7 +11,7 @@ invites.
 
 ## Decision
 
-Tokens are `hgr_<kind>_<32 random bytes, base32>`, with kinds `member`, `host`, `stream` and `join`. A
+Tokens are `dp_<kind>_<32 random bytes, base32>`, with kinds `member`, `host`, `stream` and `join`. A
 token has an owner (a person or a team), a role (`member`, `team-admin`, `operator`), optional
 scopes such as `install:upload`, and an optional expiry. The broker stores the SHA-256 hash, shows
 the token once, and looks it up on every request. Stream tokens are bound to one lease and expire

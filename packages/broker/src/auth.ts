@@ -20,7 +20,7 @@ export function sha256(s: string): string {
 }
 
 function secret(kind: string): string {
-  return `hgr_${kind}_${randomBytes(20).toString('base64url')}`;
+  return `dp_${kind}_${randomBytes(20).toString('base64url')}`;
 }
 
 export function mintToken(

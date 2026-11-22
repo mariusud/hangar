@@ -1,11 +1,16 @@
 {
   "name": "devicepool",
-  "owner": { "name": "Devicepool" },
+  "owner": {
+    "name": "Devicepool"
+  },
   "plugins": [
     {
       "name": "devicepool",
       "source": "./plugins/devicepool",
       "description": "Lease iOS simulators and Android emulators from your own Devicepool and drive them over MCP."
     }
-  ]
+  ],
+  "metadata": {
+    "description": "Devicepool: an open source, self-hosted device farm for iOS simulators and Android emulators. Lets Claude lease a device, tap through your app and read the screen."
+  }
 }

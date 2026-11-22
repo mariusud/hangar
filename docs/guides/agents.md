@@ -20,14 +20,14 @@ described in [Night QA](night-qa.md#tokens-for-a-booking).
 
 ```bash
 claude mcp add --transport http devicepool http://studio-mini.local:7420/mcp \
-  --header "Authorization: Bearer hgr_member_..."
+  --header "Authorization: Bearer dp_member_..."
 ```
 
 Or install the plugin from this repository, which reads the broker and token from the
 environment:
 
 ```bash
-export DEVICEPOOL_URL=http://studio-mini.local:7420 DEVICEPOOL_TOKEN=hgr_member_...
+export DEVICEPOOL_URL=http://studio-mini.local:7420 DEVICEPOOL_TOKEN=dp_member_...
 claude
 /plugin install devicepool --marketplace mariusud/devicepool
 ```
@@ -41,7 +41,7 @@ In `.cursor/mcp.json`:
   "mcpServers": {
     "devicepool": {
       "url": "http://studio-mini.local:7420/mcp",
-      "headers": { "Authorization": "Bearer hgr_member_..." }
+      "headers": { "Authorization": "Bearer dp_member_..." }
     }
   }
 }
@@ -54,7 +54,7 @@ In `~/.codex/config.toml`:
 ```toml
 [mcp_servers.devicepool]
 url = "http://studio-mini.local:7420/mcp"
-http_headers = { Authorization = "Bearer hgr_member_..." }
+http_headers = { Authorization = "Bearer dp_member_..." }
 ```
 
 ## The tools

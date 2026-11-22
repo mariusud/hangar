@@ -468,6 +468,7 @@ async function fleetView() {
     grid.replaceChildren(
       ...active.map((l) => tiles.get(l.id).el),
       ...free.map((d) => h('div', { class: 'tile ready' }, h('div', { class: 'shot' }, h('span', {}, 'Ready')), h('div', { class: 'meta' }, h('div', { class: 'holder' }, h('b', {}, system(d))), h('div', { class: 'via muted' }, d.host)))),
+      ...devices.filter((d) => d.state === 'quarantined').map((d) => h('div', { class: 'tile ready' }, h('div', { class: 'shot' }, h('span', { class: 'state failed' }, 'Quarantined')), h('div', { class: 'meta' }, h('div', { class: 'holder' }, h('b', {}, system(d))), h('div', { class: 'via muted' }, d.host), h('div', { class: 'via muted', style: 'white-space:normal' }, d.note ?? '')))),
     );
   };
   await refresh();

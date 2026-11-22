@@ -25,9 +25,9 @@ test('the booking form drops empty fields and wants a whole device count', () =>
 });
 
 test('MCP settings match what devicepool connect prints', () => {
-  const s = mcpSettings('http://mac.local:7300/mcp', 'hgr_x');
-  assert.deepEqual(JSON.parse(s.json), { mcpServers: { devicepool: { url: 'http://mac.local:7300/mcp', headers: { Authorization: 'Bearer hgr_x' } } } });
-  assert.equal(s.claude, 'claude mcp add --transport http devicepool http://mac.local:7300/mcp --header "Authorization: Bearer hgr_x"');
+  const s = mcpSettings('http://mac.local:7300/mcp', 'dp_x');
+  assert.deepEqual(JSON.parse(s.json), { mcpServers: { devicepool: { url: 'http://mac.local:7300/mcp', headers: { Authorization: 'Bearer dp_x' } } } });
+  assert.equal(s.claude, 'claude mcp add --transport http devicepool http://mac.local:7300/mcp --header "Authorization: Bearer dp_x"');
 });
 
 test('a lease told it ends shows why and a countdown', () => {
