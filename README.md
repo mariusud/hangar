@@ -82,7 +82,7 @@ the cloud and can't reach your network.
 | Use a device in the browser | Yes | Yes, off by default | Not documented | Yes | Yes |
 | Sharded CI runs with JUnit | Yes | Not documented | Not documented | Its own flow runner with JUnit (experimental) | Not documented |
 | Fast Refresh on a leased device | Yes | Metro tunnel only | Local only | Not documented | Yes |
-| Physical phones | Android over USB, untested on real hardware | Yes | Yes | No | No |
+| Physical phones | Android over USB, experimental: never run on real hardware, use a test phone | Yes | Yes | No | No |
 | Runs on | Your Macs | Your machines | Your machine | Your Macs | Expo's servers |
 
 [Full comparison and sources](docs/comparison.md).

@@ -85,12 +85,18 @@ Set a phone up once: turn on Developer options and USB debugging, plug it in, an
 to None, since Devicepool cannot enter a PIN. Use a test phone with no personal accounts and no
 SIM, and do not install the app under test beforehand.
 
-The agent reads `adb devices -l` every three seconds. Every serial that is not an emulator's
-and is in state `device` becomes a device with platform `android-device`. A phone can be plugged
-in or unplugged while Devicepool runs. A phone that adb lists but cannot use shows as
-`quarantined` in `devicepool devices` with what to do: accept the debugging prompt for
-`unauthorized`, plug it in again for `offline`. Unplugging a leased phone ends the lease with
-`device_lost`.
+The agent reads `adb devices -l` every three seconds. Every USB serial in state `device` becomes
+a device with platform `android-device`. A phone that adb also reaches over Wi-Fi debugging is
+listed a second time, as `host:port` or under a name starting with `adb-`. Those serials are not
+offered, so one phone is one device, and the agent's log names each of them once as skipped. A
+phone can be plugged in or unplugged while Devicepool runs. A phone that adb lists but cannot
+use shows as `quarantined` in `devicepool devices` with what to do: accept the debugging prompt
+for `unauthorized`, plug it in again for `offline`. A phone counts as unplugged when it has been
+missing for three scans in a row, about ten seconds, so a nudged cable does not end a lease.
+Unplugging a leased phone for longer ends the lease with `device_lost`.
+
+After a restart, unlock the phone once. Until then its files cannot be listed, and a lease on it
+fails with an error that says so. The phone is not changed and stays `ready`.
 
 ```bash
 devicepool lease --phone
@@ -118,25 +124,29 @@ An emulator is wiped by killing it. A phone is wiped by undoing the lease
    each APK, every path under `/sdcard` (apart from `/sdcard/Android`) and `/data/local/tmp`,
    the three animation scales, stay-awake, the two rotation settings, night mode, and the
    `adb reverse` and `adb forward` mappings. The record is kept in `~/.devicepool/phones/`
-   until the wipe is verified.
+   until the wipe is verified. If the files cannot be listed in full, because the phone is
+   locked after a restart or its storage is not mounted, there is no record and no lease.
 2. When the lease ends, the agent removes port mappings that were not there, uninstalls every
-   package that was not there, runs `pm clear` on apps the lease installed or launched through
-   Devicepool that stay on the phone, deletes every path that was not there, and puts the
-   settings back.
+   package that was not there, deletes every path that was not there, and puts the settings
+   back. It does not clear the data of any app that was on the phone before the lease.
 3. It records the phone again and compares. If everything matches, the phone is `ready`. If
    not, the phone is `quarantined`, and `devicepool devices` and the agent's log say what
    differs, for example an app that refused to uninstall. Fix it on the phone, then unplug the
-   phone and plug it in again, which runs the wipe and the check once more. To accept the
-   phone as it is, delete its `.baseline.json` file in `~/.devicepool/phones/` before plugging
-   it in.
+   phone, wait ten seconds and plug it in again, which runs the wipe and the check once more.
+   To accept the phone as it is, delete its `.baseline.json` and `.touched.json` files in
+   `~/.devicepool/phones/` before plugging it in.
 
 If Devicepool stops or the phone is unplugged during a lease, the record stays on disk and the
-phone is wiped the next time the agent sees it, before anyone can lease it.
+phone is wiped the next time the agent sees it, before anyone can lease it. A record that is
+damaged quarantines the phone with a note, because the agent cannot tell what the lease left.
+
+A file the lease made whose name has a control character, such as a newline, or bytes that are
+not UTF-8 is not deleted by the wipe. The phone is quarantined and the note names the file.
 
 The wipe does not factory-reset the phone, and it does not cover:
 
-- data inside apps that were on the phone before the lease, unless the lease installed or
-  launched them through Devicepool. An app the lease opened by tapping its icon keeps its data;
+- data inside apps that were on the phone before the lease, system apps such as the browser
+  included. The wipe never resets it, however the lease opened the app;
 - accounts signed in to Android or to system apps, such as a Google account;
 - an app from before the lease that the lease installed over. The check notices and
   quarantines the phone, and an operator has to install the earlier version again;
@@ -151,8 +161,10 @@ deleted with the lease's files. This is one more reason to keep personal phones 
 ### What was tested
 
 No phone was attached to the Mac this was written on. The parsing of `adb devices -l`, phones
-arriving and leaving, the wipe plan, the comparison and the on-disk record are tested against a
-fake phone that answers the same adb commands. Nothing has run against real hardware: not
-discovery, not a lease, not the stream, not the wipe. The commands most likely to differ
-between phones are `find` on shared storage, `cmd uimode night`, `screenrecord` on phones whose
-maker limits it, and uninstalling apps that a device policy protects.
+arriving and leaving, the wipe plan, the comparison, the on-disk record, and the agent's
+handling of a locked phone, a damaged record, a phone that drops off adb and a lease that ends
+early are tested against a fake phone that answers the same adb commands. Nothing has run
+against real hardware: not discovery, not a lease, not the stream, not the wipe. The commands
+most likely to differ between phones are `find -print0` on shared storage and its exit status,
+`getprop sys.user.0.ce_available`, `cmd uimode night`, `screenrecord` on phones whose maker
+limits it, and uninstalling apps that a device policy protects.

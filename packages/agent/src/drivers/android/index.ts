@@ -125,8 +125,7 @@ export async function info(serial: string): Promise<{ model: string; os: string 
   return { model: await prop('ro.product.model'), os: await prop('ro.build.version.release') };
 }
 
-export async function screenSize(serial: string): Promise<{ width: number; height: number }> {
-  const out = await adb(serial, 'shell', 'wm', 'size');
+export function parseScreenSize(out: string): { width: number; height: number } {
   // "Override size" wins over "Physical size" when both are printed.
   const all = [...out.matchAll(/(\d+)x(\d+)/g)];
   const m = all[all.length - 1];
@@ -134,6 +133,10 @@ export async function screenSize(serial: string): Promise<{ width: number; heigh
     throw new DriverError('NO_SCREEN_SIZE', `Could not read the screen size: ${out.trim()}`);
   }
   return { width: Number(m[1]), height: Number(m[2]) };
+}
+
+export async function screenSize(serial: string): Promise<{ width: number; height: number }> {
+  return parseScreenSize(await adb(serial, 'shell', 'wm', 'size'));
 }
 
 export async function screenshot(serial: string): Promise<Buffer> {

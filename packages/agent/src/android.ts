@@ -23,18 +23,33 @@ export type AndroidAgentOptions = {
   phones?: boolean;
   /** Where the baseline of a leased phone is kept until its wipe is verified. */
   stateDir?: string;
+  /** How the agent reaches adb for phones. Tests pass a fake phone here. */
+  adb?: PhoneAdb;
+  /** The driver calls that change which apps a phone holds. Tests pass their own. */
+  driver?: PhoneDriver;
   maxDevices?: number;
   warm?: number;
   log?: (line: string) => void;
 };
 
+export type PhoneAdb = {
+  /** The output of `adb devices -l`. */
+  list: () => Promise<string>;
+  open: (serial: string) => android.Adb;
+};
+export type PhoneDriver = Pick<typeof android, 'install' | 'launch'>;
+
 type Shared = AgentDevice & { serial: string; leaseId: string | null; screen: { width: number; height: number } };
 type EmulatorDevice = Shared & { kind: 'emulator'; emulator: android.Emulator; port: number };
 // `touched` are the packages the lease installed or launched; `baseline` is the phone as the lease found it.
-type PhoneDevice = Shared & { kind: 'phone'; touched: Set<string>; baseline: phone.PhoneState | null };
+// `running` are the operations of the lease that have not answered yet; the wipe waits for them.
+type PhoneDevice = Shared & { kind: 'phone'; adb: android.Adb; touched: Set<string>; baseline: phone.PhoneState | null; running: Set<Promise<void>> };
 type Device = EmulatorDevice | PhoneDevice;
 
 const PHONE_SCAN_MS = 3000;
+// How long a wipe waits for operations of the ended lease that are still running on the phone.
+const RUNNING_OPS_MS = 60_000;
+const REPLUG = 'unplug it, wait ten seconds and plug it in again';
 
 // Console ports start at 5600, away from the 5554 that Android Studio uses.
 const FIRST_PORT = 5600;
@@ -50,7 +65,18 @@ export class AndroidAgent {
   private next = 0;
   // Phones adb lists but cannot use, by serial, with what the operator should do.
   private unusable = new Map<string, string>();
+  private skipped = new Map<string, string>();
   private enrolling = new Set<string>();
+  // Phones in state `device` that did not answer when they were enrolled, by serial.
+  private failed = new Map<string, string>();
+  // Scans in a row that each known phone has been missing.
+  private misses = new Map<string, number>();
+  // The lease a phone held when it left. If the phone comes back before the broker ends that lease, the lease goes on.
+  private lost = new Map<string, string>();
+  // One queue of work per phone: recording, wiping and enrolling never overlap on the same phone.
+  private chains = new Map<string, Promise<void>>();
+  private adb: PhoneAdb;
+  private driver: PhoneDriver;
   private scanning = false;
   private scanError = '';
   private scanTimer: NodeJS.Timeout | null = null;
@@ -64,6 +90,8 @@ export class AndroidAgent {
     this.maxDevices = opts.maxDevices ?? 2;
     this.warm = Math.min(opts.warm ?? 1, this.maxDevices);
     this.tunnels = new Tunnels(opts.send);
+    this.adb = opts.adb ?? { list: android.deviceList, open: android.adbFor };
+    this.driver = opts.driver ?? android;
     this.stateDir = opts.stateDir ?? join(process.env.DEVICEPOOL_HOME ?? join(homedir(), '.devicepool'), 'phones');
   }
 
@@ -92,7 +120,7 @@ export class AndroidAgent {
       type: 'hello',
       protocol: PROTOCOL_VERSION,
       hostName: `${hostname()} (Android)`,
-      versions: await android.versions(),
+      versions: await android.versions().catch(() => ({})),
       memoryBytes: totalmem(),
       offers: this.offers(),
       devices: this.inventory(),
@@ -144,8 +172,12 @@ export class AndroidAgent {
       }
       devices.push(device);
     }
-    for (const [serial, note] of this.unusable) {
-      devices.push({ deviceId: phone.deviceIdFor(serial), model: 'Android phone', os: '', state: 'quarantined', platform: 'android-device', note });
+    // A known phone that is offline for a scan or two is already listed above.
+    for (const [serial, note] of [...this.unusable, ...this.failed]) {
+      const deviceId = phone.deviceIdFor(serial);
+      if (!devices.some((d) => d.deviceId === deviceId)) {
+        devices.push({ deviceId, model: 'Android phone', os: '', state: 'quarantined', platform: 'android-device', note });
+      }
     }
     return devices;
   }
@@ -204,7 +236,7 @@ export class AndroidAgent {
       d.state = 'busy';
       this.publish();
       if (d.kind === 'phone') {
-        void this.preparePhone(d, m.id);
+        void this.enqueue(d.deviceId, () => this.preparePhone(d, m.id, m.leaseId));
         return;
       }
       this.opts.send({ type: 'response', id: m.id, ok: true });
@@ -266,16 +298,27 @@ export class AndroidAgent {
   private async endLease(leaseId: string): Promise<void> {
     this.tunnels.stop(leaseId);
     this.tools.close(leaseId);
-    await this.stopStream(leaseId);
+    for (const [deviceId, lostLease] of this.lost) {
+      if (lostLease === leaseId) {
+        this.lost.delete(deviceId);
+      }
+    }
     const d = this.held(leaseId);
+    if (d?.kind === 'phone') {
+      // From here no operation of the lease starts, and the wipe has its place in the phone's queue.
+      d.leaseId = null;
+      const stopped = this.stopStream(leaseId).catch(() => {});
+      await this.enqueue(d.deviceId, async () => {
+        await stopped;
+        await this.finishPhoneLease(d);
+      });
+      return;
+    }
+    await this.stopStream(leaseId);
     if (!d) {
       return;
     }
     d.leaseId = null;
-    if (d.kind === 'phone') {
-      await this.wipePhone(d);
-      return;
-    }
     d.state = 'wiping';
     this.publish();
     await android.kill(d.emulator);
@@ -284,38 +327,71 @@ export class AndroidAgent {
     void this.fill();
   }
 
-  // Looks at `adb devices` for phones that were plugged in, unplugged, or need the operator.
-  private async scanPhones(): Promise<void> {
+  // Runs work for one phone after the work already queued for it. Other phones are not held up.
+  private enqueue(deviceId: string, job: () => Promise<void>): Promise<void> {
+    const next = (this.chains.get(deviceId) ?? Promise.resolve()).then(job).catch((err: unknown) => {
+      this.log(`Work on a phone failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    this.chains.set(deviceId, next);
+    void next.then(() => {
+      if (this.chains.get(deviceId) === next) {
+        this.chains.delete(deviceId);
+      }
+    });
+    return next;
+  }
+
+  /** Resolves when no phone has work queued. */
+  async idle(): Promise<void> {
+    while (this.chains.size) {
+      await Promise.all(this.chains.values());
+    }
+  }
+
+  /** Looks at `adb devices` for phones that were plugged in, unplugged, or need the operator. It does not wait for a phone's wipe. */
+  async scanPhones(): Promise<void> {
     if (this.scanning) {
       return;
     }
     this.scanning = true;
     try {
       const known = [...this.phones().map((d) => d.serial), ...this.enrolling];
-      const changes = phone.phoneChanges(known, await phone.listPhones());
+      const changes = phone.phoneChanges(known, phone.parseDevices(await this.adb.list()), this.misses);
+      this.misses = changes.misses;
       this.scanError = '';
       let offersChanged = false;
       for (const serial of changes.left) {
         const d = this.phones().find((p) => p.serial === serial);
         if (d) {
-          await this.dropPhone(d);
+          this.dropPhone(d);
           offersChanged = true;
         }
       }
-      for (const serial of changes.arrived) {
-        offersChanged = (await this.enrol(serial, changes.unusable)) || offersChanged;
-      }
       const notes = (m: Map<string, string>): string => JSON.stringify([...m].sort());
-      const unusableChanged = notes(changes.unusable) !== notes(this.unusable);
+      const before = notes(new Map([...this.unusable, ...this.failed]));
+      for (const serial of this.failed.keys()) {
+        if (!changes.arrived.includes(serial)) {
+          this.failed.delete(serial);
+        }
+      }
+      for (const serial of changes.arrived) {
+        this.enrol(serial);
+      }
       for (const [serial, note] of changes.unusable) {
         if (this.unusable.get(serial) !== note) {
           this.log(`A phone is attached but cannot be used. ${note}`);
         }
       }
+      for (const [serial, reason] of changes.skipped) {
+        if (!this.skipped.has(serial)) {
+          this.log(`Skipped ${serial}: ${reason}`);
+        }
+      }
       this.unusable = changes.unusable;
+      this.skipped = changes.skipped;
       if (offersChanged) {
         await this.hello();
-      } else if (unusableChanged) {
+      } else if (notes(new Map([...this.unusable, ...this.failed])) !== before) {
         this.publish();
       }
     } catch (err) {
@@ -329,94 +405,166 @@ export class AndroidAgent {
     }
   }
 
-  // Adds a phone adb can talk to. A phone with a baseline on disk left a lease unwiped, so it is wiped first.
-  private async enrol(serial: string, unusable: Map<string, string>): Promise<boolean> {
+  // Adds a phone adb can talk to. A phone with a record on disk left a lease unwiped, so it is not `ready` until that is dealt with.
+  private enrol(serial: string): void {
+    const deviceId = phone.deviceIdFor(serial);
     this.enrolling.add(serial);
-    try {
-      const info = await android.info(serial);
-      const deviceId = phone.deviceIdFor(serial);
-      const d: PhoneDevice = { kind: 'phone', deviceId, ...info, state: 'wiping', serial, leaseId: null, screen: await android.screenSize(serial), touched: new Set(), baseline: null };
-      const stored = await phone.loadBaseline(this.stateDir, deviceId);
-      this.devices.set(deviceId, d);
-      if (stored) {
-        d.baseline = stored.baseline;
-        d.touched = new Set(stored.touched);
-        this.log(`${d.model} is back with a lease that was not wiped; wiping it now`);
-        await this.wipePhone(d);
-      } else {
+    void this.enqueue(deviceId, async () => {
+      const adb = this.adb.open(serial);
+      let d: PhoneDevice;
+      let stored: phone.Stored;
+      try {
+        const { screen, ...info } = await phone.identify(adb);
+        stored = await phone.loadBaseline(this.stateDir, deviceId);
+        d = { kind: 'phone', deviceId, ...info, state: 'wiping', serial, adb, leaseId: null, screen, touched: new Set(), baseline: null, running: new Set() };
+        this.devices.set(deviceId, d);
+        this.failed.delete(serial);
+      } catch (err) {
+        this.failed.set(serial, `The phone did not answer adb (${err instanceof Error ? err.message : String(err)}). Unplug it and plug it in again.`);
+        this.publish();
+        return;
+      } finally {
+        this.enrolling.delete(serial);
+      }
+      const leaseId = this.lost.get(deviceId);
+      this.lost.delete(deviceId);
+      if (stored.status === 'none') {
         d.state = 'ready';
         this.log(`${d.model} (Android ${d.os}) attached and ready`);
+      } else if (stored.status === 'invalid') {
+        this.quarantine(d, `The record of this phone from before its last lease cannot be used: ${stored.reason}. The phone may still hold what that lease left. Check the phone by hand, delete the record, then ${REPLUG}.`);
+      } else {
+        d.baseline = stored.baseline;
+        d.touched = new Set(stored.touched);
+        if (leaseId) {
+          // The broker decides whether the lease is over: hello names it, and the broker answers lease.end if it is.
+          d.leaseId = leaseId;
+          d.state = 'busy';
+          this.log(`${d.model} is back and its lease may still be open; it is wiped when the lease ends`);
+        }
       }
-      return true;
-    } catch (err) {
-      unusable.set(serial, `The phone did not answer adb (${err instanceof Error ? err.message : String(err)}). Unplug it and plug it in again.`);
-      return false;
-    } finally {
-      this.enrolling.delete(serial);
-    }
+      await this.hello();
+      if (stored.status === 'ok' && !leaseId) {
+        this.log(`${d.model} is back with a lease that was not wiped; wiping it now`);
+        await this.wipePhone(d);
+      }
+    });
   }
 
-  private async dropPhone(d: PhoneDevice): Promise<void> {
+  private dropPhone(d: PhoneDevice): void {
     this.devices.delete(d.deviceId);
     if (d.leaseId) {
+      this.lost.set(d.deviceId, d.leaseId);
       this.tunnels.stop(d.leaseId);
       this.tools.close(d.leaseId);
-      await this.stopStream(d.leaseId);
+      void this.stopStream(d.leaseId);
     }
     this.log(`${d.model} was unplugged${d.baseline ? '; its lease is wiped when it is plugged in again' : ''}`);
   }
 
   // Records the phone as the lease finds it, on disk too, before the lease may change anything.
-  private async preparePhone(d: PhoneDevice, id: number): Promise<void> {
-    const adb = android.adbFor(d.serial);
+  private async preparePhone(d: PhoneDevice, id: number, leaseId: string): Promise<void> {
+    const refuse = (message: string): void => {
+      this.opts.send({ type: 'response', id, ok: false, error: { code: 'DEVICE_NOT_READY', message } });
+    };
+    if (this.devices.get(d.deviceId) !== d || d.leaseId !== leaseId) {
+      refuse('The lease ended, or the phone was unplugged, before the phone was recorded.');
+      return;
+    }
+    d.touched = new Set();
     try {
-      d.touched = new Set();
-      d.baseline = await phone.snapshot(adb);
-      await phone.saveBaseline(this.stateDir, d.deviceId, d.baseline);
-      await phone.wake(adb);
-      this.opts.send({ type: 'response', id, ok: true });
+      const baseline = await phone.snapshot(d.adb);
+      await phone.saveBaseline(this.stateDir, d.deviceId, baseline);
+      d.baseline = baseline;
     } catch (err) {
-      // Nothing ran for the lease yet, apart from waking the screen, so the phone goes through its wipe to prove that.
-      d.leaseId = null;
-      this.opts.send({ type: 'response', id, ok: false, error: { code: 'DEVICE_NOT_READY', message: `Could not record the phone before the lease: ${err instanceof Error ? err.message : String(err)}` } });
-      if (d.baseline) {
-        await this.wipePhone(d);
-        return;
+      // Nothing was changed on the phone, so it needs no wipe and keeps no record.
+      const message = err instanceof Error ? err.message : String(err);
+      await phone.dropBaseline(this.stateDir, d.deviceId).catch(() => {});
+      this.log(`${d.model} could not be recorded before a lease, so the lease did not start. ${message}`);
+      refuse(`Could not record the phone before the lease. ${message}`);
+      if (d.leaseId === leaseId) {
+        d.leaseId = null;
+        d.state = 'ready';
+        this.publish();
       }
-      d.state = 'ready';
-      this.publish();
+      return;
     }
+    try {
+      await phone.wake(d.adb);
+    } catch (err) {
+      // Waking changes the stay-awake setting, so the phone goes through its wipe.
+      refuse(`Could not wake the phone for the lease: ${err instanceof Error ? err.message : String(err)}`);
+      if (d.leaseId === leaseId) {
+        d.leaseId = null;
+      }
+      await this.wipePhone(d);
+      return;
+    }
+    this.opts.send({ type: 'response', id, ok: true });
   }
 
-  private touch(d: Device, pkg: string): void {
-    if (d.kind === 'phone' && !d.touched.has(pkg)) {
-      d.touched.add(pkg);
-      void phone.saveTouched(this.stateDir, d.deviceId, [...d.touched]).catch(() => {});
+  // Marks a package as used by the lease, on disk, before the caller goes on.
+  private async touch(d: Device, pkg: string): Promise<void> {
+    if (d.kind !== 'phone' || d.touched.has(pkg)) {
+      return;
     }
+    await phone.saveTouched(this.stateDir, d.deviceId, [...d.touched, pkg]);
+    d.touched.add(pkg);
   }
 
-  // A phone is `ready` again only when what is read back from it matches its baseline.
+  // Runs after everything queued for the phone when its lease ended, so a lease that ends while it is being prepared waits.
+  private async finishPhoneLease(d: PhoneDevice): Promise<void> {
+    if (d.running.size) {
+      let timer: NodeJS.Timeout | undefined;
+      const late = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, RUNNING_OPS_MS);
+        timer.unref();
+      });
+      await Promise.race([Promise.all(d.running), late]);
+      clearTimeout(timer);
+    }
+    if (this.devices.get(d.deviceId) !== d) {
+      return;
+    }
+    if (!d.baseline) {
+      // The phone was never recorded for this lease, so the lease did nothing to it.
+      if (d.state === 'busy' && d.leaseId === null) {
+        d.state = 'ready';
+        this.publish();
+      }
+      return;
+    }
+    await this.wipePhone(d);
+  }
+
+  private quarantine(d: PhoneDevice, note: string): void {
+    d.state = 'quarantined';
+    d.note = note;
+    this.log(`${d.model} is quarantined. ${note}`);
+  }
+
+  // A phone is `ready` again only when what is read back from it matches its baseline. Call it from the phone's queue.
   private async wipePhone(d: PhoneDevice): Promise<void> {
     d.state = 'wiping';
     delete d.note;
     this.publish();
     const baseline = d.baseline;
     const result: phone.WipeResult = baseline
-      ? await phone.wipe(android.adbFor(d.serial), baseline, d.touched).catch((err: unknown) => ({ ok: false, problems: [err instanceof Error ? err.message : String(err)] }))
+      ? await phone.wipe(d.adb, baseline, d.touched).catch((err: unknown) => ({ ok: false, problems: [err instanceof Error ? err.message : String(err)] }))
       : { ok: false, problems: ['the record of the phone before the lease is missing, so nothing can be compared'] };
     if (this.devices.get(d.deviceId) !== d) {
       return;
     }
-    if (result.ok) {
-      await phone.dropBaseline(this.stateDir, d.deviceId);
+    const kept = result.ok ? await phone.dropBaseline(this.stateDir, d.deviceId).then(() => '', (err: unknown) => (err instanceof Error ? err.message : String(err))) : '';
+    if (kept) {
+      this.quarantine(d, `The phone was wiped and checked, but its record could not be deleted (${kept}). Delete the files for ${d.deviceId} in ${this.stateDir}, then ${REPLUG}.`);
+    } else if (result.ok) {
       d.baseline = null;
       d.touched = new Set();
       d.state = 'ready';
       this.log(`${d.model} wiped and checked against its baseline`);
     } else {
-      d.state = 'quarantined';
-      d.note = `The wipe could not be verified: ${result.problems.join('; ')}. Fix this on the phone, then unplug it and plug it in again to run the check once more.`;
-      this.log(`${d.model} is quarantined. ${d.note}`);
+      this.quarantine(d, `The wipe could not be verified: ${result.problems.join('; ')}. Fix this on the phone, then ${REPLUG} to run the check once more.`);
     }
     this.publish();
   }
@@ -428,7 +576,13 @@ export class AndroidAgent {
       return;
     }
     try {
-      this.opts.send({ type: 'response', id, ok: true, ...(await this.dispatch(d, body)) });
+      const work = this.dispatch(d, body);
+      if (d.kind === 'phone') {
+        const settled = work.then(() => {}, () => {});
+        d.running.add(settled);
+        void settled.then(() => d.running.delete(settled));
+      }
+      this.opts.send({ type: 'response', id, ok: true, ...(await work) });
     } catch (err) {
       const code = err instanceof OpError || err instanceof android.DriverError || err instanceof ToolError ? err.code : 'OP_FAILED';
       this.opts.send({ type: 'response', id, ok: false, error: { code, message: err instanceof Error ? err.message : String(err) } });
@@ -461,8 +615,9 @@ export class AndroidAgent {
         try {
           const apk = join(dir, 'app.apk');
           await download(new URL(body.artifactUrl, this.opts.brokerUrl).toString(), body.sha256, apk);
-          const pkg = await android.install(serial, apk);
-          this.touch(d, pkg);
+          // The package name is only known once the APK is installed, so it is recorded right after.
+          const pkg = await this.driver.install(serial, apk);
+          await this.touch(d, pkg);
           if (d.leaseId) {
             this.tools.noteApp(d.leaseId, pkg);
           }
@@ -472,8 +627,8 @@ export class AndroidAgent {
         }
       }
       case 'launch':
-        await android.launch(serial, body.bundleId);
-        this.touch(d, body.bundleId);
+        await this.touch(d, android.checkPackage(body.bundleId));
+        await this.driver.launch(serial, body.bundleId);
         if (d.leaseId) {
           this.tools.noteApp(d.leaseId, body.bundleId);
         }
@@ -547,8 +702,8 @@ export class AndroidAgent {
     try {
       await download(new URL(app.url, this.opts.brokerUrl).toString(), app.sha256, join(dir, 'app.apk'));
       await download(new URL(testApp.url, this.opts.brokerUrl).toString(), testApp.sha256, join(dir, 'test.apk'));
-      const target = await android.install(serial, join(dir, 'app.apk'));
-      this.touch(d, target);
+      const target = await this.driver.install(serial, join(dir, 'app.apk'));
+      await this.touch(d, target);
       await android.installTestApk(serial, join(dir, 'test.apk'));
       const instrumentation = await android.instrumentationFor(serial, target);
       const started = Date.now();
