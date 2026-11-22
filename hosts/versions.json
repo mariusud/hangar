@@ -51,7 +51,7 @@
           "name": "maestro",
           "status": "skipped",
           "ms": 0,
-          "detail": "set HANGAR_SMOKE_APP to a built examples/hello .app"
+          "detail": "set DEVICEPOOL_SMOKE_APP to a built examples/hello .app"
         }
       ]
     }

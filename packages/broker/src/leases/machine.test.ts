@@ -193,6 +193,15 @@ test('a device class picks iOS or Android; devices without a platform are iOS si
   assert.equal(matches({}, pixel), true);
 });
 
+test('a phone is leased only by a class that asks for one', () => {
+  const phone: PoolDevice = { deviceId: 'p', model: 'Pixel 8a', os: '16', build: null, platform: 'android-device' };
+  assert.equal(matches({}, phone), false);
+  assert.equal(matches({ model: 'Pixel 8a' }, phone), false);
+  assert.equal(matches({ platform: 'android-emulator' }, phone), false);
+  assert.equal(matches({ platform: 'android-device' }, phone), true);
+  assert.equal(matches({ platform: 'android-device', model: 'pixel 8a' }, phone), true);
+});
+
 test('a lease that loses its client is not idle during the grace period', () => {
   let l = activate(assign(lease('a', 0, { ttlMs: 10_000, maxMs: 10_000, idleMs: 100, graceMs: 60 }), 'd1', 0), 0);
   l = detach(l, 90);

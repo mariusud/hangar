@@ -54,14 +54,14 @@ test('with a bucket, a finished file moves there and is read back, ranges includ
   });
   await new Promise<void>((r) => s3.listen(0, '127.0.0.1', r));
   const address = s3.address();
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-store-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-store-'));
   try {
-    const store = new Store(dir, { endpoint: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`, bucket: 'hangar', region: 'eu-north-1', accessKey: 'key', secretKey: 'secret' });
+    const store = new Store(dir, { endpoint: `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`, bucket: 'devicepool', region: 'eu-north-1', accessKey: 'key', secretKey: 'secret' });
     await mkdir(join(dir, 'recordings', 'r1'), { recursive: true });
     await writeFile(store.local('recordings/r1/video.mp4'), '0123456789');
     await store.saved('recordings/r1/video.mp4');
     assert.equal(await stat(store.local('recordings/r1/video.mp4')).catch(() => null), null, 'the local copy is removed');
-    assert.equal(objects.get('/hangar/recordings/r1/video.mp4')?.toString(), '0123456789');
+    assert.equal(objects.get('/devicepool/recordings/r1/video.mp4')?.toString(), '0123456789');
 
     assert.equal(await store.size('recordings/r1/video.mp4'), 10);
     const slice = await store.open('recordings/r1/video.mp4', { start: 2, end: 4 });

@@ -56,7 +56,7 @@ async function render() {
   me = await api('GET', '/v1/me').catch(() => null);
   if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
     banner.hidden = false;
-    banner.textContent = 'This connection is not encrypted. Anyone on this network can read your session. Set up TLS before using Hangar beyond a trusted LAN.';
+    banner.textContent = 'This connection is not encrypted. Anyone on this network can read your session. Set up TLS before using Devicepool beyond a trusted LAN.';
   }
   if (invite) return inviteView(invite[1]);
   const recording = path.match(/^\/recordings\/([^/]+)$/);
@@ -100,7 +100,7 @@ async function loginView() {
   const offer = await api('GET', '/v1/sign-in').catch(() => ({ sso: false, passwords: true }));
   const used = params.get('error') === 'link-used';
   const sso = params.get('error') === 'sso' ? `Single sign-on failed: ${params.get('message') ?? 'no reason given'}.` : '';
-  const err = h('p', { class: 'error' }, used ? 'That sign-in link was already used or has expired. Sign in with your name and password, or run `hangar up` again for a new admin link.' : sso);
+  const err = h('p', { class: 'error' }, used ? 'That sign-in link was already used or has expired. Sign in with your name and password, or run `devicepool up` again for a new admin link.' : sso);
   const next = location.pathname === '/cli-login' ? location.pathname + location.search : '/';
   const ssoButton = offer.sso ? h('p', {}, h('a', { class: 'button primary', href: `/v1/oidc/start?next=${encodeURIComponent(next)}` }, 'Sign in with your company account')) : '';
   if (!offer.passwords) {
@@ -151,7 +151,7 @@ function inviteView(code) {
         }
       },
     },
-    h('h1', {}, 'Join Hangar'),
+    h('h1', {}, 'Join Devicepool'),
     h('p', { class: 'muted' }, 'Pick a name and a password. You use them to sign in next time.'),
     h('label', { for: 'name' }, 'Name'),
     h('input', { id: 'name', name: 'name', type: 'text', autocomplete: 'username', required: true }),
@@ -218,7 +218,7 @@ async function devicesView() {
             picker,
             h('p', { class: 'muted' }, `No device has the image ${chosenImage} yet. Each Mac builds its image devices after an operator sets the image, which takes a few minutes. You can wait in the queue for one.`),
             waitButton)
-        : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `npx hangar up` on a Mac with Xcode.'),
+        : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `npx devicepool up` on a Mac with Xcode.'),
     err,
   );
   const t = setInterval(() => !waiting && render(), 10_000);
@@ -311,7 +311,7 @@ async function leaseView(id) {
       out.textContent = x.message;
     }
   };
-  const isAndroid = lease.device.platform === 'android-emulator';
+  const isAndroid = lease.device.platform === 'android-emulator' || lease.device.platform === 'android-device';
   const file = h('input', { type: 'file', accept: isAndroid ? '.apk' : '.zip,.tar,.tgz,.gz' });
   const urlInput = h('input', { type: 'url', placeholder: 'https://example.com or myapp://path' });
   const bundleInput = h('input', { type: 'text', placeholder: 'App bundle ID, such as com.example.app', 'aria-label': 'App bundle ID' });
@@ -497,10 +497,10 @@ async function connectView() {
           h('h2', {}, 'Your token'),
           h('p', { class: 'muted' }, 'Copy it now. It is shown only once.'),
           h('code', { class: 'code' }, t.token),
-          h('h2', {}, 'Add Hangar to Claude Code'),
+          h('h2', {}, 'Add Devicepool to Claude Code'),
           h('code', { class: 'code' }, t.mcp),
           h('h2', {}, 'Use it from a script'),
-          h('code', { class: 'code' }, `export HANGAR_URL=${location.origin}\nexport HANGAR_TOKEN=${t.token}\nnpx hangar lease`),
+          h('code', { class: 'code' }, `export DEVICEPOOL_URL=${location.origin}\nexport DEVICEPOOL_TOKEN=${t.token}\nnpx devicepool lease`),
         );
       } }, 'Make a token')),
       result,
@@ -516,14 +516,14 @@ function cliLoginView() {
     if (u.protocol === 'http:' && u.hostname === '127.0.0.1') callback = u;
   } catch {}
   if (!callback) {
-    app.replaceChildren(h('p', { class: 'error' }, 'This sign-in link is not valid. Run `hangar login` again.'));
+    app.replaceChildren(h('p', { class: 'error' }, 'This sign-in link is not valid. Run `devicepool login` again.'));
     return;
   }
   const computer = q.get('name') || 'a computer';
   app.replaceChildren(
     h('div', { class: 'card narrow' },
       h('h1', {}, 'Sign in the command line?'),
-      h('p', {}, `The hangar command on ${computer} wants to act as ${me.name}. Only approve this if you just ran \`hangar login\`.`),
+      h('p', {}, `The devicepool command on ${computer} wants to act as ${me.name}. Only approve this if you just ran \`devicepool login\`.`),
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: async () => {
           const t = await api('POST', '/v1/tokens', { label: `CLI on ${computer}`, ...(me.role === 'operator' ? { scopes: ['operator', 'install:upload'] } : {}) });
@@ -540,7 +540,7 @@ async function peopleView() {
   const [people, teams, limits] = await Promise.all([api('GET', '/v1/people'), api('GET', '/v1/teams'), api('GET', '/v1/lease-limits').catch(() => null)]);
   const result = h('div');
   const status = h('p', { class: 'muted' });
-  const role = h('select', {}, h('option', { value: 'member' }, 'Member: uses devices'), h('option', { value: 'operator' }, 'Operator: runs Hangar, can upload apps'));
+  const role = h('select', {}, h('option', { value: 'member' }, 'Member: uses devices'), h('option', { value: 'operator' }, 'Operator: runs Devicepool, can upload apps'));
   const save = (fn) => fn().then(() => peopleView(), (x) => (status.textContent = x.message));
   const teamPicker = (p) => h('select', { onchange: (e) => save(() => api('PUT', `/v1/people/${encodeURIComponent(p.name)}/team`, { team: e.target.value })) },
     ...teams.map((t) => h('option', { value: t.id, selected: t.id === p.team }, t.name)));
@@ -653,7 +653,7 @@ async function recordingsView() {
   app.replaceChildren(
     h('h1', {}, 'Recordings'),
     list.length === 0
-      ? h('p', { class: 'muted' }, 'No recordings yet. Press Record on a device, or lease with `hangar lease --record`. Recordings are kept for 14 days.')
+      ? h('p', { class: 'muted' }, 'No recordings yet. Press Record on a device, or lease with `devicepool lease --record`. Recordings are kept for 14 days.')
       : h('table', {},
           h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Who'), h('th', {}, 'Device'), h('th', {}, 'Length'), h('th', {}, 'State')),
           ...list.map((r) => h('tr', {},
@@ -720,9 +720,9 @@ async function recordingView(id, view = null) {
           h('div', { class: 'row' },
             me ? h('button', { onclick: (e) => navigator.clipboard.writeText(location.origin + location.pathname).then(() => (e.target.textContent = 'Link copied')) }, 'Copy link') : '',
             me ? shareButton(id) : '',
-            h('a', { class: 'button', href: files.video, download: `hangar-${id}.mp4` }, 'Video'),
-            h('a', { class: 'button', href: files.screenshot, download: `hangar-${id}.png` }, 'Last screenshot'),
-            h('a', { class: 'button', href: files.log, download: `hangar-${id}.ndjson` }, 'App log'),
+            h('a', { class: 'button', href: files.video, download: `devicepool-${id}.mp4` }, 'Video'),
+            h('a', { class: 'button', href: files.screenshot, download: `devicepool-${id}.png` }, 'Last screenshot'),
+            h('a', { class: 'button', href: files.log, download: `devicepool-${id}.ndjson` }, 'App log'),
           ),
         ),
         h('div', { class: 'card' },
@@ -756,7 +756,7 @@ function shareButton(id) {
   return button;
 }
 
-const system = (d) => `${d.model}, ${d.platform === 'android-emulator' ? 'Android' : 'iOS'} ${d.os}`;
+const system = (d) => `${d.model}, ${d.platform === 'android-emulator' || d.platform === 'android-device' ? 'Android' : 'iOS'} ${d.os}`;
 
 const counts = (r) => [r.counts.passed && `${r.counts.passed} passed`, r.counts.flaky && `${r.counts.flaky} flaky`, r.counts.failed && `${r.counts.failed} failed`, r.counts.pending && `${r.counts.pending} to go`].filter(Boolean).join(', ');
 
@@ -765,7 +765,7 @@ async function runsView() {
   app.replaceChildren(
     h('h1', {}, 'Runs'),
     list.length === 0
-      ? h('p', { class: 'muted' }, 'No runs yet. Start one with `hangar run maestro <flows-dir> --app <App.app>`, or from CI with the GitHub Action.')
+      ? h('p', { class: 'muted' }, 'No runs yet. Start one with `devicepool run maestro <flows-dir> --app <App.app>`, or from CI with the GitHub Action.')
       : h('table', {},
           h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Who'), h('th', {}, 'Build'), h('th', {}, 'Flows'), h('th', {}, 'Length'), h('th', {}, 'State')),
           ...list.map((r) => h('tr', {},
@@ -800,7 +800,7 @@ async function runView(id) {
     }
   };
   cleanup = () => events?.close();
-  // Hangar keeps a run's environment values in memory only, so after a restart a rerun asks for them again.
+  // Devicepool keeps a run's environment values in memory only, so after a restart a rerun asks for them again.
   const status = h('p', { class: 'muted' });
   const envBox = h('div', { class: 'card', hidden: true });
   const rerun = async (flow, env) => {
@@ -821,7 +821,7 @@ async function runView(id) {
     const err = h('p', { class: 'error' });
     envBox.replaceChildren(
       h('h2', { style: 'margin-top:0' }, `Environment for ${flow}`),
-      h('p', { class: 'muted' }, 'One KEY=value per line. Hangar uses them for this rerun and does not save them.'),
+      h('p', { class: 'muted' }, 'One KEY=value per line. Devicepool uses them for this rerun and does not save them.'),
       text,
       h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'primary', onclick: () => {
         try {
@@ -847,7 +847,7 @@ async function runView(id) {
   const releaseHeld = async (flow) => {
     try {
       show(await api('DELETE', `/v1/runs/${id}/flows/${encodeURIComponent(flow)}/hold`));
-      status.textContent = `Released the device ${flow} failed on. Hangar wipes it and puts it back in the pool.`;
+      status.textContent = `Released the device ${flow} failed on. Devicepool wipes it and puts it back in the pool.`;
     } catch (x) {
       status.textContent = x.message;
     }
@@ -861,7 +861,7 @@ async function runView(id) {
       h('h1', { style: 'margin-bottom:4px' }, `${r.build}, started by ${r.owner}`),
       h('p', { class: 'muted', style: 'margin-top:0' }, `${new Date(r.createdAt).toLocaleString()} · ${r.shards} shard${r.shards === 1 ? '' : 's'} · ${seconds(r.durationMs)} · `, h('span', { class: `state ${r.state}` }, r.state)),
       r.error ? h('p', { class: 'error' }, r.error) : '',
-      h('div', { class: 'row' }, h('a', { class: 'button', href: r.junit, download: `hangar-run-${id}.xml` }, 'JUnit report'), cancel),
+      h('div', { class: 'row' }, h('a', { class: 'button', href: r.junit, download: `devicepool-run-${id}.xml` }, 'JUnit report'), cancel),
       h('table', {},
         h('tr', {}, h('th', {}, 'Flow'), h('th', {}, 'Shard'), h('th', {}, 'Attempts'), h('th', {}, 'State'), h('th', {}, '')),
         ...r.flows.map((f) => h('tr', {},
@@ -874,7 +874,7 @@ async function runView(id) {
               ...flowRecordings(f).map((l) => h('a', { href: l.href, 'data-link': true }, l.label)),
               canRerun(r, f) ? h('button', { title: 'Run this flow again on a fresh device, recorded', onclick: () => rerun(f.flow) }, 'Rerun') : '',
               f.held ? h('button', { class: 'primary', title: 'Lease the device this flow failed on, as the flow left it', onclick: () => takeHeld(f.flow) }, 'Take the device') : '',
-              f.held ? h('button', { title: 'Let the device go. Hangar wipes it and puts it back in the pool.', onclick: () => releaseHeld(f.flow) }, 'Release') : '',
+              f.held ? h('button', { title: 'Let the device go. Devicepool wipes it and puts it back in the pool.', onclick: () => releaseHeld(f.flow) }, 'Release') : '',
             ),
           ),
         )),
@@ -955,7 +955,7 @@ async function heldContext(runId, flow, card) {
       h('a', { href: `/runs/${runId}`, 'data-link': true }, 'Back to the run'),
       recordingId ? h('a', { href: `/recordings/${recordingId}`, 'data-link': true }, 'Recording') : '',
     ),
-    h('p', { class: 'muted' }, 'Release below ends this lease, and Hangar wipes the device.'),
+    h('p', { class: 'muted' }, 'Release below ends this lease, and Devicepool wipes the device.'),
   );
   card.hidden = false;
 }
@@ -995,7 +995,7 @@ async function scheduleView() {
       status.textContent = x.message;
     }
   };
-  const describeClass = (c) => [c.image ? `image ${c.image}` : '', c.model ?? '', c.os ? `OS ${c.os}` : '', c.platform === 'android-emulator' ? 'Android' : ''].filter(Boolean).join(', ');
+  const describeClass = (c) => [c.image ? `image ${c.image}` : '', c.model ?? '', c.os ? `OS ${c.os}` : '', c.platform === 'android-emulator' ? 'Android' : c.platform === 'android-device' ? 'Android phone' : ''].filter(Boolean).join(', ');
 
   const fields = {
     name: h('input', { type: 'text', placeholder: 'nightly-qa', 'aria-label': 'Name', required: true }),
@@ -1088,7 +1088,7 @@ async function nightsView() {
   app.replaceChildren(
     h('h1', {}, 'Nights'),
     list.length === 0
-      ? h('p', { class: 'card muted' }, 'No nights yet. A night opens with `hangar night open <booking>` and closes when the booking’s window closes.')
+      ? h('p', { class: 'card muted' }, 'No nights yet. A night opens with `devicepool night open <booking>` and closes when the booking’s window closes.')
       : h('div', { class: 'card' },
           h('table', {},
             h('tr', {}, h('th', {}, 'Opened'), h('th', {}, 'Booking'), h('th', {}, 'Team'), h('th', {}, 'Closed'), h('th', {}, 'State')),
@@ -1164,7 +1164,7 @@ function findingCard(f) {
         go(target);
         return;
       }
-      out.textContent = 'Hangar started it, but did not say where. Look under Devices.';
+      out.textContent = 'Devicepool started it, but did not say where. Look under Devices.';
     } catch (x) {
       out.textContent = openAgainError(x);
     } finally {

@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { PRIVACY_SERVICES, type BrokerMessage, type DeviceImage, type ImageBuildState, type Platform, type PrivacyService } from '@hangar/protocol';
+import { PRIVACY_SERVICES, type BrokerMessage, type DeviceImage, type ImageBuildState, type Platform, type PrivacyService } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Db, ImageSpec } from './db.ts';
 import { ApiError } from './leases/service.ts';
@@ -166,7 +166,7 @@ export function refreshApps(current: Build[], builds: Build[]): string[] {
     }
     if (at < 0) {
       const names = current.map((b) => b.name).join(', ') || 'none';
-      throw new ApiError(400, 'WHICH_APP', `The image has no app built as ${build.name}, so Hangar can't tell which app it replaces. Its apps: ${names}.`, 'Upload the build under the same name, or declare the image again with `hangar image set`.');
+      throw new ApiError(400, 'WHICH_APP', `The image has no app built as ${build.name}, so Devicepool can't tell which app it replaces. Its apps: ${names}.`, 'Upload the build under the same name, or declare the image again with `devicepool image set`.');
     }
     apps[at] = build.sha256;
   }
@@ -217,7 +217,7 @@ export function imageFailure(db: Db, hosts: HostView[], name: string): ApiError 
     409,
     'IMAGE_FAILED',
     `Image ${spec.name} failed to build on every connected Mac.\n${why}`,
-    'Fix what the message says, for example set a missing value with `hangar image secret <NAME>` or upload a working build, then run `hangar image set` again. Each Mac builds a failed image again when the broker sends it images.',
+    'Fix what the message says, for example set a missing value with `devicepool image secret <NAME>` or upload a working build, then run `devicepool image set` again. Each Mac builds a failed image again when the broker sends it images.',
   );
 }
 
@@ -268,7 +268,7 @@ function secretKey(db: Db): Buffer {
     }
     key = readFileSync(file);
     if (key.length !== 32) {
-      throw new Error(`${file} is not a Hangar secret key. Move it away, then set the image secrets again with \`hangar image secret\`.`);
+      throw new Error(`${file} is not a Devicepool secret key. Move it away, then set the image secrets again with \`devicepool image secret\`.`);
     }
   }
   secretKeys.set(db, key);

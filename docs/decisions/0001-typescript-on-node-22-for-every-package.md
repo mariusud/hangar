@@ -5,7 +5,7 @@
 
 ## Context
 
-Hangar has a broker, a host agent, drivers, a console, an SDK and a CLI. The broker and the agent
+Devicepool has a broker, a host agent, drivers, a console, an SDK and a CLI. The broker and the agent
 exchange messages whose shape must stay in step. Most clients (agent frameworks, Argent, Maestro
 wrappers, CI scripts) are JavaScript or TypeScript. The drivers are external processes (`simctl`,
 idb, adb, scrcpy, `xcodebuild`), so the agent's language does not limit what it can drive.

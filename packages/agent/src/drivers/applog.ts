@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import type { LogLine } from '@hangar/protocol';
+import type { LogLine } from '@devicepool/protocol';
 import { Ring } from './ring.ts';
 
 export type Spawn = (command: string, args: string[]) => ChildProcess;

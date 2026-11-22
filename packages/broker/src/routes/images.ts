@@ -25,10 +25,10 @@ route('POST', '/v1/images/:name/refresh', async (req, res, ctx) => {
   const name = req.params.name ?? '';
   const spec = ctx.db.images().find((i) => i.name.toLowerCase() === name.toLowerCase());
   if (!spec) {
-    throw new ApiError(404, 'IMAGE_NOT_FOUND', `No image called ${name}.`, 'Declare it with `hangar image set`.');
+    throw new ApiError(404, 'IMAGE_NOT_FOUND', `No image called ${name}.`, 'Declare it with `devicepool image set`.');
   }
   if (spec.captured) {
-    throw new ApiError(409, 'CAPTURED_IMAGE', `${spec.name} was captured from a device and has no app to refresh.`, 'Capture it again with `hangar image capture`.');
+    throw new ApiError(409, 'CAPTURED_IMAGE', `${spec.name} was captured from a device and has no app to refresh.`, 'Capture it again with `devicepool image capture`.');
   }
   const b = await body<{ apps?: unknown }>(req, 64 * 1024);
   if (b.apps !== undefined && !Array.isArray(b.apps)) {

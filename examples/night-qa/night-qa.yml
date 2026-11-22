@@ -1,26 +1,26 @@
-# Night QA: at 21:00 UTC an agent tests the app on devices from the Hangar booking "night", and
-# after the window closes a second job posts the night's report to Slack. Hangar starts nothing
+# Night QA: at 21:00 UTC an agent tests the app on devices from the Devicepool booking "night", and
+# after the window closes a second job posts the night's report to Slack. Devicepool starts nothing
 # and calls nothing outside your network; this workflow does both. Copy it to .github/workflows/
-# and brief.md and hangar.json to night-qa/ in your app's repository.
+# and brief.md and devicepool.json to night-qa/ in your app's repository.
 #
 # The booking this expects (in the broker's time zone; here the broker runs on UTC):
-#   hangar book night --devices 4 --from 21:00 --to 06:00 --days mon-fri --image nightly
-#   hangar connect night        # prints the token and the cron for the window in UTC
+#   devicepool book night --devices 4 --from 21:00 --to 06:00 --days mon-fri --image nightly
+#   devicepool connect night        # prints the token and the cron for the window in UTC
 #
 # Secrets:
-#   HANGAR_URL          the Hangar address as the tailnet sees it, such as https://studio-mini.example.ts.net
-#   HANGAR_TOKEN        the token `hangar connect night` printed
+#   DEVICEPOOL_URL          the Devicepool address as the tailnet sees it, such as https://studio-mini.example.ts.net
+#   DEVICEPOOL_TOKEN        the token `devicepool connect night` printed
 #   TS_OAUTH_CLIENT_ID  a Tailscale OAuth client that can add devices tagged tag:ci
 #   TS_OAUTH_SECRET
 #   ANTHROPIC_API_KEY   for the agent CLI below; use your own agent's key instead
 #   SLACK_WEBHOOK       a Slack incoming webhook URL, for the report
 #
-# <owner>/hangar is wherever your copy of the Hangar repository lives on GitHub.
+# <owner>/devicepool is wherever your copy of the Devicepool repository lives on GitHub.
 name: night qa
 
 on:
   schedule:
-    # When the window opens. Use the cron `hangar connect night` prints, and check it after a
+    # When the window opens. Use the cron `devicepool connect night` prints, and check it after a
     # daylight saving change: GitHub reads cron in UTC.
     - cron: '0 21 * * 1-5'
     # After the window closes at 06:00 the next morning, so the night is closed and complete.
@@ -51,17 +51,17 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       # Any agent CLI that speaks MCP over HTTP works here. This one is Claude Code in print mode,
-      # which reads night-qa/hangar.json and fills in HANGAR_URL and HANGAR_TOKEN from the
-      # environment. It may use only the hangar server's tools.
+      # which reads night-qa/devicepool.json and fills in DEVICEPOOL_URL and DEVICEPOOL_TOKEN from the
+      # environment. It may use only the devicepool server's tools.
       - name: Run the QA agent
         env:
-          HANGAR_URL: ${{ secrets.HANGAR_URL }}
-          HANGAR_TOKEN: ${{ secrets.HANGAR_TOKEN }}
+          DEVICEPOOL_URL: ${{ secrets.DEVICEPOOL_URL }}
+          DEVICEPOOL_TOKEN: ${{ secrets.DEVICEPOOL_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           npx --yes @anthropic-ai/claude-code -p "$(cat night-qa/brief.md)" \
-            --mcp-config night-qa/hangar.json --strict-mcp-config \
-            --allowedTools mcp__hangar
+            --mcp-config night-qa/devicepool.json --strict-mcp-config \
+            --allowedTools mcp__devicepool
 
   report:
     if: ${{ github.event.schedule == '15 6 * * 2-6' || (github.event_name == 'workflow_dispatch' && inputs.job == 'report') }}
@@ -74,17 +74,17 @@ jobs:
           tags: tag:ci
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      # Hangar is not on npm yet, so the CLI runs from your copy of the repository, as the
-      # Hangar action does.
+      # Devicepool is not on npm yet, so the CLI runs from your copy of the repository, as the
+      # Devicepool action does.
       - uses: actions/checkout@v4
         with:
-          repository: <owner>/hangar
-          path: hangar
-      - run: corepack enable && pnpm --dir hangar install --frozen-lockfile --prod
+          repository: <owner>/devicepool
+          path: devicepool
+      - run: corepack enable && pnpm --dir devicepool install --frozen-lockfile --prod
       # Prints the report of the booking's newest night and posts it from this runner.
       - name: Post the night report
         env:
-          HANGAR_URL: ${{ secrets.HANGAR_URL }}
-          HANGAR_TOKEN: ${{ secrets.HANGAR_TOKEN }}
+          DEVICEPOOL_URL: ${{ secrets.DEVICEPOOL_URL }}
+          DEVICEPOOL_TOKEN: ${{ secrets.DEVICEPOOL_TOKEN }}
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        run: pnpm --dir hangar hangar night report night --slack-webhook "$SLACK_WEBHOOK"
+        run: pnpm --dir devicepool devicepool night report night --slack-webhook "$SLACK_WEBHOOK"

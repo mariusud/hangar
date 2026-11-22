@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mariusud/devicepool",
+  "title": "Devicepool",
+  "description": "Lease iOS simulators and Android emulators from your own Devicepool and drive them over MCP.",
+  "repository": {
+    "url": "https://github.com/mariusud/devicepool",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "devicepool",
+      "version": "0.1.0",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "up"
+        }
+      ],
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:7420/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "A Devicepool agent token, made with `devicepool connect` or on the console's Connect page.",
+            "value": "Bearer {token}",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "token": {
+                "description": "The Devicepool token.",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

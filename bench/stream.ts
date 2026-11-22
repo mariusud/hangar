@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { Lease } from 'hangar';
+import type { Lease } from 'devicepool';
 import { start } from '../e2e/harness.ts';
 
 const TRIALS = Number(process.env.TRIALS ?? 15);
@@ -121,8 +121,8 @@ async function capture(url: string, token: string): Promise<string | null> {
 
 const h = await start(1, () => {});
 try {
-  const { hangar, token } = h.client('bench');
-  const lease = await hangar.lease({}, { autoRenew: false });
+  const { devicepool, token } = h.client('bench');
+  const lease = await devicepool.lease({}, { autoRenew: false });
   const results = {
     machine: machine(),
     date: new Date().toISOString().slice(0, 10),

@@ -9,19 +9,19 @@ import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 export type S3Config = { endpoint: string; bucket: string; region: string; accessKey: string; secretKey: string };
 
 export function s3FromEnv(env: NodeJS.ProcessEnv = process.env): S3Config | undefined {
-  if (!env.HANGAR_S3_BUCKET) {
+  if (!env.DEVICEPOOL_S3_BUCKET) {
     return undefined;
   }
-  const missing = ['HANGAR_S3_ENDPOINT', 'HANGAR_S3_ACCESS_KEY', 'HANGAR_S3_SECRET_KEY'].filter((k) => !env[k]);
+  const missing = ['DEVICEPOOL_S3_ENDPOINT', 'DEVICEPOOL_S3_ACCESS_KEY', 'DEVICEPOOL_S3_SECRET_KEY'].filter((k) => !env[k]);
   if (missing.length) {
-    throw new Error(`HANGAR_S3_BUCKET is set, so ${missing.join(', ')} must be too.`);
+    throw new Error(`DEVICEPOOL_S3_BUCKET is set, so ${missing.join(', ')} must be too.`);
   }
   return {
-    endpoint: env.HANGAR_S3_ENDPOINT!.replace(/\/$/, ''),
-    bucket: env.HANGAR_S3_BUCKET,
-    region: env.HANGAR_S3_REGION ?? 'us-east-1',
-    accessKey: env.HANGAR_S3_ACCESS_KEY!,
-    secretKey: env.HANGAR_S3_SECRET_KEY!,
+    endpoint: env.DEVICEPOOL_S3_ENDPOINT!.replace(/\/$/, ''),
+    bucket: env.DEVICEPOOL_S3_BUCKET,
+    region: env.DEVICEPOOL_S3_REGION ?? 'us-east-1',
+    accessKey: env.DEVICEPOOL_S3_ACCESS_KEY!,
+    secretKey: env.DEVICEPOOL_S3_SECRET_KEY!,
   };
 }
 

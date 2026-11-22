@@ -1,4 +1,4 @@
-import type { LimitRole, Priority, TokenLimits } from '@hangar/protocol';
+import type { LimitRole, Priority, TokenLimits } from '@devicepool/protocol';
 import * as auth from '../auth.ts';
 import type { Db, TokenPriorityRow } from '../db.ts';
 import { capFor, isLimitRole, roleOf, tokenLimits, type Ask, type Limits, type Overrides } from './limits.ts';
@@ -38,7 +38,7 @@ export function priorityOf(db: Db, p: auth.Principal): TokenPriorityRow {
 
 export function mintMemberToken(db: Db, p: auth.Principal, b: TokenRequest, bookingId: string | null = null): { token: string; limits: TokenLimits; priority: Priority } {
   if (b.priority !== undefined && b.priority !== 'ci' && b.priority !== 'interactive') {
-    throw new ApiError(400, 'BAD_PRIORITY', '`priority` is "ci" or "interactive".', 'A token for a booking comes from POST /v1/bookings/:name/tokens, or `hangar connect <booking>`.');
+    throw new ApiError(400, 'BAD_PRIORITY', '`priority` is "ci" or "interactive".', 'A token for a booking comes from POST /v1/bookings/:name/tokens, or `devicepool connect <booking>`.');
   }
   const priority: Priority = bookingId ? 'booked' : b.priority === 'ci' ? 'ci' : 'interactive';
   const minted = mintPlainToken(db, p, b);

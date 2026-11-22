@@ -1,0 +1,26 @@
+# The image built from the Dockerfile at the repository root.
+image:
+  repository: devicepool
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# The address people and Macs reach Devicepool at.
+url: https://devicepool.example.com
+
+# SQLite, builds and recordings live on this volume. One replica only.
+storage:
+  size: 50Gi
+  storageClassName: ""
+
+ingress:
+  enabled: false
+  className: ""
+  host: devicepool.example.com
+  tlsSecretName: ""
+  # WebSockets stay open for hours. For ingress-nginx:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 4g
+
+resources: {}

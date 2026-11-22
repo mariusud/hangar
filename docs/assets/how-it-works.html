@@ -81,31 +81,31 @@
 </head>
 <body>
   <div class="col-title" style="left:40px">Who needs a device</div>
-  <div class="col-title" style="left:470px">Device broker</div>
+  <div class="col-title" style="left:470px">Device farm</div>
   <div class="col-title" style="left:800px">Devices</div>
 
   <div class="client" id="agent" style="top:62px; --c: var(--mint)">
     <div class="who"><span class="dot" style="background:var(--mint)"></span>AI agent</div>
     <div class="how">Claude Code, Cursor, any MCP client</div>
-    <div class="cmd mono" id="agent-cmd">hangar connect claude</div>
+    <div class="cmd mono" id="agent-cmd">devicepool connect claude</div>
     <div class="live" id="agent-live"></div>
   </div>
   <div class="client" id="ci" style="top:256px; --c: var(--sky)">
     <div class="who"><span class="dot" style="background:var(--sky)"></span>CI pipeline</div>
     <div class="how">Maestro on every pull request</div>
-    <div class="cmd mono" id="ci-cmd">hangar connect ci</div>
+    <div class="cmd mono" id="ci-cmd">devicepool connect ci</div>
     <div class="live" id="ci-live"></div>
   </div>
   <div class="client" id="dev" style="top:450px; --c: var(--amber)">
     <div class="who"><span class="dot" style="background:var(--amber)"></span>Developer</div>
     <div class="how">Your app, Metro on your laptop</div>
-    <div class="cmd mono" id="dev-cmd">hangar run ios</div>
+    <div class="cmd mono" id="dev-cmd">devicepool run ios</div>
     <div class="live" id="dev-live"></div>
   </div>
 
   <div class="broker">
     <div class="top">
-      <div class="brand"><img src="mark-dark.svg" width="20" height="20" alt="" />Hangar</div>
+      <div class="brand"><img src="mark-dark.svg" width="20" height="20" alt="" />Devicepool</div>
       <div class="nav"><span>Devices</span><span class="on">Fleet</span><span>Runs</span></div>
     </div>
     <div class="body">
@@ -134,9 +134,9 @@
   <svg class="wires" id="wires" width="1200" height="620"></svg>
 
   <div class="end" id="end">
-    <div class="name"><img src="mark-dark.svg" width="68" height="68" alt="" />Hangar</div>
-    <div class="sub">Free, open source devices for your team, your CI and your agents.</div>
-    <div class="pill mono"><span>$</span>hangar up</div>
+    <div class="name"><img src="mark-dark.svg" width="68" height="68" alt="" />Devicepool</div>
+    <div class="sub">The open source, self-hosted device farm.</div>
+    <div class="pill mono"><span>$</span>devicepool up</div>
   </div>
 
 <script>

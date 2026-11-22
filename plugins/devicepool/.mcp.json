@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "devicepool": {
+      "type": "http",
+      "url": "${DEVICEPOOL_URL}/mcp",
+      "headers": { "Authorization": "Bearer ${DEVICEPOOL_TOKEN}" }
+    }
+  }
+}

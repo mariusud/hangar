@@ -32,7 +32,7 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, db: D
 }
 
 function buildServer(p: auth.Principal, db: Db, leases: Leases, recordings: Recordings, internalUrl: string, publicUrl: string): McpServer {
-  const server = new McpServer({ name: 'hangar', version: '0.0.0' });
+  const server = new McpServer({ name: 'devicepool', version: '0.0.0' });
 
   const pick = (leaseId?: string): string => {
     if (leaseId) {

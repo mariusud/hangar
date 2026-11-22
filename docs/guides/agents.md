@@ -1,14 +1,14 @@
 # Connect an AI agent
 
-Agents use Hangar over MCP at `/mcp` (streamable HTTP, a bearer token) or over the REST API.
-The quickest way to give an agent its own token is `hangar connect`, run on a machine where you
-are signed in with `hangar login`:
+Agents use Devicepool over MCP at `/mcp` (streamable HTTP, a bearer token) or over the REST API.
+The quickest way to give an agent its own token is `devicepool connect`, run on a machine where you
+are signed in with `devicepool login`:
 
 ```bash
-hangar connect claude    # adds Hangar to Claude Code, or prints the command if claude is not here
-hangar connect cursor    # prints the .cursor/mcp.json block
-hangar connect codex     # prints the block for ~/.codex/config.toml
-hangar connect night     # a token that leases only from the booking "night", in its window
+devicepool connect claude    # adds Devicepool to Claude Code, or prints the command if claude is not here
+devicepool connect cursor    # prints the .cursor/mcp.json block
+devicepool connect codex     # prints the block for ~/.codex/config.toml
+devicepool connect night     # a token that leases only from the booking "night", in its window
 ```
 
 Each makes an agent token labelled with the target and this computer's name (see "How long a
@@ -19,7 +19,7 @@ described in [Night QA](night-qa.md#tokens-for-a-booking).
 ## Claude Code
 
 ```bash
-claude mcp add --transport http hangar http://studio-mini.local:7420/mcp \
+claude mcp add --transport http devicepool http://studio-mini.local:7420/mcp \
   --header "Authorization: Bearer hgr_member_..."
 ```
 
@@ -27,9 +27,9 @@ Or install the plugin from this repository, which reads the broker and token fro
 environment:
 
 ```bash
-export HANGAR_URL=http://studio-mini.local:7420 HANGAR_TOKEN=hgr_member_...
+export DEVICEPOOL_URL=http://studio-mini.local:7420 DEVICEPOOL_TOKEN=hgr_member_...
 claude
-/plugin install hangar --marketplace mariusud/hangar
+/plugin install devicepool --marketplace mariusud/devicepool
 ```
 
 ## Cursor
@@ -39,7 +39,7 @@ In `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "hangar": {
+    "devicepool": {
       "url": "http://studio-mini.local:7420/mcp",
       "headers": { "Authorization": "Bearer hgr_member_..." }
     }
@@ -52,7 +52,7 @@ In `.cursor/mcp.json`:
 In `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.hangar]
+[mcp_servers.devicepool]
 url = "http://studio-mini.local:7420/mcp"
 http_headers = { Authorization = "Bearer hgr_member_..." }
 ```
@@ -70,7 +70,7 @@ http_headers = { Authorization = "Bearer hgr_member_..." }
 | `react_native` | Open the dev menu, or reload the bundle. |
 | `send_push`, `set_permission`, `set_location`, `set_appearance`, `set_app_language` | Device presets. |
 | `record` | Start or stop a recording. Stop returns a link with the video, the timeline of actions, the app log and the network requests. |
-| `report_finding` | File a bug with a title, a description and a severity. Hangar attaches the last two minutes of the recording, the steps, the app log, the network requests and a screenshot, and the finding goes into the night report. |
+| `report_finding` | File a bug with a title, a description and a severity. Devicepool attaches the last two minutes of the recording, the steps, the app log, the network requests and a screenshot, and the finding goes into the night report. |
 | `bookings` | The device bookings and whether their windows are open, the broker's time zone, and your token's priority and booking. |
 | `app_log` | The app's own log lines, newest last. |
 | `js_evaluate`, `js_console` | Evaluate a JavaScript expression in the React Native app, and read its console messages and uncaught exceptions. |
@@ -90,8 +90,8 @@ may ask for less than its token allows, never more. A request for more fails wit
 
 | Token | Idle | Longest | TTL |
 |---|---|---|---|
-| Made in the console, or by `hangar login` | 5 minutes | 4 hours | 10 minutes, renewed by the client and CLI |
-| Made by `hangar connect claude`, `cursor` or `codex` | 30 minutes | 8 hours | none |
+| Made in the console, or by `devicepool login` | 5 minutes | 4 hours | 10 minutes, renewed by the client and CLI |
+| Made by `devicepool connect claude`, `cursor` or `codex` | 30 minutes | 8 hours | none |
 
 Leases made over MCP have no TTL whatever the token, so they end only when idle or at the
 longest-lease limit. `GET /v1/lease-limits` shows the limits your token gets and the caps per
@@ -106,7 +106,7 @@ token made with `POST /v1/tokens` takes `agent: true`, `idleSeconds`, `maxSecond
 `graceSeconds`, each held under the cap for its role.
 
 An agent that will be quiet for a while calls `keepalive` (or `POST /v1/leases/:id/keepalive`,
-or `hangar keepalive`). It counts as activity and renews the TTL, and it does not touch the
+or `devicepool keepalive`). It counts as activity and renews the TTL, and it does not touch the
 device.
 
 ## When a lease is about to end
@@ -123,7 +123,7 @@ lease recorded is kept either way. [Night QA](night-qa.md#priority-and-preemptio
 
 An agent that restarts, or loses its connection, can pick its lease up again with
 `reattach_lease` and the lease id (`list_leases` shows it), or `POST /v1/leases/:id/attach`, or
-`hangar attach <lease-id>`. It has to use the same token that made the lease; another token of
+`devicepool attach <lease-id>`. It has to use the same token that made the lease; another token of
 the same person gets `WRONG_TOKEN`. Reattaching an active lease counts as activity. A lease that
 ended can't be reattached.
 
@@ -151,15 +151,15 @@ The agent keeps the newest 2000 lines per app.
 
 `js_evaluate` (`POST /v1/leases/:id/js`), `js_console` (`GET /v1/leases/:id/js/console`) and
 `network_requests` (`GET /v1/leases/:id/network`) reach the app's JavaScript through Metro's
-debugger, over the Metro tunnel that `hangar run ios` or `hangar run android` opens. Without
+debugger, over the Metro tunnel that `devicepool run ios` or `devicepool run android` opens. Without
 that tunnel they answer `NO_METRO_TUNNEL`. Console messages and requests are collected from the
 first JavaScript call on the lease, so call one of these tools early. Network requests come from
-the debugger's Network domain when the runtime has one; otherwise Hangar patches
+the debugger's Network domain when the runtime has one; otherwise Devicepool patches
 `XMLHttpRequest` in the app, which also covers `fetch`. Request and response bodies are not
 kept. The agent keeps the newest 500 console messages and 300 requests per lease.
 
 The tools take `bundleId`; without it they use the last app installed or launched through
-Hangar on the lease. `app_log`, `js_console` and `network_requests` return `next`: pass it as
+Devicepool on the lease. `app_log`, `js_console` and `network_requests` return `next`: pass it as
 `since` on the next call to get only newer entries. `dropped: true` means entries after `since`
 fell out of the buffer. Everything is dropped when the lease ends.
 
@@ -184,7 +184,7 @@ is a lease id:
 3. `mobile_release_remote_device` gives it back.
 
 Coordinates are points on iOS and pixels on Android, the units the element list reports.
-`mobile_install_app` takes a build registered on Hangar, by name or hash, because a path on the
+`mobile_install_app` takes a build registered on Devicepool, by name or hash, because a path on the
 agent's machine is not reachable from the fleet. mobile-mcp's tools for logs, crash reports,
 orientation, clipboard, folding and recording to a file are not there under their names; use
 `app_log`, `set_orientation` and `record` instead.
@@ -195,10 +195,10 @@ An agent framework without MCP can call the REST API with the same token, or use
 client:
 
 ```ts
-import { Hangar } from 'hangar';
+import { Devicepool } from 'devicepool';
 
-const hangar = new Hangar({ url: process.env.HANGAR_URL!, token: process.env.HANGAR_TOKEN! });
-await using lease = await hangar.lease({ model: 'iPhone 17' });
+const devicepool = new Devicepool({ url: process.env.DEVICEPOOL_URL!, token: process.env.DEVICEPOOL_TOKEN! });
+await using lease = await devicepool.lease({ model: 'iPhone 17' });
 await lease.launch('com.example.app');
 await lease.tap({ label: 'Sign in', role: 'button' });
 const { nodes } = await lease.ui();

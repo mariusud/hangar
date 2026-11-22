@@ -5,18 +5,18 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@hangar/protocol';
-import { startBroker, type Broker } from '@hangar/broker';
+import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@devicepool/protocol';
+import { startBroker, type Broker } from '@devicepool/broker';
 import * as auth from '../packages/broker/src/auth.ts';
 import { OpError } from '../packages/agent/src/index.ts';
 import { xcuitest } from '../packages/agent/src/xcuitest.ts';
 
 const run = promisify(execFile);
-const real = Boolean(process.env.HANGAR_REAL);
+const real = Boolean(process.env.DEVICEPOOL_REAL);
 const root = new URL('..', import.meta.url).pathname;
 const fixture = join(root, 'e2e/fixtures/xcuitest');
 // The simulator this test makes and deletes. It is not named like the agent's own devices.
-const simName = process.env.HANGAR_E2E_SIMULATOR ?? 'xcuitest-e2e';
+const simName = process.env.DEVICEPOOL_E2E_SIMULATOR ?? 'xcuitest-e2e';
 
 // A host with one simulator that runs XCUITest ops with the agent's own xcuitest code. It does not record, and
 // it does not wipe the simulator between leases: it only reports it under a new id, as the broker leases a
@@ -53,20 +53,20 @@ function xcuitestHost(broker: Broker, udid: string): void {
   handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'xcuitest-e2e', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5', platform: 'ios-simulator' }], devices: [device], leases: [] });
 }
 
-async function hangar(url: string, token: string, args: string[]): Promise<{ code: number; stderr: string }> {
-  const env = { ...process.env, HANGAR_URL: url, HANGAR_TOKEN: token };
-  return run('node', ['--disable-warning=ExperimentalWarning', join(root, 'packages/hangar/src/main.ts'), ...args], { env, maxBuffer: 16 * 1024 * 1024 }).then(
+async function devicepool(url: string, token: string, args: string[]): Promise<{ code: number; stderr: string }> {
+  const env = { ...process.env, DEVICEPOOL_URL: url, DEVICEPOOL_TOKEN: token };
+  return run('node', ['--disable-warning=ExperimentalWarning', join(root, 'packages/devicepool/src/main.ts'), ...args], { env, maxBuffer: 16 * 1024 * 1024 }).then(
     (r) => ({ code: 0, stderr: r.stderr }),
     (err: { code?: number; stderr?: string }) => ({ code: err.code ?? 1, stderr: err.stderr ?? '' }),
   );
 }
 
-test('hangar run xcuitest runs a real UI test target on a simulator, with JUnit for a pass and a failure', { skip: !real && 'set HANGAR_REAL=1', timeout: 900_000 }, async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-e2e-xcuitest-'));
+test('devicepool run xcuitest runs a real UI test target on a simulator, with JUnit for a pass and a failure', { skip: !real && 'set DEVICEPOOL_REAL=1', timeout: 900_000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-e2e-xcuitest-'));
   let udid: string | null = null;
   let broker: Broker | null = null;
   try {
-    await run('xcodebuild', ['build-for-testing', '-project', join(fixture, 'HangarFixture.xcodeproj'), '-scheme', 'HangarFixture', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', join(dir, 'dd')], { maxBuffer: 64 * 1024 * 1024 });
+    await run('xcodebuild', ['build-for-testing', '-project', join(fixture, 'DevicepoolFixture.xcodeproj'), '-scheme', 'DevicepoolFixture', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', join(dir, 'dd')], { maxBuffer: 64 * 1024 * 1024 });
     const products = join(dir, 'dd/Build/Products');
 
     udid = (await run('xcrun', ['simctl', 'create', simName, 'iPhone 17'])).stdout.trim();
@@ -78,17 +78,17 @@ test('hangar run xcuitest runs a real UI test target on a simulator, with JUnit 
     const account = auth.createAccount(broker.db, 'ci', 'member');
     const token = auth.mintToken(broker.db, 'member', { accountId: account.id, scopes: ['install:upload'] });
 
-    const pass = await hangar(broker.url, token, ['run', 'xcuitest', products, '--tests', 'HangarFixtureUITests/CounterTests', '--retries', '0', '--junit', join(dir, 'pass.xml')]);
+    const pass = await devicepool(broker.url, token, ['run', 'xcuitest', products, '--tests', 'DevicepoolFixtureUITests/CounterTests', '--retries', '0', '--junit', join(dir, 'pass.xml')]);
     assert.equal(pass.code, 0, pass.stderr);
     const passXml = await readFile(join(dir, 'pass.xml'), 'utf8');
     assert.match(passXml, /<testsuite name="xcuitest" tests="1" failures="0"/);
-    assert.match(passXml, /<testcase classname="xcuitest" name="HangarFixtureUITests\/CounterTests"><properties>[^]*?<\/properties><\/testcase>/);
+    assert.match(passXml, /<testcase classname="xcuitest" name="DevicepoolFixtureUITests\/CounterTests"><properties>[^]*?<\/properties><\/testcase>/);
 
     // No --tests: the targets come from the .xctestrun, and the whole target fails on BrokenTests.
-    const fail = await hangar(broker.url, token, ['run', 'xcuitest', products, '--retries', '0', '--junit', join(dir, 'fail.xml')]);
+    const fail = await devicepool(broker.url, token, ['run', 'xcuitest', products, '--retries', '0', '--junit', join(dir, 'fail.xml')]);
     assert.equal(fail.code, 1, fail.stderr);
     const failXml = await readFile(join(dir, 'fail.xml'), 'utf8');
-    assert.match(failXml, /<testcase classname="xcuitest" name="HangarFixtureUITests">/);
+    assert.match(failXml, /<testcase classname="xcuitest" name="DevicepoolFixtureUITests">/);
     assert.match(failXml, /<failure message="BrokenTests\.testMissingButton: [^"]*The missing button is not there/);
     assert.doesNotMatch(failXml, /CounterTests\.testAddOne/, 'the passing test is not in the failure');
   } finally {

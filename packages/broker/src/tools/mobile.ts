@@ -1,11 +1,11 @@
 // Coordinates are points on iOS and pixels on Android.
 
 import { z } from 'zod';
-import type { Action, DeviceClass, Frame, Point, UiNode } from '@hangar/protocol';
+import type { Action, DeviceClass, Frame, Point, UiNode } from '@devicepool/protocol';
 import { ApiError } from '../leases/service.ts';
 import type { ToolDeps } from './util.ts';
 
-const device = z.string().describe('The device id from mobile_allocate_remote_device (a Hangar lease id)');
+const device = z.string().describe('The device id from mobile_allocate_remote_device (a Devicepool lease id)');
 
 function actionable(nodes: UiNode[]): UiNode[] {
   return nodes.filter((n) => n.role !== 'application' && (n.label || n.identifier));
@@ -179,7 +179,7 @@ export function registerMobileTools({ server, p, db, leases, safe, text, install
         };
         const a = actions[name];
         if (!a) {
-          throw new ApiError(400, 'UNKNOWN_BUTTON', `Hangar presses HOME, LOCK, POWER and ENTER, not ${button}.`);
+          throw new ApiError(400, 'UNKNOWN_BUTTON', `Devicepool presses HOME, LOCK, POWER and ENTER, not ${button}.`);
         }
         await act(id, [a]);
         return text(`Pressed ${name}.`);
@@ -223,7 +223,7 @@ export function registerMobileTools({ server, p, db, leases, safe, text, install
 
   server.registerTool(
     'mobile_install_app',
-    { description: 'Install a build registered on Hangar, by name or sha256. Upload files first with `hangar install` or POST /v1/builds; a path on your machine is not reachable from the fleet.', inputSchema: { device, path: z.string() } },
+    { description: 'Install a build registered on Devicepool, by name or sha256. Upload files first with `devicepool install` or POST /v1/builds; a path on your machine is not reachable from the fleet.', inputSchema: { device, path: z.string() } },
     ({ device: id, path }) => safe(async () => text(await install(id, path))),
   );
 

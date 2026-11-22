@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type BrokerMessage, type Finding, type NightReport } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type BrokerMessage, type Finding, type NightReport } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { NightRow } from './db.ts';
 import { parseFinding, STARTED_WITH_FINDING, videoSpan } from './findings.ts';
@@ -213,7 +213,7 @@ function caller(broker: Broker, token: string): Call {
 test('a finding carries the video span, steps, app log, network and a screenshot, and lands in the night report', async () => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-findings-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-findings-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const client = new Client({ name: 'test', version: '0' });
   try {
@@ -274,7 +274,7 @@ test('a finding carries the video span, steps, app log, network and a screenshot
     const network = (await call<{ requests: { id: string }[] }>('GET', `/v1/recordings/${recId}/network.json`)).json;
     assert.deepEqual(network.requests.map((r) => r.id), ['req-1']);
 
-    // Through MCP on a lease with no recording: Hangar starts one and says so.
+    // Through MCP on a lease with no recording: Devicepool starts one and says so.
     await client.connect(new StreamableHTTPClientTransport(new URL(`${broker.url}/mcp`), { requestInit: { headers: { authorization: `Bearer ${qaToken}` } } }));
     const r = await client.callTool({ name: 'report_finding', arguments: { title: 'Second bug', description: 'Again.', leaseId } });
     assert.ok(!r.isError, JSON.stringify(r));

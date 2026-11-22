@@ -108,8 +108,8 @@ test('pickTarget picks the leased device, and refuses to guess between devices',
     reactNative: { logicalDeviceId: device },
     webSocketDebuggerUrl: `ws://localhost:8081/inspector/debug?device=${device}&page=${id}`,
   });
-  const list = [page('1', 'iPhone 17', 'mine'), page('2', 'hangar-abc', 'leased'), page('3', 'hangar-abc', 'leased'), page('4', 'hangar-abc', 'leased', 'com.other')];
-  assert.equal(pickTarget(list, 'com.example', (n) => n === 'hangar-abc').id, '3');
+  const list = [page('1', 'iPhone 17', 'mine'), page('2', 'devicepool-abc', 'leased'), page('3', 'devicepool-abc', 'leased'), page('4', 'devicepool-abc', 'leased', 'com.other')];
+  assert.equal(pickTarget(list, 'com.example', (n) => n === 'devicepool-abc').id, '3');
   assert.throws(() => pickTarget(list, 'com.example', () => false), { code: 'JS_TARGET_AMBIGUOUS' });
   assert.equal(pickTarget([page('1', 'x', 'only')], undefined, () => false).id, '1');
   assert.throws(() => pickTarget([], 'com.example', () => true), { code: 'JS_NOT_CONNECTED' });
@@ -131,7 +131,7 @@ async function fakeMetro(opts: { network: boolean }): Promise<FakeMetro> {
   const server: Server = createServer((req, res) => {
     const port = portOf(server);
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify([{ id: '1', title: 'com.example', appId: 'com.example', deviceName: 'hangar-abc', webSocketDebuggerUrl: `ws://localhost:${port + 1}/inspector/debug?device=d&page=1` }]));
+    res.end(JSON.stringify([{ id: '1', title: 'com.example', appId: 'com.example', deviceName: 'devicepool-abc', webSocketDebuggerUrl: `ws://localhost:${port + 1}/inspector/debug?device=d&page=1` }]));
   });
   const wss = new WebSocketServer({ server, path: '/inspector/debug' });
   wss.on('connection', (ws) => {
@@ -158,7 +158,7 @@ async function fakeMetro(opts: { network: boolean }): Promise<FakeMetro> {
         if (e === XHR_PATCH) {
           patched = true;
           reply({ result: { type: 'boolean', value: true } });
-        } else if (e.startsWith('globalThis.__hangarNet')) {
+        } else if (e.startsWith('globalThis.__devicepoolNet')) {
           const entries = [{ seq: 1, id: 'xhr-1', method: 'POST', url: 'https://api.example.com/login', startedAt: 5, status: 401, durationMs: 30 }];
           reply({ result: patched ? { type: 'string', value: JSON.stringify(e.includes('since(0)') ? entries : []) } : { type: 'object', subtype: 'null', value: null } });
         } else if (e === 'throw') {
@@ -190,7 +190,7 @@ async function fakeMetro(opts: { network: boolean }): Promise<FakeMetro> {
 
 test('JsTools evaluates, collects console messages and CDP network events through the tunnel port', async () => {
   const metro = await fakeMetro({ network: true });
-  const js = new JsTools({ port: () => metro.port, matchDevice: async () => (n) => n === 'hangar-abc' });
+  const js = new JsTools({ port: () => metro.port, matchDevice: async () => (n) => n === 'devicepool-abc' });
   try {
     assert.deepEqual(await js.evaluate('1 + 1'), { type: 'object', value: { answer: 42 } });
     assert.deepEqual(await js.evaluate('throw'), { type: 'object', exception: 'Error: nope' });

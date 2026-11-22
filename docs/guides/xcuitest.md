@@ -1,7 +1,7 @@
 # Run XCUITest on leased simulators
 
-`hangar run xcuitest` runs your UI tests the way `hangar run maestro` runs flows: split over fresh
-simulators, a failed class retried once on its own and recorded, flaky classes marked, and one
+`devicepool run xcuitest` runs your UI tests the way `devicepool run maestro` runs flows: split over
+fresh simulators, a failed class retried once on its own and recorded, flaky classes marked, and one
 JUnit report.
 
 Build the tests once, on any Mac:
@@ -11,13 +11,13 @@ xcodebuild build-for-testing -workspace ios/MyApp.xcworkspace -scheme MyApp \
   -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build
 ```
 
-Then run them on Hangar:
+Then run them on Devicepool:
 
 ```bash
-hangar run xcuitest build/Build/Products --shards 3 --junit xcuitest.xml
+devicepool run xcuitest build/Build/Products --shards 3 --junit xcuitest.xml
 ```
 
-Hangar uploads the `Build/Products` folder (the `.xctestrun` file, the app and the test runner)
+Devicepool uploads the `Build/Products` folder (the `.xctestrun` file, the app and the test runner)
 as a build, so the token needs the install:upload permission. Each shard runs
 `xcodebuild test-without-building` against its leased simulator only, so it cannot touch the
 Mac's other devices.

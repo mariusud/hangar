@@ -7,7 +7,7 @@ export function registerLeaseTools({ server, p, db, leases, pick, safe, text }: 
     {
       description: 'Lease a device for your exclusive use. Waits until one is free. The device is wiped when released. Returns the lease id.',
       inputSchema: {
-        platform: z.enum(['ios-simulator', 'android-emulator']).optional().describe('Leave out for any.'),
+        platform: z.enum(['ios-simulator', 'android-emulator', 'android-device']).optional().describe('Leave out for any.'),
         model: z.string().optional().describe('For example "iPhone 17". Leave out for any.'),
         os: z.string().optional().describe('For example "26.5". Leave out for any.'),
         image: z.string().optional().describe('A device image by name, with apps and settings already in place. See GET /v1/images.'),
@@ -52,7 +52,7 @@ export function registerLeaseTools({ server, p, db, leases, pick, safe, text }: 
   server.registerTool(
     'keepalive',
     {
-      description: 'Tell Hangar you are still using the device without touching it, for example while you think or wait for a build. Counts as activity, so the lease does not end as idle.',
+      description: 'Tell Devicepool you are still using the device without touching it, for example while you think or wait for a build. Counts as activity, so the lease does not end as idle.',
       inputSchema: { leaseId: z.string().optional() },
     },
     ({ leaseId }) => safe(async () => text(leases.view(leases.keepalive(p, pick(leaseId))))),

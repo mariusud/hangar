@@ -1,4 +1,4 @@
-import type { AppLogPage } from '@hangar/protocol';
+import type { AppLogPage } from '@devicepool/protocol';
 import { defaultSpawn, LogStream, type LogSource, type Spawn } from './applog.ts';
 import { JsTools, type JsOptions } from './cdp.ts';
 import { ToolError } from './tool-error.ts';
@@ -41,7 +41,7 @@ export class LeaseTools {
   app(leaseId: string, bundleId: string | undefined): string {
     const app = bundleId || this.leases.get(leaseId)?.app;
     if (!app) {
-      throw new ToolError('NO_APP', 'Name the app with bundleId, or install or launch it through Hangar first so Hangar knows which app is yours.');
+      throw new ToolError('NO_APP', 'Name the app with bundleId, or install or launch it through Devicepool first so Devicepool knows which app is yours.');
     }
     return app;
   }

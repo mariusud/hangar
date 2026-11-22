@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Booking, BookingWindow, DeviceClass, Platform } from '@hangar/protocol';
+import type { Booking, BookingWindow, DeviceClass, Platform } from '@devicepool/protocol';
 import type { Principal } from '../auth.ts';
 import type { Db } from '../db.ts';
 import type { Hosts } from '../hosts.ts';
@@ -49,7 +49,7 @@ export function createBooking(db: Db, hosts: Hosts, p: Principal, req: BookingRe
   }
   const teamId = teamFor(db, p, req.team);
   const cls: DeviceClass = {};
-  if (req.platform === 'ios-simulator' || req.platform === 'android-emulator') {
+  if (req.platform === 'ios-simulator' || req.platform === 'android-emulator' || req.platform === 'android-device') {
     const platform: Platform = req.platform;
     cls.platform = platform;
   }
@@ -61,7 +61,7 @@ export function createBooking(db: Db, hosts: Hosts, p: Principal, req: BookingRe
     }
   }
   if (cls.image && !db.images().some((i) => i.name.toLowerCase() === cls.image?.toLowerCase())) {
-    throw new ApiError(404, 'NO_SUCH_IMAGE', `No image called ${cls.image}.`, 'List images with `hangar images`, or book without --image.');
+    throw new ApiError(404, 'NO_SUCH_IMAGE', `No image called ${cls.image}.`, 'List images with `devicepool images`, or book without --image.');
   }
   const booking: Booking = { id: randomUUID(), name, teamId, devices, class: cls, days, from: clock(from), to: clock(to), createdBy: p.accountId, createdAt: now };
   const check = checkBooking(booking, db.bookings(), hostCapacity(db, hosts));
@@ -76,7 +76,7 @@ export function createBooking(db: Db, hosts: Hosts, p: Principal, req: BookingRe
 export function findBooking(db: Db, ref: string): Booking {
   const b = db.bookings().find((x) => x.id === ref || x.name.toLowerCase() === ref.toLowerCase());
   if (!b) {
-    throw new ApiError(404, 'BOOKING_NOT_FOUND', `No booking called ${ref}.`, 'List bookings with `hangar bookings`.');
+    throw new ApiError(404, 'BOOKING_NOT_FOUND', `No booking called ${ref}.`, 'List bookings with `devicepool bookings`.');
   }
   return b;
 }

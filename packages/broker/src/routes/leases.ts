@@ -1,4 +1,4 @@
-import type { Action, DeviceClass, Op, PrivacyService } from '@hangar/protocol';
+import type { Action, DeviceClass, Op, PrivacyService } from '@devicepool/protocol';
 import * as auth from '../auth.ts';
 import { isLimitRole, LIMIT_ROLES } from '../leases/limits.ts';
 import { ApiError } from '../leases/service.ts';
@@ -193,7 +193,7 @@ route('POST', '/v1/leases/:id/apps', async (req, res, ctx) => {
     const { build: ref } = await body<{ build?: string }>(req);
     build = ref ? ctx.db.getBuild(ref) : null;
     if (!build) {
-      throw new ApiError(404, 'BUILD_NOT_FOUND', `No build called ${ref}.`, 'Upload one with `hangar install ./MyApp.app`, or list them at GET /v1/builds.');
+      throw new ApiError(404, 'BUILD_NOT_FOUND', `No build called ${ref}.`, 'Upload one with `devicepool install ./MyApp.app`, or list them at GET /v1/builds.');
     }
   } else {
     if (!p.scopes.includes('install:upload')) {

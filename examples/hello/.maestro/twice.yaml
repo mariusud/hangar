@@ -1,4 +1,4 @@
-appId: dev.hangar.hello
+appId: dev.devicepool.hello
 ---
 - launchApp:
     clearState: true

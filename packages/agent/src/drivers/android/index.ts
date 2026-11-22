@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Frame, Orientation, TestCase, UiNode } from '@hangar/protocol';
+import type { Frame, Orientation, TestCase, UiNode } from '@devicepool/protocol';
 import { parseLogcatLine, type LogSource } from '../applog.ts';
 
 const run = promisify(execFile);
@@ -51,11 +51,27 @@ async function adbBuffer(serial: string, ...args: string[]): Promise<Buffer> {
   }
 }
 
+/** Runs adb against one device. The wipe takes this so tests can pass a fake phone. */
+export type Adb = { serial: string; run: (...args: string[]) => Promise<string> };
+
+export function adbFor(serial: string): Adb {
+  return { serial, run: (...args) => adb(serial, ...args) };
+}
+
+/** The output of `adb devices -l`, for finding phones. */
+export async function deviceList(): Promise<string> {
+  try {
+    return (await run(tool('platform-tools', 'adb'), ['devices', '-l'], { maxBuffer: MAX_BUFFER })).stdout;
+  } catch (err) {
+    throw new DriverError('ADB_FAILED', `adb devices failed: ${stderrOf(err)}`);
+  }
+}
+
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-function checkPackage(pkg: string): string {
+export function checkPackage(pkg: string): string {
   if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(pkg)) {
     throw new DriverError('BAD_PACKAGE', `${pkg} is not an Android package name.`);
   }
@@ -155,7 +171,7 @@ export function toNodes(xml: string, screen: { width: number; height: number }):
 }
 
 export async function describe(serial: string): Promise<{ screen: Frame; nodes: UiNode[] }> {
-  const path = '/data/local/tmp/hangar-ui.xml';
+  const path = '/data/local/tmp/devicepool-ui.xml';
   await adb(serial, 'shell', 'uiautomator', 'dump', path);
   return toNodes(await adb(serial, 'exec-out', 'cat', path), await screenSize(serial));
 }

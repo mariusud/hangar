@@ -1,8 +1,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { Booking, BookingWindow, DeviceClass, DeviceState, Hold, LeaseEndReason, LeaseEnding, LeaseLimits, Op, Platform, Priority } from '@hangar/protocol';
-import { normalizeActions } from '@hangar/protocol';
+import type { Booking, BookingWindow, DeviceClass, DeviceState, Hold, LeaseEndReason, LeaseEnding, LeaseLimits, Op, Platform, Priority } from '@devicepool/protocol';
+import { isAndroid, normalizeActions } from '@devicepool/protocol';
 import type { Principal } from '../auth.ts';
 import type { Db, TokenPriorityRow } from '../db.ts';
 import type { Hosts } from '../hosts.ts';
@@ -107,7 +107,7 @@ export class Leases {
     const { priority, bookingId } = own;
     const booking = bookingId ? this.db.bookings().find((b) => b.id === bookingId) : undefined;
     if (bookingId && !booking) {
-      throw new ApiError(410, 'BOOKING_GONE', 'The booking this token was made for no longer exists.', 'Make a new booking with `hangar book`, then a token for it with `hangar connect <booking>`.');
+      throw new ApiError(410, 'BOOKING_GONE', 'The booking this token was made for no longer exists.', 'Make a new booking with `devicepool book`, then a token for it with `devicepool connect <booking>`.');
     }
     if (booking && asked.image && booking.class.image && asked.image.toLowerCase() !== booking.class.image.toLowerCase()) {
       throw new ApiError(400, 'NOT_IN_BOOKING', `This token leases from ${booking.name}, which holds image ${booking.class.image}, not ${asked.image}.`);
@@ -139,10 +139,10 @@ export class Leases {
       }
     }
     if (offers.length === 0) {
-      throw new ApiError(503, 'NO_DEVICES', 'No Mac with devices is connected.', 'Run `npx hangar up` on a Mac, or check `hangar status` on the Macs you have.');
+      throw new ApiError(503, 'NO_DEVICES', 'No Mac with devices is connected.', 'Run `npx devicepool up` on a Mac, or check `devicepool status` on the Macs you have.');
     }
     if (!offers.some((o) => m.matches(cls, { deviceId: '', ...o, build: null }))) {
-      const offered = [...new Set(offers.map((o) => `${o.model} (${o.platform === 'android-emulator' ? 'Android' : 'iOS'} ${o.os}${o.image ? `, image ${o.image}` : ''})`))].join(', ');
+      const offered = [...new Set(offers.map((o) => `${o.model} (${isAndroid(o.platform) ? 'Android' : 'iOS'} ${o.os}${o.image ? `, image ${o.image}` : ''})`))].join(', ');
       throw new ApiError(404, 'NO_MATCHING_DEVICE', `No device matches ${describeClass(cls)}.`, `Devices on offer: ${offered}.`);
     }
     const lease = m.newLease(
@@ -643,8 +643,9 @@ function quotas(db: Db): Map<string, number> {
 }
 
 export function describeClass(cls: DeviceClass): string {
-  const system = cls.platform === 'android-emulator' ? 'Android' : 'iOS';
-  const kind = cls.platform && !cls.model && !cls.os ? (cls.platform === 'android-emulator' ? 'an Android emulator' : 'an iOS simulator') : null;
+  const system = isAndroid(cls.platform) ? 'Android' : 'iOS';
+  const kinds = { 'ios-simulator': 'an iOS simulator', 'android-emulator': 'an Android emulator', 'android-device': 'an Android phone' } satisfies Record<Platform, string>;
+  const kind = cls.platform && !cls.model && !cls.os ? kinds[cls.platform] : null;
   const parts = [kind, cls.model, cls.os && `${system} ${cls.os}`, cls.build && `with ${cls.build}`, cls.image && `image ${cls.image}`].filter(Boolean);
   return parts.length ? parts.join(', ') : 'any device';
 }

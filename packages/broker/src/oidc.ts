@@ -12,23 +12,23 @@ export type OidcConfig = {
 };
 
 export function oidcFromEnv(env: NodeJS.ProcessEnv = process.env): OidcConfig | undefined {
-  if (!env.HANGAR_OIDC_ISSUER || !env.HANGAR_OIDC_CLIENT_ID) {
+  if (!env.DEVICEPOOL_OIDC_ISSUER || !env.DEVICEPOOL_OIDC_CLIENT_ID) {
     return undefined;
   }
   let groups: Record<string, string> | undefined;
-  if (env.HANGAR_OIDC_GROUPS) {
+  if (env.DEVICEPOOL_OIDC_GROUPS) {
     try {
-      groups = JSON.parse(env.HANGAR_OIDC_GROUPS);
+      groups = JSON.parse(env.DEVICEPOOL_OIDC_GROUPS);
     } catch {
-      throw new Error('HANGAR_OIDC_GROUPS is not valid JSON. Write it like {"mobile-qa":"QA"}.');
+      throw new Error('DEVICEPOOL_OIDC_GROUPS is not valid JSON. Write it like {"mobile-qa":"QA"}.');
     }
   }
   return {
-    issuer: env.HANGAR_OIDC_ISSUER.replace(/\/$/, ''),
-    clientId: env.HANGAR_OIDC_CLIENT_ID,
-    ...(env.HANGAR_OIDC_CLIENT_SECRET ? { clientSecret: env.HANGAR_OIDC_CLIENT_SECRET } : {}),
+    issuer: env.DEVICEPOOL_OIDC_ISSUER.replace(/\/$/, ''),
+    clientId: env.DEVICEPOOL_OIDC_CLIENT_ID,
+    ...(env.DEVICEPOOL_OIDC_CLIENT_SECRET ? { clientSecret: env.DEVICEPOOL_OIDC_CLIENT_SECRET } : {}),
     ...(groups ? { groups } : {}),
-    ...(env.HANGAR_OIDC_ONLY === '1' ? { disablePasswords: true } : {}),
+    ...(env.DEVICEPOOL_OIDC_ONLY === '1' ? { disablePasswords: true } : {}),
   };
 }
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type AgentDevice } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice } from '@devicepool/protocol';
 import * as auth from '../auth.ts';
 import { startBroker, type Broker } from '../index.ts';
 
@@ -40,7 +40,7 @@ async function call(broker: Broker, token: string, method: string, path: string,
 }
 
 test('agent tokens carry longer limits under the operator caps, and a restarted agent gets its lease back', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-leases-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     fakeHost(broker);
@@ -105,7 +105,7 @@ test('agent tokens carry longer limits under the operator caps, and a restarted 
 test('keepalive and reattach_lease are MCP tools', async () => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-leases-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const client = new Client({ name: 'test', version: '0' });
   try {
@@ -131,7 +131,7 @@ test('keepalive and reattach_lease are MCP tools', async () => {
 });
 
 test('a queued lease ends when the client waiting for it leaves', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-leases-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     fakeHost(broker);
@@ -159,7 +159,7 @@ test('a queued lease ends when the client waiting for it leaves', async () => {
 });
 
 test('the broker tells its Macs which class a queued lease waits for', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-leases-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const sent: unknown[] = [];
@@ -188,7 +188,7 @@ test('the broker tells its Macs which class a queued lease waits for', async () 
 });
 
 test('capturing a lease saves its device as an image and ends the lease', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-leases-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const sent: unknown[] = [];
@@ -226,7 +226,7 @@ test('capturing a lease saves its device as an image and ends the lease', async 
 });
 
 test('a lease token drives only its own lease and stops working when the lease ends', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-leases-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-leases-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     fakeHost(broker);

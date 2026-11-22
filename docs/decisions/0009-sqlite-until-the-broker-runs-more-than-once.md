@@ -25,5 +25,5 @@ way to reach agents connected to another broker. That is not planned yet.
 ## Consequences
 
 - One broker per database, enforced by the Helm chart's single replica and `Recreate` strategy.
-- Backups are `hangar export`, or a copy of the volume while the broker is stopped.
+- Backups are `devicepool export`, or a copy of the volume while the broker is stopped.
 - Teams who require Postgres for every service have to wait for the multi-broker design.

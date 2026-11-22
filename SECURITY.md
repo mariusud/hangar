@@ -1,6 +1,6 @@
 # Security policy
 
-Hangar runs on your own network and hands devices to people and programs with different
+Devicepool runs on your own network and hands devices to people and programs with different
 permissions, so a hole in lease isolation or authentication affects every installation.
 
 ## Reporting a vulnerability
@@ -26,4 +26,4 @@ The security model is in [docs/design.md](docs/design.md#7-security-model). In p
   iOS simulator runs as a process on the Mac. Uploads need the `install:upload` scope for this
   reason.
 - Out of scope: hostile operators, physical access to hosts, an attacker who already has a shell
-  as the `hangar` user.
+  as the `devicepool` user.

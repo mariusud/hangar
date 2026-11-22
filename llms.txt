@@ -1,0 +1,64 @@
+# Devicepool
+
+> Devicepool is an open source, self-hosted device farm for iOS simulators and Android emulators, for your team, your CI and your AI agents.
+
+Devicepool runs iOS simulators and Android emulators on Macs you own and lends them out one at a
+time. A developer runs a React Native or Expo app on a leased device with Fast Refresh. CI runs
+Maestro flows split over several fresh devices and gets one JUnit report. An AI agent such as
+Claude Code, Codex or Cursor takes a device over MCP, taps through the app and reads the screen.
+A person opens a device in the browser and records a bug as a link. When a lease ends,
+Devicepool deletes the device and clones a fresh one. It is free under Apache-2.0, needs no
+account, sends no telemetry and works offline.
+
+What it does not do:
+
+- It does not run physical phones. They are on the roadmap.
+- It does not host anything. It needs a Mac with Xcode that someone on the team looks after.
+- It has no Appium endpoint.
+- It is early. It is not on npm yet, and it is installed from a clone of the repository.
+
+Install and start it on a Mac with `git clone`, `pnpm install`,
+`npm install -g ./packages/devicepool` and `devicepool up`. The README has the exact commands.
+
+## Docs
+
+- [README](README.md): what Devicepool is, how to start it and how to connect to it
+- [Docs index](docs/index.md): every page in one list
+- [Features](docs/features.md): everything Devicepool does today, with what is tested only against fakes
+- [Design](docs/design.md): the broker, the agents, leases, tokens and the targets
+- [Apple's license terms](docs/licensing.md): what to read before lending simulators to others
+- [Roadmap](ROADMAP.md): planned work, including physical phones
+
+## Guides
+
+- [AI agents](docs/guides/agents.md): connect Claude Code, Codex, Cursor or any MCP client, the MCP tools, and the REST API
+- [Your Expo or React Native app](docs/guides/expo.md): `devicepool run ios` with Fast Refresh and React Native DevTools
+- [Maestro flows](docs/guides/maestro.md): `devicepool run maestro` with shards, retries and a JUnit report
+- [GitHub Actions](docs/guides/github-actions.md): run Maestro flows on every pull request
+- [XCUITest](docs/guides/xcuitest.md): run XCUITest on leased simulators
+- [Android](docs/guides/android.md): Android emulators and Espresso
+- [Recordings](docs/guides/recordings.md): record a bug as a link with video, timeline and app log
+- [Device images](docs/guides/device-images.md): simulators kept ready with an app installed and a locale set
+- [Embed a screen](docs/guides/embed-screen.md): a live device in a page of your own
+- [Night QA](docs/guides/night-qa.md): book devices for a window and let an agent test overnight
+- [More Macs](docs/guides/more-macs.md): add Macs, or run the broker in Docker or Kubernetes
+- [Single sign-on](docs/guides/sso.md): OpenID Connect with groups mapped to teams and roles
+- [Unattended](docs/guides/unattended.md): start Devicepool at login or at boot
+- [Isolation](docs/guides/isolation.md): what a leased app can reach on the Mac
+
+## Alternatives
+
+- [All alternatives](docs/alternatives/index.md): open source alternatives to hosted device clouds
+- [Maestro Cloud](docs/alternatives/maestro-cloud.md): run the same Maestro flows on your own Macs
+- [AWS Device Farm](docs/alternatives/aws-device-farm.md): for tests that run on simulators and emulators; Device Farm has real phones
+- [BrowserStack App Live](docs/alternatives/browserstack-app-live.md): test by hand in the browser on simulators and emulators; App Live has real phones
+- [Appetize](docs/alternatives/appetize.md): stream simulators and emulators to the browser for your own team
+- [Expo Simulators](docs/alternatives/expo-simulators.md): remote simulators for developers, CI and agents on your own Macs
+
+## Comparison
+
+- [How Devicepool compares](docs/comparison.md): Devicepool, Simlock, Argent, Tapflow and Expo Simulators feature by feature, and a dated table of hosted prices
+
+## Numbers
+
+- [Measured speed](docs/numbers.md): 52 frames a second in the browser and 87 ms from saving a file to the change on the device, on one Mac, with the method

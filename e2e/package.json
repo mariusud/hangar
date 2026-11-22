@@ -1,12 +1,12 @@
 {
-  "name": "@hangar/e2e",
+  "name": "@devicepool/e2e",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@hangar/agent": "workspace:*",
-    "@hangar/broker": "workspace:*",
-    "@hangar/protocol": "workspace:*",
-    "hangar": "workspace:*"
+    "@devicepool/agent": "workspace:*",
+    "@devicepool/broker": "workspace:*",
+    "@devicepool/protocol": "workspace:*",
+    "devicepool": "workspace:*"
   }
 }

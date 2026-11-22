@@ -7,7 +7,7 @@ import { Socket } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { PRIVACY_SERVICES, type DeviceInfo, type Frame, type KeyModifier, type PrivacyService, type UiNode } from '@hangar/protocol';
+import { PRIVACY_SERVICES, type DeviceInfo, type Frame, type KeyModifier, type PrivacyService, type UiNode } from '@devicepool/protocol';
 import * as hid from './hid.ts';
 import { iosPredicate, parseIosLine, type LogSource } from '../applog.ts';
 import { forgetCapture } from './capture.ts';
@@ -37,10 +37,10 @@ export async function simctl(...args: string[]): Promise<string> {
 
 // idb's own auto-spawned companions go stale across reboots and return an empty accessibility tree.
 const companions = new Map<string, { proc: ChildProcess; socket: string }>();
-/** Hangar owns the simulators whose names start with this. HANGAR_SIM_PREFIX gives the smoke test its own set. */
-export const NAME_PREFIX = process.env.HANGAR_SIM_PREFIX || 'hangar-';
+/** Devicepool owns the simulators whose names start with this. DEVICEPOOL_SIM_PREFIX gives the smoke test its own set. */
+export const NAME_PREFIX = process.env.DEVICEPOOL_SIM_PREFIX || 'devicepool-';
 // Socket paths are capped at 104 bytes, so another prefix gets a short directory of its own.
-const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'hangar-' ? 'hangar-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
+const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'devicepool-' ? 'devicepool-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
 
 export async function startCompanion(udid: string): Promise<void> {
   if (companions.has(udid)) {
@@ -86,7 +86,7 @@ export function companionSocket(udid: string): string | null {
 async function idb(udid: string, ...args: string[]): Promise<string> {
   const companion = companions.get(udid);
   if (!companion) {
-    throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Hangar first.`);
+    throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
   }
   try {
     const { stdout } = await run('idb', ['--companion', companion.socket, ...args], { maxBuffer: MAX_BUFFER });
@@ -165,7 +165,7 @@ export async function screenshot(udid: string, format: 'png' | 'jpeg' = 'png', m
 }
 
 async function screenshotWithSimctl(udid: string, format: 'png' | 'jpeg', maxSize: number | undefined, quality: number): Promise<Buffer> {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-shot-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-shot-'));
   const file = join(dir, `shot.${format}`);
   try {
     await simctl('io', udid, 'screenshot', `--type=${format}`, file);
@@ -286,7 +286,7 @@ function round(n: number): number {
 async function sendHid(udid: string, events: hid.HidEvent[]): Promise<void> {
   const companion = companions.get(udid);
   if (!companion) {
-    throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Hangar first.`);
+    throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
   }
   try {
     await hid.send(companion.socket, events);
@@ -389,7 +389,7 @@ export async function push(udid: string, bundleId: string, payload: Record<strin
   if (typeof payload !== 'object' || payload === null || !('aps' in payload)) {
     throw new DriverError('BAD_PAYLOAD', 'The push payload needs an "aps" key, for example {"aps":{"alert":"Hi"}}.');
   }
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-push-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-push-'));
   try {
     const file = join(dir, 'payload.json');
     await writeFile(file, JSON.stringify(payload));
@@ -450,8 +450,8 @@ let screenBuild: Promise<string> | null = null;
 export function screenBinary(): Promise<string> {
   screenBuild ??= (async () => {
     const hash = createHash('sha256').update(await readFile(SCREEN_SOURCE)).digest('hex').slice(0, 12);
-    const dir = join(process.env.HANGAR_HOME ?? join(homedir(), '.hangar'), 'bin');
-    const bin = join(dir, `hangar-screen-${hash}`);
+    const dir = join(process.env.DEVICEPOOL_HOME ?? join(homedir(), '.devicepool'), 'bin');
+    const bin = join(dir, `devicepool-screen-${hash}`);
     if (await access(bin).then(() => true, () => false)) {
       return bin;
     }

@@ -5,7 +5,7 @@ export default function App() {
   const [count, setCount] = useState(0);
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Hello from Hangar</Text>
+      <Text style={styles.title}>Hello from Devicepool</Text>
       <Pressable accessibilityRole="button" style={styles.button} onPress={() => setCount((c) => c + 1)}>
         <Text style={styles.label}>Tapped {count} times</Text>
       </Pressable>

@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "packages",
+    "outDir": "dist/npm/packages",
+    "rewriteRelativeImportExtensions": true,
+    "declaration": true,
+    "paths": { "@devicepool/*": ["./packages/*/src/index.ts"] }
+  },
+  "include": [],
+  "files": ["packages/devicepool/src/main.ts", "packages/devicepool/src/client/index.ts"]
+}

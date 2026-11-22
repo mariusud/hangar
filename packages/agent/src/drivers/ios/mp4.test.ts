@@ -58,7 +58,7 @@ function find(data: Buffer, path: string[]): Box {
 }
 
 async function record(frames: number, step = 33.4): Promise<{ dir: string; file: string; records: Buffer[] }> {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-mp4-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-mp4-test-'));
   const file = join(dir, 'video.mp4');
   const records: Buffer[] = [];
   let t = 1_700_000_000_000;
@@ -157,7 +157,7 @@ test('ffprobe reads the recording back, when ffprobe is installed', async (t) =>
 });
 
 test('nothing is written before a keyframe with its parameter sets, and other sizes are dropped', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-mp4-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-mp4-test-'));
   try {
     const file = join(dir, 'video.mp4');
     const head = (keyframe: boolean, ms: number, w: number, h: number): Buffer => {

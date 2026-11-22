@@ -122,15 +122,15 @@ async function openSocket(url: string, headers: Record<string, string> = {}): Pr
   return ws;
 }
 
-async function hangarTool(): Promise<Tool & { leases: () => Promise<{ p50: number; p95: number }> }> {
+async function devicepoolTool(): Promise<Tool & { leases: () => Promise<{ p50: number; p95: number }> }> {
   const h = await start(1, () => {});
-  const { hangar, token } = h.client('bench');
+  const { devicepool, token } = h.client('bench');
   const ready = async (): Promise<void> => {
-    while (!(await hangar.devices()).some((d) => d.state === 'ready')) {
+    while (!(await devicepool.devices()).some((d) => d.state === 'ready')) {
       await sleep(100);
     }
   };
-  const lease = await hangar.lease({}, { autoRenew: false });
+  const lease = await devicepool.lease({}, { autoRenew: false });
   const frames: Frame[] = [];
   const ws = await openSocket(`${h.broker.url.replace('http', 'ws')}/v1/leases/${lease.id}/stream?codec=h264&token=${token}`);
   ws.onmessage = (e) => {
@@ -139,7 +139,7 @@ async function hangarTool(): Promise<Tool & { leases: () => Promise<{ p50: numbe
     }
   };
   return {
-    name: 'Hangar',
+    name: 'Devicepool',
     frames,
     openSettings: async () => {
       await lease.terminate(SETTINGS).catch(() => {});
@@ -151,10 +151,10 @@ async function hangarTool(): Promise<Tool & { leases: () => Promise<{ p50: numbe
       await lease.release();
       const times: number[] = [];
       for (let i = 0; i < Math.min(TRIALS, 5); i++) {
-        process.stderr.write(`Hangar lease ${i + 1}\r`);
+        process.stderr.write(`Devicepool lease ${i + 1}\r`);
         await ready();
         const t0 = performance.now();
-        const l = await hangar.lease({}, { autoRenew: false });
+        const l = await devicepool.lease({}, { autoRenew: false });
         times.push(performance.now() - t0);
         await l.release();
       }
@@ -165,7 +165,7 @@ async function hangarTool(): Promise<Tool & { leases: () => Promise<{ p50: numbe
 }
 
 async function serveSimTool(pkg: string): Promise<Tool> {
-  const { stdout } = await run('xcrun', ['simctl', 'create', 'hangar-compare', MODEL]);
+  const { stdout } = await run('xcrun', ['simctl', 'create', 'devicepool-compare', MODEL]);
   const udid = stdout.trim();
   await run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
   const cli = join(pkg, 'dist/serve-sim.js');
@@ -280,7 +280,7 @@ async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<
 }
 
 const results: Record<string, unknown> = { date: new Date().toISOString().slice(0, 10), trials: TRIALS };
-const makers: [string, () => Promise<Tool & { leases?: () => Promise<{ p50: number; p95: number }> }>][] = [['Hangar', hangarTool]];
+const makers: [string, () => Promise<Tool & { leases?: () => Promise<{ p50: number; p95: number }> }>][] = [['Devicepool', devicepoolTool]];
 if (process.env.SERVE_SIM) {
   makers.push(['serve-sim', () => serveSimTool(process.env.SERVE_SIM!)]);
 }

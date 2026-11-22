@@ -2,12 +2,15 @@
 
 ## Name and mark
 
-Hangar is where a team keeps its devices, and where each one goes out to whoever needs it and
-comes back. The mark is a hangar seen from the front, its arch in two ribs, with one device
-inside it lit in amber: the one on lease. Only the device is amber, so the mark never reads as a
-yellow arch.
+Devicepool is a pool of devices. Each device goes out on lease to whoever needs it, and comes
+back wiped.
 
-![The Hangar mark](assets/mark.svg)
+The mark is an arch drawn as two ribs, the outer one heavier, with one device standing inside it
+in amber: the device that is out on lease. The arch is the pool that holds the devices. Only the
+device is amber, so the mark never reads as a yellow arch. The mark was drawn before the project
+took the name Devicepool and has not changed.
+
+![The Devicepool mark](assets/mark.svg)
 
 | File | Use |
 |---|---|
@@ -19,8 +22,9 @@ The console has copies in `packages/console/src` and shows the light or dark one
 Keep clear space around the mark of at least a quarter of its width, and do not outline, rotate
 or recolor it. On an amber background, use the tile.
 
-The name is written Hangar in prose and `hangar` as a command. The wordmark is the name set in
-the system font at weight 700 with tight letter spacing, next to the mark.
+The name is written Devicepool in prose, as one word with one capital, and `devicepool` as a
+command. The wordmark is the name set in the system font at weight 700 with tight letter spacing,
+next to the mark.
 
 ## Color
 
@@ -42,26 +46,32 @@ there use a darker amber, `#9A5800`. The console's tokens are in
 ## Type
 
 The system UI font (SF Pro on a Mac), and the system monospace font (SF Mono) for commands,
-tokens and logs. Hangar loads no web fonts, because it makes no calls to the internet.
+tokens and logs. Devicepool loads no web fonts, because it makes no calls to the internet.
 
 ## Message
 
 | | Wording |
 |---|---|
-| Headline | The open source device broker for React Native teams. |
-| Second line | A free alternative to Expo Simulators and EAS Maestro jobs, on your own Macs. |
-| One sentence | Hangar runs iOS simulators and Android emulators on your Macs and lends them to your developers, your CI and your AI agents. |
+| Headline | The open source, self-hosted device farm. |
+| Second line | iOS simulators and Android emulators for your team, your CI and your AI agents. |
+| One sentence | Devicepool is an open source, self-hosted device farm for iOS simulators and Android emulators, for your team, your CI and your AI agents. |
 | Uses | Develop on a device you don't have. Test every pull request. Let AI agents check their own work. Try a build by hand. |
 
-Hangar is a broker for devices. Simulators and emulators work today. Physical phones are on the
-roadmap, so say "next", never "supported", until they ship.
+The one sentence appears word for word in the README, in [index.md](index.md) and in `llms.txt`.
+
+The category is "device farm", because that is what people search for: "open source device
+farm", "self-hosted device farm". The broker is the name of one component, the process that
+hands out leases, and never the name of the category. Simulators and emulators work today.
+Physical phones are on the roadmap, so say "next", never "supported", until they ship.
 
 Name Expo only to compare: "an alternative to Expo Simulators". Never put Expo in a product name,
-domain or logo, and never suggest that Hangar comes from Expo. Expo's brand page forbids both. The
-README ends with "Hangar is not affiliated with Expo."
+domain or logo, and never suggest that Devicepool comes from Expo. Expo's brand page forbids
+both. The README ends with "Devicepool is not affiliated with Expo." The same goes for the other
+services on the [alternatives pages](alternatives/index.md): name them to compare, and say on the
+page that Devicepool is not affiliated with them.
 
-Lead with free, open source and the four uses. Leave cost sums out of the pitch, because readers
-start arguing about hardware and upkeep instead. Hosted prices stay in
+Lead with open source, self-hosted and the four uses. Leave cost sums out of the pitch, because
+readers start arguing about hardware and upkeep instead. Hosted prices stay in
 [comparison.md](comparison.md).
 
 ## Voice
@@ -72,8 +82,11 @@ fast". Errors say what happened and what to do next. No exclamation marks, no em
 ## Images
 
 - [assets/header.svg](assets/header.svg): the README header, rendered to `header.png` with
-  headless Chrome at 2x so the fonts look the same everywhere.
+  headless Chrome at 2x so the fonts look the same everywhere:
+  `chrome --headless --screenshot=header.png --window-size=1280,400 --force-device-scale-factor=2
+  header.svg`.
 - [assets/how-it-works.gif](assets/how-it-works.gif): Claude tests a sign-in screen, a pull
-  request runs 12 Maestro flows on three devices, a developer saves a file, and Hangar wipes each
-  device afterwards. It ends on the name and `hangar up`. Its source is [assets/how-it-works.html](assets/how-it-works.html), recorded from
-  headless Chrome and turned into a GIF with ffmpeg.
+  request runs 12 Maestro flows on three devices, a developer saves a file, and Devicepool wipes
+  each device afterwards. It ends on the name and `devicepool up`. Its source is
+  [assets/how-it-works.html](assets/how-it-works.html), recorded from headless Chrome and turned
+  into a GIF with ffmpeg.

@@ -1,5 +1,5 @@
 node_modules/
-.hangar/
+.devicepool/
 *.log
 .DS_Store
 
@@ -7,3 +7,4 @@ node_modules/
 AGENTS.md
 CLAUDE.md
 .claude/
+dist/

@@ -87,7 +87,7 @@ test('keyframe requests before the first frame do not open more idb streams', as
 
 test('a recording on the idb stream is an MP4 of the frames', async () => {
   const fake = await fakeCompanion(50);
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-idb-rec-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-idb-rec-'));
   try {
     const s = await idbVideoStream(fake.socket, () => {});
     const file = join(dir, 'video.mp4');

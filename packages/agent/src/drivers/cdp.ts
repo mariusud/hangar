@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import type { ConsoleMessage, EvaluateResult, NetworkEntry, NetworkPage, Page } from '@hangar/protocol';
+import type { ConsoleMessage, EvaluateResult, NetworkEntry, NetworkPage, Page } from '@devicepool/protocol';
 import { Ring } from './ring.ts';
 import { ToolError } from './tool-error.ts';
 
@@ -42,14 +42,14 @@ export function pickTarget(raw: unknown, bundleId: string | undefined, isDevice:
   });
   const forApp = bundleId ? all.filter((t) => t.appId === bundleId || t.title.startsWith(bundleId)) : all;
   if (!forApp.length) {
-    throw new ToolError('JS_NOT_CONNECTED', `No React Native app${bundleId ? ` with id ${bundleId}` : ''} is connected to Metro through this lease. Start it with \`hangar run ios\` or \`hangar run android\` and wait until the bundle has loaded.`);
+    throw new ToolError('JS_NOT_CONNECTED', `No React Native app${bundleId ? ` with id ${bundleId}` : ''} is connected to Metro through this lease. Start it with \`devicepool run ios\` or \`devicepool run android\` and wait until the bundle has loaded.`);
   }
   const mine = forApp.filter((t) => isDevice(t.deviceName));
   const pool = mine.length ? mine : forApp;
   const devices = [...new Set(pool.map((t) => t.device))];
   if (devices.length > 1) {
     const names = [...new Set(pool.map((t) => t.deviceName || t.device))].join(', ');
-    throw new ToolError('JS_TARGET_AMBIGUOUS', `Metro has this app open on ${devices.length} devices (${names}) and Hangar cannot tell which is the leased one. Close the app on the others, or pass bundleId.`);
+    throw new ToolError('JS_TARGET_AMBIGUOUS', `Metro has this app open on ${devices.length} devices (${names}) and Devicepool cannot tell which is the leased one. Close the app on the others, or pass bundleId.`);
   }
   const target = pool.at(-1);
   if (!target) {
@@ -153,16 +153,16 @@ export class Cdp {
 
 // Records XHR (and so fetch, which React Native builds on XHR) in the app when the runtime has no CDP Network domain.
 export const XHR_PATCH = `(function () {
-  if (globalThis.__hangarNet) { return true; }
+  if (globalThis.__devicepoolNet) { return true; }
   var X = globalThis.XMLHttpRequest;
   if (!X || !X.prototype) { return false; }
   var buf = [], seq = 0, max = 300, open = X.prototype.open, send = X.prototype.send;
   X.prototype.open = function (method, url) {
-    this.__hangar = { method: String(method).toUpperCase(), url: String(url).slice(0, 2000) };
+    this.__devicepool = { method: String(method).toUpperCase(), url: String(url).slice(0, 2000) };
     return open.apply(this, arguments);
   };
   X.prototype.send = function () {
-    var x = this, e = x.__hangar;
+    var x = this, e = x.__devicepool;
     if (e) {
       e.startedAt = Date.now();
       x.addEventListener('loadend', function () {
@@ -175,7 +175,7 @@ export const XHR_PATCH = `(function () {
     }
     return send.apply(this, arguments);
   };
-  globalThis.__hangarNet = { since: function (c) { return buf.filter(function (e) { return e.seq > c; }); } };
+  globalThis.__devicepoolNet = { since: function (c) { return buf.filter(function (e) { return e.seq > c; }); } };
   return true;
 })()`;
 
@@ -275,7 +275,7 @@ export class JsTools {
   private async connect(bundleId: string | undefined): Promise<Cdp> {
     const port = this.opts.port();
     if (!port) {
-      throw new ToolError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease, so Hangar cannot reach the app\'s JavaScript. Run `hangar run ios` or `hangar run android`, which opens one.');
+      throw new ToolError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease, so Devicepool cannot reach the app\'s JavaScript. Run `devicepool run ios` or `devicepool run android`, which opens one.');
     }
     const list = await (this.opts.fetchJson ?? defaultFetchJson)(`http://127.0.0.1:${port}/json/list`).catch((err: Error) => {
       throw new ToolError('METRO_UNREACHABLE', `Could not read the app list from Metro through the tunnel: ${err.message}. Check that Metro is still running on your machine.`);
@@ -300,7 +300,7 @@ export class JsTools {
 
   private async pullPatch(cdp: Cdp): Promise<void> {
     const res = await cdp.call('Runtime.evaluate', {
-      expression: `globalThis.__hangarNet ? JSON.stringify(globalThis.__hangarNet.since(${this.patchCursor})) : null`,
+      expression: `globalThis.__devicepoolNet ? JSON.stringify(globalThis.__devicepoolNet.since(${this.patchCursor})) : null`,
       returnByValue: true,
     });
     const value = obj(res.result).value;
@@ -309,7 +309,7 @@ export class JsTools {
       this.patchCursor = 0;
       const installed = await cdp.call('Runtime.evaluate', { expression: XHR_PATCH, returnByValue: true });
       if (obj(installed.result).value !== true) {
-        throw new ToolError('UNSUPPORTED', 'This JavaScript runtime has neither the CDP Network domain nor XMLHttpRequest, so Hangar cannot list its requests.');
+        throw new ToolError('UNSUPPORTED', 'This JavaScript runtime has neither the CDP Network domain nor XMLHttpRequest, so Devicepool cannot list its requests.');
       }
       return;
     }

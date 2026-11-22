@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { DeviceImage } from '@hangar/protocol';
+import type { DeviceImage } from '@devicepool/protocol';
 import { imageStatus, planImages, type ImageSlot } from './golden.ts';
 
 function img(name: string, id: string): DeviceImage {

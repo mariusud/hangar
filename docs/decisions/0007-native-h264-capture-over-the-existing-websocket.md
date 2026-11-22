@@ -7,7 +7,7 @@
 
 The JPEG stream from milestone 1 takes a screenshot with `simctl`, scales it with `sips` and
 sends it base64 in JSON. Measured on a Mac with Xcode 26.6 and iOS 26.5: 6 frames per second,
-155 ms median and 269 ms p95 from the start of a capture to a finished JPEG. Hangar's target is
+155 ms median and 269 ms p95 from the start of a capture to a finished JPEG. Devicepool's target is
 60 fps and under 50 ms glass to glass.
 
 Xcode 26.6's SimulatorKit exposes each simulator display as an IOSurface, with callbacks for
@@ -17,7 +17,7 @@ way. It is a private API and can change with Xcode.
 
 ## Decision
 
-- A Swift helper, `hangar-screen`, reads the IOSurface, encodes with VideoToolbox H.264 in
+- A Swift helper, `devicepool-screen`, reads the IOSurface, encodes with VideoToolbox H.264 in
   low-latency mode (no frame reordering, keyframes only on demand) only when the display reports
   damage, and writes length-prefixed frames with a capture timestamp to stdout. It sends two
   refresh frames after motion stops so the encoder can sharpen the last picture.
@@ -32,7 +32,7 @@ way. It is a private API and can change with Xcode.
 
 Same Mac, a cloned iPhone 17 simulator at its native 1206 by 2622:
 
-| | JPEG path | `hangar-screen` |
+| | JPEG path | `devicepool-screen` |
 |---|---|---|
 | Frame rate during motion | 6 fps | 60 fps |
 | Frames while idle | 6 fps | none |

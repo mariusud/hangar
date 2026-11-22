@@ -1,22 +1,22 @@
-// Checks that this Mac's Xcode works with Hangar, and writes the result to hosts/versions.json
-// (or HANGAR_VERSIONS). It boots and clones real simulators. Run it on each new Xcode:
+// Checks that this Mac's Xcode works with Devicepool, and writes the result to hosts/versions.json
+// (or DEVICEPOOL_VERSIONS). It boots and clones real simulators. Run it on each new Xcode:
 //   pnpm bench:smoke
-// Set HANGAR_SMOKE_APP to a built examples/hello .app to also run its two Maestro flows.
-// It names its simulators hangar-smoke-* (or HANGAR_SIM_PREFIX), makes its own golden, and deletes
-// them all at the end, so it leaves the simulators of a running Hangar alone. HANGAR_SMOKE_LOG=1
+// Set DEVICEPOOL_SMOKE_APP to a built examples/hello .app to also run its two Maestro flows.
+// It names its simulators devicepool-smoke-* (or DEVICEPOOL_SIM_PREFIX), makes its own golden, and deletes
+// them all at the end, so it leaves the simulators of a running Devicepool alone. DEVICEPOOL_SMOKE_LOG=1
 // prints the agent's log.
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { runMaestro, type Lease } from 'hangar';
-import { currentXcode, recordSmoke, versionsFile, type SmokeEntry, type SmokeStep } from '../packages/hangar/src/versions.ts';
+import { runMaestro, type Lease } from 'devicepool';
+import { currentXcode, recordSmoke, versionsFile, type SmokeEntry, type SmokeStep } from '../packages/devicepool/src/versions.ts';
 import type { Harness } from '../e2e/harness.ts';
 
 // The driver reads the prefix when it loads, so the harness is imported after this.
-process.env.HANGAR_SIM_PREFIX ||= 'hangar-smoke-';
-const prefix = process.env.HANGAR_SIM_PREFIX;
-if (prefix === 'hangar-' || !prefix.startsWith('hangar-')) {
-  console.error('Set HANGAR_SIM_PREFIX to a name that starts with hangar- and is longer, such as hangar-smoke-, so the smoke test only touches its own simulators.');
+process.env.DEVICEPOOL_SIM_PREFIX ||= 'devicepool-smoke-';
+const prefix = process.env.DEVICEPOOL_SIM_PREFIX;
+if (prefix === 'devicepool-' || !prefix.startsWith('devicepool-')) {
+  console.error('Set DEVICEPOOL_SIM_PREFIX to a name that starts with devicepool- and is longer, such as devicepool-smoke-, so the smoke test only touches its own simulators.');
   process.exit(1);
 }
 const { start } = await import('../e2e/harness.ts');
@@ -60,9 +60,9 @@ function check(ok: boolean, message: string): void {
   }
 }
 
-async function ready(h: Harness, hangar: ReturnType<Harness['client']>['hangar']): Promise<void> {
+async function ready(h: Harness, devicepool: ReturnType<Harness['client']>['devicepool']): Promise<void> {
   for (let i = 0; i < 1200; i++) {
-    if ((await hangar.devices()).some((d) => d.state === 'ready')) {
+    if ((await devicepool.devices()).some((d) => d.state === 'ready')) {
       return;
     }
     await sleep(100);
@@ -74,14 +74,14 @@ let runtime = 'unknown';
 const held: { harness: Harness | null } = { harness: null };
 try {
   const h = await step('boot', async () => {
-    const harness = await start(1, process.env.HANGAR_SMOKE_LOG ? (l) => console.error(`[agent] ${l}`) : () => {});
+    const harness = await start(1, process.env.DEVICEPOOL_SMOKE_LOG ? (l) => console.error(`[agent] ${l}`) : () => {});
     held.harness = harness;
-    await ready(harness, harness.client('boot').hangar);
+    await ready(harness, harness.client('boot').devicepool);
     return harness;
   });
   if (h) {
-    const { hangar, token } = h.client('smoke');
-    const lease: Lease | null = await step('clone', () => hangar.lease({}, { autoRenew: true }));
+    const { devicepool, token } = h.client('smoke');
+    const lease: Lease | null = await step('clone', () => devicepool.lease({}, { autoRenew: true }));
     runtime = lease?.info.device?.os ?? runtime;
     if (lease) {
       await step('capture', async () => {
@@ -113,10 +113,10 @@ try {
         await lease.launch('com.apple.Preferences');
         await sleep(2000);
         await lease.stopRecording();
-        let rec = await hangar.recording(started.id);
+        let rec = await devicepool.recording(started.id);
         for (let i = 0; i < 300 && rec.state !== 'ready' && rec.state !== 'failed'; i++) {
           await sleep(100);
-          rec = await hangar.recording(started.id);
+          rec = await devicepool.recording(started.id);
         }
         check(rec.state === 'ready', `the recording is ${rec.state}: ${rec.error ?? 'no error'}`);
         const res = await fetch(new URL(rec.files.video, h.broker.url), { headers: { authorization: `Bearer ${token}` } });
@@ -126,30 +126,30 @@ try {
       };
       await step('record', recorded);
       await step('record on idb', async () => {
-        process.env.HANGAR_CAPTURE = 'idb';
+        process.env.DEVICEPOOL_CAPTURE = 'idb';
         try {
           await recorded();
         } finally {
-          delete process.env.HANGAR_CAPTURE;
+          delete process.env.DEVICEPOOL_CAPTURE;
         }
       });
       await step('wipe', async () => {
         await lease.release();
-        await ready(h, hangar);
+        await ready(h, devicepool);
       });
     }
 
     const maestro = await run('maestro', ['--version']).then(() => true, () => false);
-    const app = process.env.HANGAR_SMOKE_APP;
+    const app = process.env.DEVICEPOOL_SMOKE_APP;
     if (!maestro || !app) {
-      steps.push({ name: 'maestro', status: 'skipped', ms: 0, detail: maestro ? 'set HANGAR_SMOKE_APP to a built examples/hello .app' : 'maestro is not installed' });
+      steps.push({ name: 'maestro', status: 'skipped', ms: 0, detail: maestro ? 'set DEVICEPOOL_SMOKE_APP to a built examples/hello .app' : 'maestro is not installed' });
     } else {
       await step('maestro', async () => {
-        const result = await runMaestro(hangar, { app, flowsDir, retries: 0 });
+        const result = await runMaestro(devicepool, { app, flowsDir, retries: 0 });
         const passed = result.flows.filter((f) => f.status === 'passed').length;
         check(result.passed && passed === 2, `${passed} of ${result.flows.length} flows passed (${result.url})`);
       });
-      await step('wipe after maestro', () => ready(h, hangar));
+      await step('wipe after maestro', () => ready(h, devicepool));
     }
   }
 } finally {

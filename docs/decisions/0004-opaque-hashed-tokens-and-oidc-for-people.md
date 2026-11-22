@@ -17,7 +17,7 @@ scopes such as `install:upload`, and an optional expiry. The broker stores the S
 the token once, and looks it up on every request. Stream tokens are bound to one lease and expire
 5 minutes after minting if unused.
 
-People sign in with built-in accounts by default: `hangar up` prints a one-use admin link, admins
+People sign in with built-in accounts by default: `devicepool up` prints a one-use admin link, admins
 invite people with links that carry a role, and each person sets a passkey or a password. OIDC
 (authorization code with PKCE) is one setting away, with OIDC groups mapped to teams and roles. A
 trusted sign-in proxy header is the third option. All three end in a session cookie.

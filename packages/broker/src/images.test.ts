@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type BrokerMessage, type DeviceImage } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type BrokerMessage, type DeviceImage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import { imageId, parseImageSetup } from './images.ts';
 import { startBroker } from './index.ts';
@@ -53,7 +53,7 @@ test('a setup declaration is checked and normalized', () => {
 });
 
 test('a signed-in image sends its flow and secrets to hosts, and the API returns neither', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-images-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-images-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const messages: BrokerMessage[] = [];

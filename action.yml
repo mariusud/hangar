@@ -1,45 +1,57 @@
-name: Hangar Maestro run
-description: Run Maestro flows sharded over fresh simulators on your Hangar, with retries, recordings of failed flows, one JUnit report and one pull request comment.
+name: Devicepool Maestro
+description: Run Maestro flows on fresh iOS simulators, on the macOS runner or on your own Devicepool Mac, with retries and JUnit.
+branding:
+  icon: smartphone
+  color: orange
 inputs:
   url:
-    description: The Hangar address, such as https://hangar.example.ts.net.
-    required: true
+    description: The address of your Devicepool server, such as https://devicepool.example.ts.net. Leave it out to run Devicepool on this macOS runner instead (runner mode).
+    default: ''
   token:
-    description: A Hangar token for CI, made on the console's Connect page. Pass it from a secret.
-    required: true
+    description: A Devicepool token for CI, made on the console's Connect page. Pass it from a secret. Not used in runner mode.
+    default: ''
   app:
-    description: A built simulator .app, an archive of one, or the name of a build already on Hangar. Not used with rerun.
+    description: A built simulator .app, an archive of one, or the name of a build already on Devicepool. In runner mode it must be a path. Not used with rerun.
     default: ''
   flows:
     description: The folder with the Maestro flow files.
     default: .maestro
   shards:
-    description: How many devices to split the flows over.
-    default: '1'
+    description: How many devices to split the flows over. With a server the default is 1. In runner mode the default comes from the runner's cores and memory, which is 1 on a standard macOS runner (3 cores, 7 GB).
+    default: ''
   retries:
     description: How many times to retry a failed flow, recorded.
     default: '1'
   model:
-    description: A simulator model, such as iPhone 17. Any model if left out.
+    description: A simulator model, such as iPhone 17. Any model if left out. In runner mode leave it out, because the runner offers one model, the newest iPhone its Xcode has.
     default: ''
   env:
     description: Variables for the flows, one KEY=VALUE per line.
     default: ''
   junit:
     description: Where to write the JUnit report.
-    default: hangar-maestro.xml
+    default: devicepool-maestro.xml
   hold:
-    description: Keep a failed flow's device as it was for this long, such as 30m, for people on your team. The comment links to it.
+    description: Server only. Keep a failed flow's device as it was for this long, such as 30m, for people on your team. The comment links to it.
     default: ''
   booking:
-    description: Lease the shards inside this booking of your team while its window is open, ahead of the booking's agents.
+    description: Server only. Lease the shards inside this booking of your team while its window is open, ahead of the booking's agents.
     default: ''
   rerun:
-    description: The id of a finished Hangar run. With rerun-flow, runs that one flow again on a fresh device instead of the whole suite.
+    description: Server only. The id of a finished Devicepool run. With rerun-flow, runs that one flow again on a fresh device instead of the whole suite.
     default: ''
   rerun-flow:
     description: The flow to run again, such as login.yaml.
     default: ''
+  start-timeout:
+    description: Runner mode only. How many minutes to wait for Devicepool to prepare its first simulator on the runner.
+    default: '15'
+  maestro-version:
+    description: Runner mode only. The Maestro version to install when the runner has none, such as 2.0.10. The latest if left out.
+    default: ''
+  artifact:
+    description: Runner mode only. The name of the artifact with the JUnit report, the server log and the recordings of failed flows. Give each job its own name in a matrix.
+    default: devicepool-maestro
   comment:
     description: Comment on the pull request with the passed, flaky and failed flows, and update that comment on later runs.
     default: 'true'
@@ -62,17 +74,217 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: 22
+
+    # Decides between a server (url given) and runner mode (no url), and stops early with a
+    # message that says what to change. Inputs reach every script through the environment,
+    # never through the script text, so a value cannot run as shell.
+    - id: plan
+      shell: bash
+      env:
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_APP: ${{ inputs.app }}
+        INPUT_SHARDS: ${{ inputs.shards }}
+        INPUT_HOLD: ${{ inputs.hold }}
+        INPUT_BOOKING: ${{ inputs.booking }}
+        INPUT_RERUN: ${{ inputs.rerun }}
+        INPUT_START_TIMEOUT: ${{ inputs.start-timeout }}
+      run: |
+        fail() { echo "::error title=Devicepool::$1"; exit 1; }
+        if ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 18) ? 0 : 1)'; then
+          fail "Devicepool needs Node 22.18 or newer and this job has $(node --version). Remove any step after this action's setup that puts an older Node first on PATH."
+        fi
+        if [ -n "$INPUT_URL" ]; then
+          echo "shards=${INPUT_SHARDS:-1}" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ -n "$INPUT_TOKEN" ]; then
+          fail "The token input is set but url is empty. Check that the secret you pass as url exists in this repository, or remove token to run Devicepool on this runner."
+        fi
+        if [ "$RUNNER_OS" != "macOS" ]; then
+          fail "No url was given, so the action would run Devicepool on this runner, and that needs macOS. Set runs-on: macos-26, or pass url and token to use your Devicepool server. Secrets are empty in pull requests from forks."
+        fi
+        if [ -n "$INPUT_RERUN" ]; then
+          fail "rerun needs a Devicepool server, because a runner's Devicepool and its finished runs are gone when the job ends. Pass url and token, or run the job again."
+        fi
+        if [ -n "$INPUT_HOLD" ] || [ -n "$INPUT_BOOKING" ]; then
+          fail "hold and booking need a Devicepool server. Remove them, or pass url and token."
+        fi
+        if [ -z "$INPUT_APP" ] || [ ! -e "$INPUT_APP" ]; then
+          fail "app is '$INPUT_APP', and there is no such file or folder in $PWD. Build a simulator .app in an earlier step and pass its path, such as build/Build/Products/Release-iphonesimulator/MyApp.app."
+        fi
+        if [ -d "$INPUT_APP" ]; then
+          platform=$(plutil -extract DTPlatformName raw -o - "$INPUT_APP/Info.plist" 2>/dev/null || true)
+          if [ -n "$platform" ] && [ "$platform" != "iphonesimulator" ]; then
+            fail "$INPUT_APP is built for $platform, and a simulator needs a simulator build. Build with -sdk iphonesimulator."
+          fi
+        fi
+        if ! [[ "$INPUT_START_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+          fail "start-timeout is '$INPUT_START_TIMEOUT'. Give it a whole number of minutes, such as 15."
+        fi
+        shards="$INPUT_SHARDS"
+        if [ -z "$shards" ]; then
+          # One simulator per 2 cores and per 2.5 GB, keeping 4 GB for macOS, Node and Maestro.
+          # A standard runner (3 cores, 7 GB) gets 1; an xlarge one (5 cores, 14 GB) gets 2.
+          cores=$(sysctl -n hw.ncpu)
+          memory_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+          by_cores=$(( cores / 2 ))
+          by_memory=$(( (memory_gb - 4) * 2 / 5 ))
+          shards=$(( by_cores < by_memory ? by_cores : by_memory ))
+          if [ "$shards" -lt 1 ]; then shards=1; fi
+          echo "This runner has $cores cores and $memory_gb GB of memory: running the flows on $shards simulator(s). Set the shards input to change it."
+        elif ! [[ "$shards" =~ ^[1-9][0-9]*$ ]]; then
+          fail "shards is '$shards'. Give it a whole number, such as 2."
+        fi
+        echo "shards=$shards" >> "$GITHUB_OUTPUT"
+        echo "::notice title=Devicepool::No url input, so Devicepool runs on this runner with $shards simulator(s)."
+
     - shell: bash
-      run: corepack enable && pnpm --dir "$GITHUB_ACTION_PATH" install --frozen-lockfile --prod
+      run: |
+        # Devicepool is not on npm yet, so this installs it from the action's own checkout and
+        # puts a `devicepool` command on PATH. Once the package is published, replace the body
+        # of this function with one line: npm install -g devicepool
+        install_devicepool() {
+          # In a subshell inside the checkout, so corepack reads Devicepool's packageManager
+          # and not the one in the repository under test.
+          (cd "$GITHUB_ACTION_PATH" && corepack enable && pnpm install --frozen-lockfile --prod) &&
+            mkdir -p "$RUNNER_TEMP/devicepool-bin" &&
+            printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning "%s/packages/devicepool/src/main.ts" "$@"\n' "$GITHUB_ACTION_PATH" > "$RUNNER_TEMP/devicepool-bin/devicepool" &&
+            chmod +x "$RUNNER_TEMP/devicepool-bin/devicepool" &&
+            echo "$RUNNER_TEMP/devicepool-bin" >> "$GITHUB_PATH"
+        }
+        export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+        if ! install_devicepool; then
+          echo "::error title=Devicepool::Could not install Devicepool. The lines above say why. The install downloads pnpm and packages from the npm registry, so the runner needs to reach registry.npmjs.org."
+          exit 1
+        fi
+
+    # Runner mode: the tools `devicepool doctor` checks for, and Maestro.
+    - if: inputs.url == ''
+      shell: bash
+      env:
+        MAESTRO_VERSION: ${{ inputs.maestro-version }}
+        HOMEBREW_NO_AUTO_UPDATE: '1'
+        HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        HOMEBREW_NO_ENV_HINTS: '1'
+      run: |
+        fail() { echo "::error title=Devicepool::$1"; exit 1; }
+        export PATH="$HOME/.local/bin:$HOME/.maestro/bin:$PATH"
+        mkdir -p "$HOME/.local/bin"
+
+        runtimes=$(xcrun simctl list runtimes 2>&1 || true)
+        if ! grep -q '^iOS' <<< "$runtimes"; then
+          fail "The Xcode at $(xcode-select -p) lists no iOS simulator runtime. Select an Xcode that has one before this action, with sudo xcode-select -s /Applications/Xcode_<version>.app (ls /Applications shows the ones on the runner)."
+        fi
+
+        # The companion from the facebook/idb release that the Homebrew formula names, after
+        # checking the formula's checksum. Homebrew refuses the formula while the Command Line
+        # Tools are older than Xcode; `devicepool doctor` describes the same steps.
+        prebuilt_companion() {
+          local formula url sha file
+          formula=$(brew cat facebook/fb/idb-companion) || return 1
+          url=$(sed -n 's/^ *url "\(.*\)"$/\1/p' <<< "$formula" | sed -n 1p)
+          sha=$(sed -n 's/^ *sha256 "\([0-9a-f]\{64\}\)"$/\1/p' <<< "$formula" | sed -n 1p)
+          case "$url" in https://github.com/facebook/idb/releases/download/*) ;; *) return 1 ;; esac
+          [ -n "$sha" ] || return 1
+          file="$RUNNER_TEMP/idb-companion.tar.gz"
+          curl -fsSL --retry 3 -o "$file" "$url" || return 1
+          echo "$sha  $file" | shasum -a 256 -c - || return 1
+          mkdir -p "$HOME/.local/idb-companion"
+          tar -xzf "$file" -C "$HOME/.local/idb-companion" || return 1
+          ln -sf "$(find "$HOME/.local/idb-companion" -name idb_companion -type f | sed -n 1p)" "$HOME/.local/bin/idb_companion"
+        }
+        if ! command -v idb_companion > /dev/null; then
+          echo "::group::Install idb companion"
+          brew tap facebook/fb || fail "Could not add the facebook/fb Homebrew tap, which has idb-companion. The runner needs to reach github.com."
+          if ! brew install facebook/fb/idb-companion; then
+            echo "Homebrew did not install idb-companion. Trying the prebuilt companion the formula names."
+            prebuilt_companion || true
+          fi
+          echo "::endgroup::"
+          command -v idb_companion > /dev/null || fail "Could not install idb-companion with Homebrew or from the facebook/idb release. The lines above say why. Its formula names the macOS and Xcode it needs, and runs-on: macos-26 with the default Xcode has them. Or install it in a step before this action so that idb_companion is on PATH."
+        fi
+
+        if ! command -v idb > /dev/null; then
+          echo "::group::Install the idb client"
+          if ! command -v pipx > /dev/null; then brew install pipx || true; fi
+          pipx install fb-idb || true
+          echo "::endgroup::"
+          command -v idb > /dev/null || fail "Could not install the idb client (pipx install fb-idb). The lines above say why. Install it in a step before this action so that idb is on PATH."
+        fi
+
+        if ! command -v maestro > /dev/null; then
+          echo "::group::Install Maestro"
+          # Maestro's installer reads MAESTRO_VERSION; empty means the latest.
+          if [ -z "$MAESTRO_VERSION" ]; then unset MAESTRO_VERSION; fi
+          curl -fsSL --retry 3 "https://get.maestro.mobile.dev" | bash || true
+          echo "::endgroup::"
+          command -v maestro > /dev/null || fail "Could not install Maestro from get.maestro.mobile.dev. The lines above say why. Install it in a step before this action so that maestro is on PATH, or check the maestro-version input."
+        fi
+        if ! command -v java > /dev/null; then
+          fail "Maestro needs Java 17 or newer and this runner has no java on PATH. Add actions/setup-java before this action."
+        fi
+
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+    # Runner mode: start Devicepool in the background and wait until its first simulator is prepared.
+    - if: inputs.url == ''
+      shell: bash
+      env:
+        SHARDS: ${{ steps.plan.outputs.shards }}
+        START_TIMEOUT: ${{ inputs.start-timeout }}
+        DEVICEPOOL_HOME: ${{ runner.temp }}/devicepool-home
+        # Maestro reads these from the environment Devicepool starts it in.
+        MAESTRO_CLI_NO_ANALYTICS: '1'
+        MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: 'true'
+      run: |
+        unset DEVICEPOOL_URL DEVICEPOOL_TOKEN
+        # How long Maestro waits for its driver on a simulator, in milliseconds. A slow runner
+        # needs more than Maestro's default. A value set on the job wins.
+        export MAESTRO_DRIVER_STARTUP_TIMEOUT="${MAESTRO_DRIVER_STARTUP_TIMEOUT:-300000}"
+        port=7420
+        log="$DEVICEPOOL_HOME/devicepool.log"
+        rm -rf "$DEVICEPOOL_HOME"
+        mkdir -p "$DEVICEPOOL_HOME"
+        nohup devicepool up --port "$port" --url "http://127.0.0.1:$port" --max "$SHARDS" --warm "$SHARDS" > "$log" 2>&1 &
+        pid=$!
+        echo "$pid" > "$DEVICEPOOL_HOME/up.pid"
+        show_log() { echo "::group::Devicepool log"; cat "$log"; echo "::endgroup::"; }
+        echo "Starting Devicepool on this runner. It creates a simulator and boots it once, which takes minutes on a cold runner."
+        deadline=$(( SECONDS + START_TIMEOUT * 60 ))
+        until grep -q '^Devicepool is running at ' "$log"; do
+          if ! kill -0 "$pid" 2> /dev/null; then
+            show_log
+            if grep -q 'Fix the items marked NO' "$log"; then
+              echo "::error title=Devicepool::Devicepool's check of this runner failed. The log above marks each failed item with NO and prints a fix for it. Run those fixes in a step before this action."
+            elif grep -q "Port $port is in use" "$log"; then
+              echo "::error title=Devicepool::Port $port is in use on this runner. Use this action without url once per job."
+            else
+              echo "::error title=Devicepool::Devicepool stopped before it was ready. The log above ends with the reason."
+            fi
+            exit 1
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            show_log
+            kill -TERM "$pid" 2> /dev/null || true
+            echo "::error title=Devicepool::Devicepool was not ready after $START_TIMEOUT minutes. The log above shows how far it got. If it was still preparing the simulator, raise the start-timeout input; a larger runner such as macos-26-xlarge has 5 cores instead of 3."
+            exit 1
+          fi
+          sleep 2
+        done
+        show_log
+        echo "Devicepool was ready after $SECONDS seconds."
+
     - shell: bash
       env:
-        HANGAR_URL: ${{ inputs.url }}
-        HANGAR_TOKEN: ${{ inputs.token }}
-        HANGAR_COMMENT_KEY: ${{ inputs.comment-key }}
+        DEVICEPOOL_URL: ${{ inputs.url }}
+        DEVICEPOOL_TOKEN: ${{ inputs.token }}
+        DEVICEPOOL_COMMENT_KEY: ${{ inputs.comment-key }}
         # Inputs go through the environment, not the script text, so a value cannot run as shell.
         INPUT_FLOWS: ${{ inputs.flows }}
         INPUT_APP: ${{ inputs.app }}
-        INPUT_SHARDS: ${{ inputs.shards }}
+        INPUT_SHARDS: ${{ steps.plan.outputs.shards }}
         INPUT_RETRIES: ${{ inputs.retries }}
         INPUT_JUNIT: ${{ inputs.junit }}
         INPUT_MODEL: ${{ inputs.model }}
@@ -82,7 +294,16 @@ runs:
         INPUT_RERUN: ${{ inputs.rerun }}
         INPUT_RERUN_FLOW: ${{ inputs.rerun-flow }}
         INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_ARTIFACT: ${{ inputs.artifact }}
       run: |
+        on_runner=false
+        if [ -z "$DEVICEPOOL_URL" ]; then
+          # Runner mode: the CLI reads the address and the admin token that `devicepool up`
+          # saved in DEVICEPOOL_HOME. An empty DEVICEPOOL_URL would hide that file.
+          on_runner=true
+          unset DEVICEPOOL_URL DEVICEPOOL_TOKEN
+          export DEVICEPOOL_HOME="$RUNNER_TEMP/devicepool-home"
+        fi
         if [ -n "$INPUT_RERUN" ]; then
           args=(run maestro --rerun "$INPUT_RERUN" --flow "$INPUT_RERUN_FLOW" --junit "$INPUT_JUNIT")
         else
@@ -94,30 +315,90 @@ runs:
         while IFS= read -r line; do
           if [ -n "$line" ]; then args+=(-e "$line"); fi
         done <<< "$INPUT_ENV"
-        comment_file="$RUNNER_TEMP/hangar-comment-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.md"
+        comment_file="$RUNNER_TEMP/devicepool-comment-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.md"
         rm -f "$comment_file"
-        if [ "$INPUT_COMMENT" = "true" ]; then export HANGAR_COMMENT_FILE="$comment_file"; fi
-        node --disable-warning=ExperimentalWarning "$GITHUB_ACTION_PATH/packages/hangar/src/main.ts" "${args[@]}"
+        if [ "$INPUT_COMMENT" = "true" ]; then export DEVICEPOOL_COMMENT_FILE="$comment_file"; fi
+        status=0
+        devicepool "${args[@]}" || status=$?
+        if [ "$on_runner" = "true" ]; then
+          # The run and recording links point at this runner, which is gone when the job ends.
+          # Point them at the workflow run, whose artifact has the recordings by id.
+          base="http://127.0.0.1:7420"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          where="Devicepool ran on the GitHub runner. The JUnit report, the Devicepool log and the recordings of failed flows are in the \`$INPUT_ARTIFACT\` artifact of [this workflow run]($run_url), one folder per recording id."
+          for file in "$GITHUB_STEP_SUMMARY" "$comment_file"; do
+            if [ ! -s "$file" ]; then continue; fi
+            sed -e "s#\[\([^]]*\)\]($base/recordings/\([0-9a-f-]*\))#\1: recordings/\2#g" \
+                -e "s#($base/runs/[0-9a-f-]*)#($run_url)#g" \
+                -e '/^To run a failed flow again/d' "$file" > "$file.tmp"
+            printf '\n%s\n' "$where" >> "$file.tmp"
+            cat "$file.tmp" > "$file"
+            rm -f "$file.tmp"
+          done
+        fi
+        exit "$status"
+
+    # Runner mode: stop Devicepool, which deletes its simulators, and collect what the job keeps.
+    - if: always() && inputs.url == ''
+      shell: bash
+      env:
+        INPUT_JUNIT: ${{ inputs.junit }}
+        DEVICEPOOL_HOME: ${{ runner.temp }}/devicepool-home
+      run: |
+        unset DEVICEPOOL_URL DEVICEPOOL_TOKEN
+        stage="$RUNNER_TEMP/devicepool-artifact"
+        rm -rf "$stage"
+        mkdir -p "$stage"
+        pid=$(cat "$DEVICEPOOL_HOME/up.pid" 2> /dev/null || true)
+        if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
+          # A recording is "saving" until the video is on disk. Wait up to 60 seconds for it.
+          for _ in $(seq 1 30); do
+            recordings=$(devicepool recordings 2> /dev/null || true)
+            if ! grep -q '^saving' <<< "$recordings"; then break; fi
+            sleep 2
+          done
+          kill -TERM "$pid" 2> /dev/null || true
+          for _ in $(seq 1 120); do
+            if ! kill -0 "$pid" 2> /dev/null; then break; fi
+            sleep 1
+          done
+          if kill -0 "$pid" 2> /dev/null; then
+            echo "::warning title=Devicepool::Devicepool did not stop within 2 minutes and was killed. The runner is thrown away after the job, so nothing is left behind."
+            kill -KILL "$pid" 2> /dev/null || true
+          fi
+        fi
+        if [ -f "$INPUT_JUNIT" ]; then cp "$INPUT_JUNIT" "$stage/"; fi
+        if [ -f "$DEVICEPOOL_HOME/devicepool.log" ]; then cp "$DEVICEPOOL_HOME/devicepool.log" "$stage/"; fi
+        if [ -d "$DEVICEPOOL_HOME/recordings" ] && [ -n "$(ls -A "$DEVICEPOOL_HOME/recordings")" ]; then
+          cp -R "$DEVICEPOOL_HOME/recordings" "$stage/recordings"
+        fi
+    - if: always() && inputs.url == ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ runner.temp }}/devicepool-artifact
+        if-no-files-found: ignore
+
     - if: always() && inputs.comment == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR: ${{ inputs.pr }}
       run: |
-        body="$RUNNER_TEMP/hangar-comment-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.md"
+        body="$RUNNER_TEMP/devicepool-comment-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.md"
         if ! [[ "$PR" =~ ^[0-9]+$ ]] || [ ! -s "$body" ]; then exit 0; fi
         if ! command -v gh >/dev/null; then
-          echo "::warning::Hangar could not comment on the pull request: the GitHub CLI (gh) is not installed on this runner."
+          echo "::warning::Devicepool could not comment on the pull request: the GitHub CLI (gh) is not installed on this runner."
           exit 0
         fi
-        # The first line of the body is <!-- hangar-run key=<hex> run=<uuid> -->.
+        # The first line of the body is <!-- devicepool-run key=<hex> run=<uuid> -->.
         marker=$(head -n 1 "$body")
-        key=$(sed -n 's/^<!-- hangar-run key=\([0-9a-f]*\) run=[0-9a-f-]* -->$/\1/p' <<< "$marker")
-        run=$(sed -n 's/^<!-- hangar-run key=[0-9a-f]* run=\([0-9a-f-]*\) -->$/\1/p' <<< "$marker")
+        key=$(sed -n 's/^<!-- devicepool-run key=\([0-9a-f]*\) run=[0-9a-f-]* -->$/\1/p' <<< "$marker")
+        run=$(sed -n 's/^<!-- devicepool-run key=[0-9a-f]* run=\([0-9a-f-]*\) -->$/\1/p' <<< "$marker")
         if [ -z "$key" ] || [ -z "$run" ]; then exit 0; fi
         # A rerun of a flow finds the comment by its run; a new run of the same job finds it by the key.
-        warn() { echo "::warning::Hangar could not comment on pull request #$PR. Check that github-token has pull-requests write permission."; exit 0; }
-        comments=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --jq '.[] | select(.body | startswith("<!-- hangar-run ")) | "\(.id) \(.body | split("\n")[0])"') || warn
+        warn() { echo "::warning::Devicepool could not comment on pull request #$PR. Check that github-token has pull-requests write permission."; exit 0; }
+        comments=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --jq '.[] | select(.body | startswith("<!-- devicepool-run ")) | "\(.id) \(.body | split("\n")[0])"') || warn
         id=$(grep -F " run=$run " <<< "$comments" | head -n 1 | cut -d' ' -f1 || true)
         if [ -z "$id" ]; then id=$(grep -F " key=$key " <<< "$comments" | head -n 1 | cut -d' ' -f1 || true); fi
         if [ -n "$id" ]; then

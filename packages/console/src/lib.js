@@ -108,7 +108,7 @@ export function percent(rate) {
 
 // Only the Android driver rotates; simctl and idb have no call for it.
 export function canRotate(platform) {
-  return platform === 'android-emulator';
+  return platform === 'android-emulator' || platform === 'android-device';
 }
 
 export const LIMIT_FIELDS = [
@@ -164,11 +164,11 @@ export function bookingBody(fields) {
   return body;
 }
 
-// MCP settings for a token, the same as `hangar connect <booking>` prints.
+// MCP settings for a token, the same as `devicepool connect <booking>` prints.
 export function mcpSettings(mcpUrl, token) {
   return {
-    json: JSON.stringify({ mcpServers: { hangar: { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
-    claude: `claude mcp add --transport http hangar ${mcpUrl} --header "Authorization: Bearer ${token}"`,
+    json: JSON.stringify({ mcpServers: { devicepool: { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
+    claude: `claude mcp add --transport http devicepool ${mcpUrl} --header "Authorization: Bearer ${token}"`,
   };
 }
 
@@ -187,7 +187,7 @@ export function endingText(ending, now) {
 }
 
 export function heldText(until, now) {
-  if (until <= now) return 'The hold has ended. Hangar wipes the device.';
+  if (until <= now) return 'The hold has ended. Devicepool wipes the device.';
   return `Kept as the flow left it for ${duration(until - now)} more.`;
 }
 
@@ -206,7 +206,7 @@ export function openAgainTarget(result) {
 
 export function openAgainError(err) {
   if (err.code === 'NOT_FOUND' && /^No route/.test(err.message)) {
-    return 'This Hangar cannot open findings again yet. Update the broker, or follow the steps above on a fresh device.';
+    return 'This Devicepool cannot open findings again yet. Update the broker, or follow the steps above on a fresh device.';
   }
   return err.message;
 }

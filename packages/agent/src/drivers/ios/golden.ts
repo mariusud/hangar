@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { DeviceImage, ImageSignIn, ImagesStatus, PrivacyService } from '@hangar/protocol';
+import type { DeviceImage, ImageSignIn, ImagesStatus, PrivacyService } from '@devicepool/protocol';
 import { appearance, boot, DriverError, NAME_PREFIX, privacy, shutdown, simctl } from './index.ts';
 
 const run = promisify(execFile);
@@ -86,7 +86,7 @@ export function signInEnv(signIn: ImageSignIn, hostEnv: Record<string, string | 
   if (missing.length) {
     throw new DriverError(
       'SIGN_IN_ENV_MISSING',
-      `The sign-in flow reads ${missing.join(', ')}, and neither the broker's secrets nor this Mac's environment has ${missing.length === 1 ? 'it' : 'them'}. Set ${missing.length === 1 ? 'it' : 'them'} with \`hangar image secret <NAME>\`.`,
+      `The sign-in flow reads ${missing.join(', ')}, and neither the broker's secrets nor this Mac's environment has ${missing.length === 1 ? 'it' : 'them'}. Set ${missing.length === 1 ? 'it' : 'them'} with \`devicepool image secret <NAME>\`.`,
     );
   }
   return env;
@@ -131,7 +131,7 @@ export async function buildImage(udid: string, image: DeviceImage, steps: ImageS
 }
 
 export async function runSignIn(udid: string, flow: string, env: Record<string, string>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-sign-in-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-sign-in-'));
   try {
     const file = join(dir, 'sign-in.yaml');
     await writeFile(file, flow, { mode: 0o600 });

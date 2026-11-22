@@ -11,9 +11,9 @@ function q(values: number[], p: number): number {
 
 const h = await start(1, () => {});
 try {
-  const { hangar } = h.client('bench');
+  const { devicepool } = h.client('bench');
   const ready = async (): Promise<void> => {
-    while (!(await hangar.devices()).some((d) => d.state === 'ready')) {
+    while (!(await devicepool.devices()).some((d) => d.state === 'ready')) {
       await sleep(100);
     }
   };
@@ -25,7 +25,7 @@ try {
   for (let i = 0; i < TRIALS; i++) {
     await ready();
     const t0 = performance.now();
-    const l = await hangar.lease({}, { autoRenew: false });
+    const l = await devicepool.lease({}, { autoRenew: false });
     active.push(performance.now() - t0);
     await l.screenshot('jpeg');
     shot.push(performance.now() - t0);

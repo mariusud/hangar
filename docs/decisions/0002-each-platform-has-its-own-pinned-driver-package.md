@@ -1,6 +1,6 @@
 # 0002. Each platform has its own pinned driver package
 
-- **Status:** Superseded by [0010](0010-hangar-2.md): the drivers live in the agent package,
+- **Status:** Superseded by [0010](0010-devicepool-2.md): the drivers live in the agent package,
   since nothing else uses them. Pinned tool versions per driver still apply.
 - **Date:** 2026-11-05
 

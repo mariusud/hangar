@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { FINDING_SEVERITIES, type Finding, type FindingSeverity, type Night, type NightLease, type NightReport, type NightRun } from '@hangar/protocol';
+import { FINDING_SEVERITIES, type Finding, type FindingSeverity, type Night, type NightLease, type NightReport, type NightRun } from '@devicepool/protocol';
 import type { Principal } from './auth.ts';
 import type { Db, NightRow } from './db.ts';
 import { findingView } from './findings.ts';

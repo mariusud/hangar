@@ -1,4 +1,4 @@
-import { captureOf } from '@hangar/protocol';
+import { captureOf } from '@devicepool/protocol';
 import { json, route } from './util.ts';
 
 route('GET', '/v1/devices', (_req, res, ctx) => {
@@ -14,6 +14,7 @@ route('GET', '/v1/devices', (_req, res, ctx) => {
       host: d.hostName,
       state: !d.connected ? 'offline' : held.has(d.deviceId) ? 'leased' : d.state,
       capture: captureOf(d),
+      note: d.note ?? null,
     })),
   );
 });

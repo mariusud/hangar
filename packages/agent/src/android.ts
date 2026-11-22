@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { hostname, tmpdir, totalmem } from 'node:os';
+import { homedir, hostname, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import * as android from './drivers/android/index.ts';
-import { PROTOCOL_VERSION, type Action, type ActionResult, type AgentDevice, type AgentMessage, type BrokerMessage, type Op, type TestResult } from '@hangar/protocol';
+import * as phone from './drivers/android/phone.ts';
+import { PROTOCOL_VERSION, type Action, type ActionResult, type AgentDevice, type AgentMessage, type BrokerMessage, type Op, type TestResult } from '@devicepool/protocol';
 import { download, findAll, findOne, maestro, onScreen, OpError } from './index.ts';
 import { cursor, LeaseTools, pageLimit } from './drivers/devtools.ts';
 import type { JsTools } from './drivers/cdp.ts';
@@ -16,13 +17,24 @@ const run = promisify(execFile);
 export type AndroidAgentOptions = {
   send: (m: AgentMessage) => void;
   brokerUrl: string;
-  avd: string;
+  /** The Android virtual device to run emulators from. Left out, the host runs no emulators. */
+  avd?: string;
+  /** Offer the Android phones attached to this Mac. */
+  phones?: boolean;
+  /** Where the baseline of a leased phone is kept until its wipe is verified. */
+  stateDir?: string;
   maxDevices?: number;
   warm?: number;
   log?: (line: string) => void;
 };
 
-type Device = AgentDevice & { emulator: android.Emulator; port: number; leaseId: string | null; screen: { width: number; height: number } };
+type Shared = AgentDevice & { serial: string; leaseId: string | null; screen: { width: number; height: number } };
+type EmulatorDevice = Shared & { kind: 'emulator'; emulator: android.Emulator; port: number };
+// `touched` are the packages the lease installed or launched; `baseline` is the phone as the lease found it.
+type PhoneDevice = Shared & { kind: 'phone'; touched: Set<string>; baseline: phone.PhoneState | null };
+type Device = EmulatorDevice | PhoneDevice;
+
+const PHONE_SCAN_MS = 3000;
 
 // Console ports start at 5600, away from the 5554 that Android Studio uses.
 const FIRST_PORT = 5600;
@@ -36,6 +48,13 @@ export class AndroidAgent {
   private tunnels: Tunnels;
   private tools = new LeaseTools();
   private next = 0;
+  // Phones adb lists but cannot use, by serial, with what the operator should do.
+  private unusable = new Map<string, string>();
+  private enrolling = new Set<string>();
+  private scanning = false;
+  private scanError = '';
+  private scanTimer: NodeJS.Timeout | null = null;
+  private stateDir: string;
   readonly maxDevices: number;
   readonly warm: number;
   private opts: AndroidAgentOptions;
@@ -45,6 +64,7 @@ export class AndroidAgent {
     this.maxDevices = opts.maxDevices ?? 2;
     this.warm = Math.min(opts.warm ?? 1, this.maxDevices);
     this.tunnels = new Tunnels(opts.send);
+    this.stateDir = opts.stateDir ?? join(process.env.DEVICEPOOL_HOME ?? join(homedir(), '.devicepool'), 'phones');
   }
 
   private log(line: string): void {
@@ -52,11 +72,18 @@ export class AndroidAgent {
   }
 
   async start(): Promise<void> {
-    if (!(await android.avds()).includes(this.opts.avd)) {
-      throw new OpError('NO_AVD', `There is no Android virtual device called ${this.opts.avd}. Known: ${(await android.avds()).join(', ') || 'none'}. Make one in Android Studio's Device Manager.`);
+    const avd = this.opts.avd;
+    if (avd) {
+      if (!(await android.avds()).includes(avd)) {
+        throw new OpError('NO_AVD', `There is no Android virtual device called ${avd}. Known: ${(await android.avds()).join(', ') || 'none'}. Make one in Android Studio's Device Manager.`);
+      }
+      await this.boot(avd);
     }
-    await this.boot();
     await this.hello();
+    if (this.opts.phones) {
+      await this.scanPhones();
+      this.scanTimer = setInterval(() => void this.scanPhones(), PHONE_SCAN_MS);
+    }
     void this.fill();
   }
 
@@ -67,7 +94,7 @@ export class AndroidAgent {
       hostName: `${hostname()} (Android)`,
       versions: await android.versions(),
       memoryBytes: totalmem(),
-      offers: [{ platform: 'android-emulator', ...this.model }],
+      offers: this.offers(),
       devices: this.inventory(),
       leases: [...this.devices.values()].flatMap((d) => (d.leaseId ? [d.leaseId] : [])),
     });
@@ -75,16 +102,52 @@ export class AndroidAgent {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.scanTimer) {
+      clearInterval(this.scanTimer);
+    }
     this.tunnels.stopAll();
     this.tools.closeAll();
     for (const s of this.streams.values()) {
       await (await s).stop();
     }
-    await Promise.all([...this.devices.values()].map((d) => android.kill(d.emulator)));
+    // A leased phone keeps its baseline on disk and is wiped when this host next sees it.
+    await Promise.all(this.emulators().map((d) => android.kill(d.emulator)));
+  }
+
+  private emulators(): EmulatorDevice[] {
+    return [...this.devices.values()].filter((d) => d.kind === 'emulator');
+  }
+
+  private phones(): PhoneDevice[] {
+    return [...this.devices.values()].filter((d) => d.kind === 'phone');
+  }
+
+  private offers(): { model: string; os: string; platform: 'android-emulator' | 'android-device' }[] {
+    const offers: { model: string; os: string; platform: 'android-emulator' | 'android-device' }[] = [];
+    if (this.opts.avd) {
+      offers.push({ platform: 'android-emulator', ...this.model });
+    }
+    for (const d of this.phones()) {
+      if (!offers.some((o) => o.platform === 'android-device' && o.model === d.model && o.os === d.os)) {
+        offers.push({ platform: 'android-device', model: d.model, os: d.os });
+      }
+    }
+    return offers;
   }
 
   private inventory(): AgentDevice[] {
-    return [...this.devices.values()].map(({ deviceId, model, os, state }) => ({ deviceId, model, os, state, platform: 'android-emulator' }));
+    const devices: AgentDevice[] = [];
+    for (const d of this.devices.values()) {
+      const device: AgentDevice = { deviceId: d.deviceId, model: d.model, os: d.os, state: d.state, platform: d.kind === 'phone' ? 'android-device' : 'android-emulator' };
+      if (d.note) {
+        device.note = d.note;
+      }
+      devices.push(device);
+    }
+    for (const [serial, note] of this.unusable) {
+      devices.push({ deviceId: phone.deviceIdFor(serial), model: 'Android phone', os: '', state: 'quarantined', platform: 'android-device', note });
+    }
+    return devices;
   }
 
   private publish(): void {
@@ -92,7 +155,7 @@ export class AndroidAgent {
   }
 
   private freePort(): number {
-    const used = new Set([...this.devices.values()].map((d) => d.port));
+    const used = new Set(this.emulators().map((d) => d.port));
     let port = FIRST_PORT;
     while (used.has(port)) {
       port += 2;
@@ -100,15 +163,15 @@ export class AndroidAgent {
     return port;
   }
 
-  private async boot(): Promise<void> {
+  private async boot(avd: string): Promise<void> {
     const port = this.freePort();
     this.booting += 1;
     try {
-      const emulator = await android.boot(this.opts.avd, port);
+      const emulator = await android.boot(avd, port);
       const info = await android.info(emulator.serial);
       this.model = info;
       const deviceId = `android-${process.pid}-${++this.next}`;
-      this.devices.set(deviceId, { deviceId, ...info, state: 'ready', emulator, port, leaseId: null, screen: await android.screenSize(emulator.serial) });
+      this.devices.set(deviceId, { kind: 'emulator', deviceId, ...info, state: 'ready', serial: emulator.serial, emulator, port, leaseId: null, screen: await android.screenSize(emulator.serial) });
       this.log(`${info.model} (Android ${info.os}) ready on port ${port}`);
       this.publish();
     } finally {
@@ -117,12 +180,13 @@ export class AndroidAgent {
   }
 
   private async fill(): Promise<void> {
-    while (!this.stopped) {
-      const ready = [...this.devices.values()].filter((d) => d.state === 'ready').length + this.booting;
-      if (ready >= this.warm || this.devices.size + this.booting >= this.maxDevices) {
+    const avd = this.opts.avd;
+    while (avd && !this.stopped) {
+      const ready = this.emulators().filter((d) => d.state === 'ready').length + this.booting;
+      if (ready >= this.warm || this.emulators().length + this.booting >= this.maxDevices) {
         return;
       }
-      await this.boot().catch((err: Error) => {
+      await this.boot(avd).catch((err: Error) => {
         this.log(`Could not boot an emulator: ${err.message}`);
         this.stopped = true;
       });
@@ -139,6 +203,10 @@ export class AndroidAgent {
       d.leaseId = m.leaseId;
       d.state = 'busy';
       this.publish();
+      if (d.kind === 'phone') {
+        void this.preparePhone(d, m.id);
+        return;
+      }
       this.opts.send({ type: 'response', id: m.id, ok: true });
       void this.fill();
     } else if (m.type === 'lease.end') {
@@ -163,9 +231,9 @@ export class AndroidAgent {
       }
       const adb = join(android.sdkRoot() ?? '', 'platform-tools', 'adb');
       this.tunnels.start(m.id, m.leaseId, m.ports, async (port, extra) => {
-        await run(adb, ['-s', d.emulator.serial, 'reverse', 'tcp:8081', `tcp:${port}`]);
+        await run(adb, ['-s', d.serial, 'reverse', 'tcp:8081', `tcp:${port}`]);
         for (const [wanted, local] of Object.entries(extra)) {
-          await run(adb, ['-s', d.emulator.serial, 'reverse', `tcp:${wanted}`, `tcp:${local}`]);
+          await run(adb, ['-s', d.serial, 'reverse', `tcp:${wanted}`, `tcp:${local}`]);
         }
       });
     } else if (m.type === 'tunnel.stop') {
@@ -186,7 +254,7 @@ export class AndroidAgent {
     if (!d || this.streams.has(leaseId)) {
       return;
     }
-    this.streams.set(leaseId, android.screenStream(d.emulator.serial, (data) => this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data }), { maxSize: 1600 }));
+    this.streams.set(leaseId, android.screenStream(d.serial, (data) => this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data }), { maxSize: 1600 }));
   }
 
   private async stopStream(leaseId: string): Promise<void> {
@@ -204,12 +272,153 @@ export class AndroidAgent {
       return;
     }
     d.leaseId = null;
+    if (d.kind === 'phone') {
+      await this.wipePhone(d);
+      return;
+    }
     d.state = 'wiping';
     this.publish();
     await android.kill(d.emulator);
     this.devices.delete(d.deviceId);
     this.publish();
     void this.fill();
+  }
+
+  // Looks at `adb devices` for phones that were plugged in, unplugged, or need the operator.
+  private async scanPhones(): Promise<void> {
+    if (this.scanning) {
+      return;
+    }
+    this.scanning = true;
+    try {
+      const known = [...this.phones().map((d) => d.serial), ...this.enrolling];
+      const changes = phone.phoneChanges(known, await phone.listPhones());
+      this.scanError = '';
+      let offersChanged = false;
+      for (const serial of changes.left) {
+        const d = this.phones().find((p) => p.serial === serial);
+        if (d) {
+          await this.dropPhone(d);
+          offersChanged = true;
+        }
+      }
+      for (const serial of changes.arrived) {
+        offersChanged = (await this.enrol(serial, changes.unusable)) || offersChanged;
+      }
+      const notes = (m: Map<string, string>): string => JSON.stringify([...m].sort());
+      const unusableChanged = notes(changes.unusable) !== notes(this.unusable);
+      for (const [serial, note] of changes.unusable) {
+        if (this.unusable.get(serial) !== note) {
+          this.log(`A phone is attached but cannot be used. ${note}`);
+        }
+      }
+      this.unusable = changes.unusable;
+      if (offersChanged) {
+        await this.hello();
+      } else if (unusableChanged) {
+        this.publish();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message !== this.scanError) {
+        this.log(`Could not look for phones: ${message}`);
+      }
+      this.scanError = message;
+    } finally {
+      this.scanning = false;
+    }
+  }
+
+  // Adds a phone adb can talk to. A phone with a baseline on disk left a lease unwiped, so it is wiped first.
+  private async enrol(serial: string, unusable: Map<string, string>): Promise<boolean> {
+    this.enrolling.add(serial);
+    try {
+      const info = await android.info(serial);
+      const deviceId = phone.deviceIdFor(serial);
+      const d: PhoneDevice = { kind: 'phone', deviceId, ...info, state: 'wiping', serial, leaseId: null, screen: await android.screenSize(serial), touched: new Set(), baseline: null };
+      const stored = await phone.loadBaseline(this.stateDir, deviceId);
+      this.devices.set(deviceId, d);
+      if (stored) {
+        d.baseline = stored.baseline;
+        d.touched = new Set(stored.touched);
+        this.log(`${d.model} is back with a lease that was not wiped; wiping it now`);
+        await this.wipePhone(d);
+      } else {
+        d.state = 'ready';
+        this.log(`${d.model} (Android ${d.os}) attached and ready`);
+      }
+      return true;
+    } catch (err) {
+      unusable.set(serial, `The phone did not answer adb (${err instanceof Error ? err.message : String(err)}). Unplug it and plug it in again.`);
+      return false;
+    } finally {
+      this.enrolling.delete(serial);
+    }
+  }
+
+  private async dropPhone(d: PhoneDevice): Promise<void> {
+    this.devices.delete(d.deviceId);
+    if (d.leaseId) {
+      this.tunnels.stop(d.leaseId);
+      this.tools.close(d.leaseId);
+      await this.stopStream(d.leaseId);
+    }
+    this.log(`${d.model} was unplugged${d.baseline ? '; its lease is wiped when it is plugged in again' : ''}`);
+  }
+
+  // Records the phone as the lease finds it, on disk too, before the lease may change anything.
+  private async preparePhone(d: PhoneDevice, id: number): Promise<void> {
+    const adb = android.adbFor(d.serial);
+    try {
+      d.touched = new Set();
+      d.baseline = await phone.snapshot(adb);
+      await phone.saveBaseline(this.stateDir, d.deviceId, d.baseline);
+      await phone.wake(adb);
+      this.opts.send({ type: 'response', id, ok: true });
+    } catch (err) {
+      // Nothing ran for the lease yet, apart from waking the screen, so the phone goes through its wipe to prove that.
+      d.leaseId = null;
+      this.opts.send({ type: 'response', id, ok: false, error: { code: 'DEVICE_NOT_READY', message: `Could not record the phone before the lease: ${err instanceof Error ? err.message : String(err)}` } });
+      if (d.baseline) {
+        await this.wipePhone(d);
+        return;
+      }
+      d.state = 'ready';
+      this.publish();
+    }
+  }
+
+  private touch(d: Device, pkg: string): void {
+    if (d.kind === 'phone' && !d.touched.has(pkg)) {
+      d.touched.add(pkg);
+      void phone.saveTouched(this.stateDir, d.deviceId, [...d.touched]).catch(() => {});
+    }
+  }
+
+  // A phone is `ready` again only when what is read back from it matches its baseline.
+  private async wipePhone(d: PhoneDevice): Promise<void> {
+    d.state = 'wiping';
+    delete d.note;
+    this.publish();
+    const baseline = d.baseline;
+    const result: phone.WipeResult = baseline
+      ? await phone.wipe(android.adbFor(d.serial), baseline, d.touched).catch((err: unknown) => ({ ok: false, problems: [err instanceof Error ? err.message : String(err)] }))
+      : { ok: false, problems: ['the record of the phone before the lease is missing, so nothing can be compared'] };
+    if (this.devices.get(d.deviceId) !== d) {
+      return;
+    }
+    if (result.ok) {
+      await phone.dropBaseline(this.stateDir, d.deviceId);
+      d.baseline = null;
+      d.touched = new Set();
+      d.state = 'ready';
+      this.log(`${d.model} wiped and checked against its baseline`);
+    } else {
+      d.state = 'quarantined';
+      d.note = `The wipe could not be verified: ${result.problems.join('; ')}. Fix this on the phone, then unplug it and plug it in again to run the check once more.`;
+      this.log(`${d.model} is quarantined. ${d.note}`);
+    }
+    this.publish();
   }
 
   private async op(id: number, leaseId: string, body: Op): Promise<void> {
@@ -227,7 +436,7 @@ export class AndroidAgent {
   }
 
   private async dispatch(d: Device, body: Op): Promise<{ result?: unknown; binary?: string }> {
-    const serial = d.emulator.serial;
+    const serial = d.serial;
     switch (body.op) {
       case 'screenshot':
         return { binary: (await this.screenshot(serial, body.format ?? 'png', body.maxSize)).toString('base64') };
@@ -248,11 +457,12 @@ export class AndroidAgent {
         return { result: results };
       }
       case 'install': {
-        const dir = await mkdtemp(join(tmpdir(), 'hangar-apk-'));
+        const dir = await mkdtemp(join(tmpdir(), 'devicepool-apk-'));
         try {
           const apk = join(dir, 'app.apk');
           await download(new URL(body.artifactUrl, this.opts.brokerUrl).toString(), body.sha256, apk);
           const pkg = await android.install(serial, apk);
+          this.touch(d, pkg);
           if (d.leaseId) {
             this.tools.noteApp(d.leaseId, pkg);
           }
@@ -263,6 +473,7 @@ export class AndroidAgent {
       }
       case 'launch':
         await android.launch(serial, body.bundleId);
+        this.touch(d, body.bundleId);
         if (d.leaseId) {
           this.tools.noteApp(d.leaseId, body.bundleId);
         }
@@ -271,6 +482,9 @@ export class AndroidAgent {
         await android.terminate(serial, body.bundleId);
         return {};
       case 'uninstall':
+        if (d.kind === 'phone' && d.baseline && body.bundleId in d.baseline.packages) {
+          throw new OpError('IN_BASELINE', `${body.bundleId} was on the phone before this lease, so the lease may not remove it. Uninstall only apps the lease installed.`);
+        }
         await android.uninstall(serial, body.bundleId);
         return {};
       case 'openUrl':
@@ -280,18 +494,21 @@ export class AndroidAgent {
         await android.appearance(serial, body.mode);
         return {};
       case 'location':
+        if (d.kind === 'phone') {
+          throw new OpError('NOT_ON_PHONE', 'Location is set through the emulator console, which a phone does not have. Lease an emulator for location tests.');
+        }
         await android.location(serial, body.lat, body.lon);
         return {};
       case 'useMetro': {
         if (!d.leaseId || !this.tunnels.port(d.leaseId)) {
-          throw new OpError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease. Run `hangar run android`, which opens one.');
+          throw new OpError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease. Run `devicepool run android`, which opens one.');
         }
         return { result: { url: 'http://localhost:8081' } };
       }
       case 'maestro':
         return { result: await maestro(serial, body.archive, body.flows, body.env ?? {}) };
       case 'espresso':
-        return { result: await this.espresso(serial, body.app, body.testApp, body.tests) };
+        return { result: await this.espresso(d, body.app, body.testApp, body.tests) };
       case 'appLog':
         return { result: await this.tools.appLog(d.leaseId ?? '', body, (pkg) => android.appLogSource(serial, pkg)) };
       case 'jsEvaluate':
@@ -310,7 +527,7 @@ export class AndroidAgent {
       case 'gesture':
         return android.multiTouch();
       default:
-        throw new OpError('NOT_ON_ANDROID', `${body.op} is not supported on Android emulators yet.`);
+        throw new OpError('NOT_ON_ANDROID', `${body.op} is not supported on Android yet.`);
     }
   }
 
@@ -323,13 +540,15 @@ export class AndroidAgent {
     });
   }
 
-  private async espresso(serial: string, app: { url: string; sha256: string }, testApp: { url: string; sha256: string }, tests: string[]): Promise<TestResult> {
+  private async espresso(d: Device, app: { url: string; sha256: string }, testApp: { url: string; sha256: string }, tests: string[]): Promise<TestResult> {
     android.checkTestNames(tests);
-    const dir = await mkdtemp(join(tmpdir(), 'hangar-espresso-'));
+    const serial = d.serial;
+    const dir = await mkdtemp(join(tmpdir(), 'devicepool-espresso-'));
     try {
       await download(new URL(app.url, this.opts.brokerUrl).toString(), app.sha256, join(dir, 'app.apk'));
       await download(new URL(testApp.url, this.opts.brokerUrl).toString(), testApp.sha256, join(dir, 'test.apk'));
       const target = await android.install(serial, join(dir, 'app.apk'));
+      this.touch(d, target);
       await android.installTestApk(serial, join(dir, 'test.apk'));
       const instrumentation = await android.instrumentationFor(serial, target);
       const started = Date.now();
@@ -346,7 +565,7 @@ export class AndroidAgent {
     if (format === 'png' && !maxSize) {
       return png;
     }
-    const dir = await mkdtemp(join(tmpdir(), 'hangar-shot-'));
+    const dir = await mkdtemp(join(tmpdir(), 'devicepool-shot-'));
     try {
       await writeFile(join(dir, 'in.png'), png);
       const args = ['-s', 'format', format, ...(maxSize ? ['-Z', String(maxSize)] : []), join(dir, 'in.png'), '--out', join(dir, `out.${format}`)];
@@ -363,7 +582,7 @@ export class AndroidAgent {
   }
 
   private async act(d: Device, a: Action): Promise<void> {
-    const serial = d.emulator.serial;
+    const serial = d.serial;
     switch (a.type) {
       case 'tap': {
         if ('element' in a) {

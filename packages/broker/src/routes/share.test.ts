@@ -19,7 +19,7 @@ test('a view link is good for one recording until it expires, and a changed one 
 });
 
 test('someone without an account opens a shared recording, and can do nothing else with the link', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-share-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-share-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const member = (name: string): string => auth.mintToken(broker.db, 'member', { accountId: auth.createAccount(broker.db, name, 'member').id });

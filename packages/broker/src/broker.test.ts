@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage, type Platform } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage, type Platform } from '@devicepool/protocol';
 import { createServer } from 'node:net';
-import { Hangar } from 'hangar';
+import { Devicepool } from 'devicepool';
 import { WebSocket } from 'ws';
-import { decodeMessage, encodeMessage } from '@hangar/protocol';
+import { decodeMessage, encodeMessage } from '@devicepool/protocol';
 import { mintHostToken } from './index.ts';
 import * as auth from './auth.ts';
 import { startBroker, type Broker } from './index.ts';
@@ -86,7 +86,7 @@ function fakeAgent(broker: Broker, platform: Platform = 'ios-simulator'): { mess
 }
 
 async function setup(): Promise<{ broker: Broker; dir: string; token: (name: string) => string }> {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-broker-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-broker-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const token = (name: string): string => {
     const account = auth.createAccount(broker.db, name, 'member');
@@ -165,7 +165,7 @@ test('requests explain what is wrong and what to do', async () => {
     const none = await call(broker, t, 'POST', '/v1/leases', {});
     assert.equal(none.status, 503);
     assert.equal(none.json.error.code, 'NO_DEVICES');
-    assert.match(none.json.error.hint, /hangar up/);
+    assert.match(none.json.error.hint, /devicepool up/);
 
     fakeAgent(broker);
     const wrong = await call(broker, t, 'POST', '/v1/leases', { class: { model: 'Pixel 9' } });
@@ -190,7 +190,7 @@ test('welcome link signs in once; invites create accounts', async () => {
     const first = await fetch(link, { redirect: 'manual' });
     assert.equal(first.status, 302);
     const cookie = first.headers.get('set-cookie')?.split(';')[0] ?? '';
-    assert.match(cookie, /^hangar_session=/);
+    assert.match(cookie, /^devicepool_session=/);
     const again = await fetch(link, { redirect: 'manual' });
     assert.equal(again.headers.get('location'), '/?error=link-used');
 
@@ -218,7 +218,7 @@ test('the Metro tunnel carries a device connection to the lease holder, and only
   try {
     const agent = fakeAgent(broker);
     const alice = token('alice');
-    const lease = await new Hangar({ url: broker.url, token: alice }).lease({}, { autoRenew: false });
+    const lease = await new Devicepool({ url: broker.url, token: alice }).lease({}, { autoRenew: false });
     const address = metro.address();
     const tunnel = await lease.metroTunnel(typeof address === 'object' && address ? address.port : 0);
     assert.equal(tunnel.port, 41000);
@@ -233,7 +233,7 @@ test('the Metro tunnel carries a device connection to the lease holder, and only
     }
     assert.equal(reply, 'metro got GET /status');
 
-    const bob = new Hangar({ url: broker.url, token: token('bob') }).attach(lease.id);
+    const bob = new Devicepool({ url: broker.url, token: token('bob') }).attach(lease.id);
     await assert.rejects(bob.metroTunnel(1));
     tunnel.close();
     await lease.release();
@@ -320,10 +320,10 @@ test('/metrics counts leases and device ops without names or ids', async () => {
     await call(broker, alice, 'POST', `/v1/leases/${lease.json.id}/open-url`, { url: 'myapp://x' });
     await call(broker, alice, 'DELETE', `/v1/leases/${lease.json.id}`);
     const text = await (await fetch(`${broker.url}/metrics`)).text();
-    assert.match(text, /^hangar_hosts_connected 1$/m);
-    assert.match(text, /^hangar_lease_wait_seconds_count 1$/m);
-    assert.match(text, /^hangar_leases_ended_total\{reason="released"\} 1$/m);
-    assert.match(text, /^hangar_op_duration_seconds_count\{op="openUrl"\} 1$/m);
+    assert.match(text, /^devicepool_hosts_connected 1$/m);
+    assert.match(text, /^devicepool_lease_wait_seconds_count 1$/m);
+    assert.match(text, /^devicepool_leases_ended_total\{reason="released"\} 1$/m);
+    assert.match(text, /^devicepool_op_duration_seconds_count\{op="openUrl"\} 1$/m);
     assert.doesNotMatch(text, new RegExp(lease.json.id));
     assert.doesNotMatch(text, /alice/);
   } finally {
@@ -650,7 +650,7 @@ test('single sign-on: code flow with PKCE, a checked ID token, groups to team an
         return;
       }
       const enc = (o: object): string => Buffer.from(JSON.stringify(o)).toString('base64url');
-      const body = `${enc({ alg: 'RS256', kid: 'k1' })}.${enc({ iss: issuer, aud: 'hangar', sub: 'u-42', email: 'kim@example.com', groups: ['mobile-qa', 'platform'], nonce: code.nonce, exp: Math.floor(Date.now() / 1000) + 300 })}`;
+      const body = `${enc({ alg: 'RS256', kid: 'k1' })}.${enc({ iss: issuer, aud: 'devicepool', sub: 'u-42', email: 'kim@example.com', groups: ['mobile-qa', 'platform'], nonce: code.nonce, exp: Math.floor(Date.now() / 1000) + 300 })}`;
       res.end(JSON.stringify({ id_token: `${body}.${sign('sha256', Buffer.from(body), privateKey).toString('base64url')}` }));
     }
   });
@@ -658,8 +658,8 @@ test('single sign-on: code flow with PKCE, a checked ID token, groups to team an
   const address = idp.address();
   issuer = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
 
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-broker-test-'));
-  const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1', oidc: { issuer, clientId: 'hangar', groups: { 'mobile-qa': 'QA', platform: 'operator' } } });
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-broker-test-'));
+  const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1', oidc: { issuer, clientId: 'devicepool', groups: { 'mobile-qa': 'QA', platform: 'operator' } } });
   try {
     const start = await fetch(`${broker.url}/v1/oidc/start?next=/runs`, { redirect: 'manual' });
     const authorize = new URL(start.headers.get('location') ?? '');

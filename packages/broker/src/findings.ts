@@ -16,7 +16,7 @@ import {
   type OpenAgainStep,
   type Point,
   type UiNode,
-} from '@hangar/protocol';
+} from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Principal } from './auth.ts';
 import type { Db, FindingData, FindingRow } from './db.ts';
@@ -25,7 +25,7 @@ import { describeOp, type Recordings } from './recordings.ts';
 import type { Store } from './store.ts';
 
 // Reads the device tools for findings and recordings. As a non-holder it does not count as activity on the lease.
-export const RECORDER: Principal = { accountId: 'hangar-recorder', name: 'Hangar', role: 'operator', scopes: [] };
+export const RECORDER: Principal = { accountId: 'devicepool-recorder', name: 'Devicepool', role: 'operator', scopes: [] };
 
 export const FINDING_WINDOW_MS = 2 * 60_000;
 export const LOG_TAIL = 100;
@@ -36,7 +36,7 @@ const DESCRIPTION_LIMIT = 10_000;
 export type FindingInput = { title: string; description: string; severity: FindingSeverity };
 
 export const STARTED_WITH_FINDING =
-  'The lease was not being recorded, so Hangar started a recording with this finding. The video shows what happens from the finding on, not what led up to it.';
+  'The lease was not being recorded, so Devicepool started a recording with this finding. The video shows what happens from the finding on, not what led up to it.';
 
 export function parseFinding(body: unknown): FindingInput {
   const b = typeof body === 'object' && body !== null ? body : {};
@@ -94,7 +94,7 @@ export class Findings {
         startedWithFinding = true;
         notes.push(STARTED_WITH_FINDING);
       } catch (err) {
-        notes.push(`Hangar could not start a recording, so this finding has no video: ${messageOf(err)}`);
+        notes.push(`Devicepool could not start a recording, so this finding has no video: ${messageOf(err)}`);
       }
     }
     const current = this.recordings.current(leaseId);
@@ -118,7 +118,7 @@ export class Findings {
     }
     const id = randomUUID();
     const screenshot = await this.screenshot(leaseId, id).catch((err: unknown) => {
-      notes.push(`Hangar could not take a screenshot: ${messageOf(err)}`);
+      notes.push(`Devicepool could not take a screenshot: ${messageOf(err)}`);
       return false;
     });
     const night = this.db.nights({ teamId: lease.teamId, state: 'open' }, 1)[0] ?? null;
@@ -158,7 +158,7 @@ export class Findings {
     const finding = this.get(p, id);
     const original = this.db.getLease(finding.leaseId);
     if (!original) {
-      throw new ApiError(404, 'LEASE_NOT_FOUND', `The lease of finding ${id} is gone, so Hangar does not know which device to lease.`);
+      throw new ApiError(404, 'LEASE_NOT_FOUND', `The lease of finding ${id} is gone, so Devicepool does not know which device to lease.`);
     }
     const { actions, truncated } = storedActions(finding.data);
     const lease = this.leases.create(p, original.class, { via: `Open again: ${finding.data.title}` });
@@ -173,13 +173,13 @@ export class Findings {
     }
     const notes: string[] = [];
     if (truncated) {
-      notes.push(`The original lease took more than ${ACTION_LIMIT} actions. Hangar kept the last ${ACTION_LIMIT}, so the replay does not start where the lease started.`);
+      notes.push(`The original lease took more than ${ACTION_LIMIT} actions. Devicepool kept the last ${ACTION_LIMIT}, so the replay does not start where the lease started.`);
     }
     let recording: string | null = null;
     try {
       recording = `${publicUrl}/recordings/${(await this.recordings.start(p, lease.id)).id}`;
     } catch (err) {
-      notes.push(`Hangar could not record the replay: ${messageOf(err)}`);
+      notes.push(`Devicepool could not record the replay: ${messageOf(err)}`);
     }
     const steps = await this.replay(p, lease.id, planReplay(actions));
     try {
@@ -209,7 +209,7 @@ export class Findings {
         }
       };
       const timer = setTimeout(() => {
-        done(new ApiError(504, 'STILL_QUEUED', `No device like the finding's came free within ${Math.round(ms / 1000)} s, so Hangar withdrew the request.`, 'Try again later, or pass a longer `waitSeconds`.'));
+        done(new ApiError(504, 'STILL_QUEUED', `No device like the finding's came free within ${Math.round(ms / 1000)} s, so Devicepool withdrew the request.`, 'Try again later, or pass a longer `waitSeconds`.'));
       }, ms);
       this.leases.events.on(leaseId, check);
       const current = this.db.getLease(leaseId);
@@ -270,7 +270,7 @@ export class Findings {
           return { status: 'failed', by: 'label', note: `No element "${selectorName(selector)}" on the screen.` };
         }
         await this.act(p, leaseId, withPoint(action, recorded));
-        return { status: 'ok', by: 'coordinates', note: `No element "${selectorName(selector)}" on the screen, so Hangar used the recorded point.` };
+        return { status: 'ok', by: 'coordinates', note: `No element "${selectorName(selector)}" on the screen, so Devicepool used the recorded point.` };
       }
     }
     await this.act(p, leaseId, action);
@@ -400,13 +400,13 @@ type ReplayableOp = Extract<Op, { op: 'launch' | 'terminate' | 'openUrl' | 'perm
 const REPLAYABLE_OPS: ReplayableOp['op'][] = ['launch', 'terminate', 'openUrl', 'permission', 'location', 'clearLocation', 'appearance', 'locale', 'orientation', 'gesture'];
 
 const NOT_REPLAYED: Partial<Record<Op['op'], string>> = {
-  uninstall: 'Hangar does not uninstall apps again.',
-  push: 'Hangar does not send push notifications again.',
+  uninstall: 'Devicepool does not uninstall apps again.',
+  push: 'Devicepool does not send push notifications again.',
   useMetro: 'Metro runs on your machine, so connect it again yourself.',
-  jsEvaluate: 'Hangar does not run JavaScript again.',
-  maestro: 'Hangar does not run tests again. Start a run for that.',
-  xcuitest: 'Hangar does not run tests again. Start a run for that.',
-  espresso: 'Hangar does not run tests again. Start a run for that.',
+  jsEvaluate: 'Devicepool does not run JavaScript again.',
+  maestro: 'Devicepool does not run tests again. Start a run for that.',
+  xcuitest: 'Devicepool does not run tests again. Start a run for that.',
+  espresso: 'Devicepool does not run tests again. Start a run for that.',
 };
 
 // One action a lease took, kept so a finding can replay it. `at` is when it started, in epoch milliseconds.
@@ -432,7 +432,7 @@ export function recordOp(body: Op, at: number, result: unknown, screen: UiNode[]
     return body.actions.map((action, i): RecordedAction => {
       const failed = failureOf(results[i]);
       if (action.type === 'type' && action.text.length > TYPE_LIMIT) {
-        return { at, failed, kind: 'skip', what: `Type ${action.text.length} characters`, reason: `Hangar keeps typed text up to ${TYPE_LIMIT} characters.` };
+        return { at, failed, kind: 'skip', what: `Type ${action.text.length} characters`, reason: `Devicepool keeps typed text up to ${TYPE_LIMIT} characters.` };
       }
       const target = (action.type === 'tap' || action.type === 'longPress') && 'point' in action && screen ? targetAt(screen, action.point) : null;
       return { at, failed, kind: 'action', action, target };
@@ -597,7 +597,7 @@ function isRecordedAction(v: unknown): v is RecordedAction {
   return typeof v === 'object' && v !== null && 'at' in v && typeof v.at === 'number' && 'kind' in v && KINDS.some((k) => k === v.kind);
 }
 
-// The actions a finding kept. Findings filed before Hangar kept them have none.
+// The actions a finding kept. Findings filed before Devicepool kept them have none.
 export function storedActions(d: FindingData): { actions: RecordedAction[]; truncated: boolean } {
   const actions = 'actions' in d && Array.isArray(d.actions) ? d.actions.filter(isRecordedAction) : [];
   return { actions, truncated: 'actionsTruncated' in d && d.actionsTruncated === true };

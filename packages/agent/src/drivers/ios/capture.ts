@@ -1,4 +1,4 @@
-import type { CapturePath } from '@hangar/protocol';
+import type { CapturePath } from '@devicepool/protocol';
 import { idbVideoStream } from './idbvideo.ts';
 import { companionSocket, DriverError, screenStream, type ScreenStream } from './index.ts';
 
@@ -80,7 +80,7 @@ const defaultDeps = (): CaptureDeps => ({
     },
   },
   now: Date.now,
-  forced: parseForced(process.env.HANGAR_CAPTURE),
+  forced: parseForced(process.env.DEVICEPOOL_CAPTURE),
   stallMs: STALL_MS,
   firstFrameMs: FIRST_FRAME_MS,
 });
@@ -218,7 +218,7 @@ export async function captureStream(
     }
     if (!stopping) {
       if (deps.forced === 'jpeg') {
-        reasons.push('HANGAR_CAPTURE is jpeg');
+        reasons.push('DEVICEPOOL_CAPTURE is jpeg');
       }
       setPath('jpeg');
       finish(`No H.264 capture works for this device (${reasons.join('; ')}).`);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Booking, Hold, Priority } from '@hangar/protocol';
+import type { Booking, Hold, Priority } from '@devicepool/protocol';
 import { activate, assign, due, end, newLease, warn, type Lease } from './leases/machine.ts';
 import {
   checkBooking,

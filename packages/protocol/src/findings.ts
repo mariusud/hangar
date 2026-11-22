@@ -105,7 +105,7 @@ export type OpenAgain = {
   leaseId: string;
   // The console page of the new lease.
   url: string;
-  // The console page of the recording of the replay, or null when Hangar could not record it.
+  // The console page of the recording of the replay, or null when Devicepool could not record it.
   recording: string | null;
   steps: OpenAgainStep[];
   notes: string[];

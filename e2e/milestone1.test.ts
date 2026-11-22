@@ -5,8 +5,8 @@ import { promisify } from 'node:util';
 import { start } from './harness.ts';
 
 const run = promisify(execFile);
-const real = Boolean(process.env.HANGAR_REAL);
-const app = process.env.HANGAR_E2E_APP;
+const real = Boolean(process.env.DEVICEPOOL_REAL);
+const app = process.env.DEVICEPOOL_E2E_APP;
 
 async function hasApp(udidPrefix: string, bundleId: string): Promise<boolean> {
   const { stdout } = await run('xcrun', ['simctl', 'list', 'devices', '-j']);
@@ -20,11 +20,11 @@ async function hasApp(udidPrefix: string, bundleId: string): Promise<boolean> {
   return false;
 }
 
-test('lease, screenshot, tree, tap by label; a second client queues; release wipes', { skip: !real && 'set HANGAR_REAL=1', timeout: 600_000 }, async () => {
+test('lease, screenshot, tree, tap by label; a second client queues; release wipes', { skip: !real && 'set DEVICEPOOL_REAL=1', timeout: 600_000 }, async () => {
   const h = await start(1);
   try {
-    const alice = h.client('alice').hangar;
-    const bob = h.client('bob').hangar;
+    const alice = h.client('alice').devicepool;
+    const bob = h.client('bob').devicepool;
 
     const step = (s: string): void => console.error(`[e2e] ${s}`);
     step('leasing');
@@ -60,13 +60,13 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
     step('permission');
     await lease.permission('com.apple.Maps', 'location', 'grant');
     step('push');
-    await lease.push('com.apple.Preferences', { aps: { alert: 'Hangar e2e' } });
+    await lease.push('com.apple.Preferences', { aps: { alert: 'Devicepool e2e' } });
     step('presets work');
 
     let bundleId: string | null = null;
     if (app) {
       bundleId = (await lease.install(app)).bundleId;
-      assert.ok(await hasApp('hangar-', bundleId), 'the app is installed on the leased device');
+      assert.ok(await hasApp('devicepool-', bundleId), 'the app is installed on the leased device');
     }
 
     step('releasing');
@@ -77,7 +77,7 @@ test('lease, screenshot, tree, tap by label; a second client queues; release wip
     step('bob active');
     assert.equal(second.info.state, 'active');
     if (bundleId) {
-      assert.equal(await hasApp('hangar-', bundleId), false, 'the released device was wiped');
+      assert.equal(await hasApp('devicepool-', bundleId), false, 'the released device was wiped');
     }
     await second.release();
   } finally {

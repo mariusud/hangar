@@ -18,12 +18,12 @@ then run it.
 ## Decision
 
 - A bearer token acts as an operator only when it carries the `operator` scope and its account is
-  an operator. `hangar up` and `hangar login` give the operator's own CLI token that scope.
+  an operator. `devicepool up` and `devicepool login` give the operator's own CLI token that scope.
   Agent tokens cannot carry it.
 - No token gets `install:upload` from its account. It is a scope an operator grants.
 - `install:upload:<prefix>` allows uploads only under names that start with the prefix, for jobs
-  that run code from a pull request. `hangar connect ci <prefix>` makes one.
-- When the broker starts, existing tokens labelled `hangar up on ...` or `CLI on ...` on an
+  that run code from a pull request. `devicepool connect ci <prefix>` makes one.
+- When the broker starts, existing tokens labelled `devicepool up on ...` or `CLI on ...` on an
   operator account get `operator` and `install:upload`. Every other existing token becomes a
   member's.
 

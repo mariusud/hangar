@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import { startBroker, type Broker } from './index.ts';
 
@@ -97,7 +97,7 @@ async function settle(broker: Broker, token: string, id: string): Promise<any> {
 }
 
 async function withBroker(fn: (broker: Broker, member: (name: string, team?: string) => string, dir: string) => Promise<void>, dir?: string): Promise<void> {
-  const data = dir ?? (await mkdtemp(join(tmpdir(), 'hangar-runs-test-')));
+  const data = dir ?? (await mkdtemp(join(tmpdir(), 'devicepool-runs-test-')));
   const broker = await startBroker({ dataDir: data, port: 0, host: '127.0.0.1' });
   const member = (name: string, team?: string): string => {
     const account = auth.createAccount(broker.db, name, 'member');
@@ -188,7 +188,7 @@ test('rerunning one flow leases a fresh device, runs only that flow recorded, an
 });
 
 test('a rerun after a restart asks for the environment again, since only its names are stored', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-runs-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-runs-test-'));
   try {
     let runId = '';
     let token = '';

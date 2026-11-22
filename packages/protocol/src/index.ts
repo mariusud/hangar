@@ -3,7 +3,12 @@ import type { DeviceToolOp } from './devicetools.ts';
 
 export const PROTOCOL_VERSION = 1;
 
-export type Platform = 'ios-simulator' | 'android-emulator';
+export type Platform = 'ios-simulator' | 'android-emulator' | 'android-device';
+
+/** True for Android emulators and Android phones. */
+export function isAndroid(platform: Platform | undefined): boolean {
+  return platform === 'android-emulator' || platform === 'android-device';
+}
 
 export type DeviceClass = {
   platform?: Platform;
@@ -166,6 +171,8 @@ export type AgentDevice = {
   state: 'ready' | 'busy' | 'wiping' | 'quarantined';
   platform?: Platform;
   image?: string;
+  /** Why the device is not usable, in words an operator can act on. Set on quarantined devices. */
+  note?: string;
 };
 
 /** A device's state as the broker sees it: what its host reports, or `held` while a failed run flow keeps it. */

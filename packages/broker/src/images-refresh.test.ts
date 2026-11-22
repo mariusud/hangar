@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type BrokerMessage, type DeviceImage } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type BrokerMessage, type DeviceImage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import { imageHosts, refreshApps } from './images.ts';
 import { startBroker } from './index.ts';
@@ -48,7 +48,7 @@ test('an image is ready when every connected iOS host offers it', () => {
 });
 
 test('refreshing an image sends hosts a new image id and shows its builds and state', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-image-refresh-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-image-refresh-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const messages: BrokerMessage[] = [];

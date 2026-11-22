@@ -19,7 +19,7 @@ function debugApp(): string {
   if (process.env.HELLO_APP) {
     return process.env.HELLO_APP;
   }
-  const out = execFileSync('find', [join(process.env.HOME!, 'Library/Developer/Xcode/DerivedData'), '-maxdepth', '5', '-path', '*Debug-iphonesimulator/HangarHello.app']).toString().trim().split('\n')[0];
+  const out = execFileSync('find', [join(process.env.HOME!, 'Library/Developer/Xcode/DerivedData'), '-maxdepth', '5', '-path', '*Debug-iphonesimulator/DevicepoolHello.app']).toString().trim().split('\n')[0];
   if (!out) {
     throw new Error('No Debug build of examples/hello. Build it (see examples/hello/README.md) or set HELLO_APP.');
   }
@@ -41,13 +41,13 @@ try {
   for (let i = 0; i < 240 && !(await metroUp()); i++) {
     await sleep(500);
   }
-  const { hangar, token } = h.client('bench');
-  const lease = await hangar.lease({}, { autoRenew: false });
+  const { devicepool, token } = h.client('bench');
+  const lease = await devicepool.lease({}, { autoRenew: false });
   const tunnel = await lease.metroTunnel(PORT);
   await lease.install(debugApp());
-  await lease.useMetro('dev.hangar.hello');
-  await lease.launch('dev.hangar.hello');
-  await lease.waitFor({ label: 'Hello from Hangar' }, 120_000);
+  await lease.useMetro('dev.devicepool.hello');
+  await lease.launch('dev.devicepool.hello');
+  await lease.waitFor({ label: 'Hello from Devicepool' }, 120_000);
 
   const frames: number[] = [];
   const ws = new WebSocket(`${h.broker.url.replace('http', 'ws')}/v1/leases/${lease.id}/stream?codec=h264&token=${token}`);
@@ -63,7 +63,7 @@ try {
   for (let i = 0; i < TRIALS; i++) {
     const label = `Hello ${i + 1}`;
     const t0 = Date.now();
-    writeFileSync(APP_FILE, original.replace('Hello from Hangar', label));
+    writeFileSync(APP_FILE, original.replace('Hello from Devicepool', label));
     let shown = false;
     for (let k = 0; k < 60 && !shown; k++) {
       shown = (await lease.ui()).nodes.some((n) => n.label === label);

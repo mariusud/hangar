@@ -98,7 +98,7 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
 export function h264View(canvas, askKeyframe) {
   const ctx = canvas.getContext('2d');
   const received = new Map();
-  const stats = (window.hangarStats = []);
+  const stats = (window.devicepoolStats = []);
   let decoder = null;
   let config = '';
   const make = () =>
@@ -156,7 +156,7 @@ function avcCodec(data) {
   return null;
 }
 
-class HangarScreen extends HTMLElement {
+class DevicepoolScreen extends HTMLElement {
   connectedCallback() {
     this.style.display ||= 'block';
     this.style.position ||= 'relative';
@@ -177,4 +177,4 @@ class HangarScreen extends HTMLElement {
   }
 }
 
-if (!customElements.get('hangar-screen')) customElements.define('hangar-screen', HangarScreen);
+if (!customElements.get('devicepool-screen')) customElements.define('devicepool-screen', DevicepoolScreen);

@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "Hangar Hello",
-    "slug": "hangar-hello",
+    "name": "Devicepool Hello",
+    "slug": "devicepool-hello",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "dev.hangar.hello"
+      "bundleIdentifier": "dev.devicepool.hello"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "dev.hangar.hello"
+      "package": "dev.devicepool.hello"
     }
   }
 }

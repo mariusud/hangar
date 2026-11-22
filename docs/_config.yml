@@ -1,0 +1,15 @@
+# GitHub Pages builds this folder with its built-in Jekyll. No theme, plugin or script here
+# loads anything from another site.
+title: Devicepool
+description: >-
+  Devicepool is an open source, self-hosted device farm for iOS simulators and Android
+  emulators, for your team, your CI and your AI agents.
+
+# Turns links between .md files into links between the rendered pages, so the same links work
+# on github.com and on Pages. GitHub Pages turns this plugin on by default; it is named here so
+# a local `jekyll build` behaves the same.
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: false

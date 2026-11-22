@@ -16,9 +16,9 @@ jumps to that moment.
 ## From the CLI
 
 ```bash
-hangar record              # start on your current lease
-hangar record stop         # prints the link
-hangar lease --record      # record the whole lease; the link is in `hangar recordings`
+devicepool record              # start on your current lease
+devicepool record stop         # prints the link
+devicepool lease --record      # record the whole lease; the link is in `devicepool recordings`
 ```
 
 ## From code and agents

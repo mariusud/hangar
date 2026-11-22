@@ -1,5 +1,5 @@
 
-import { captureOf, type Op } from '@hangar/protocol';
+import { captureOf, type Op } from '@devicepool/protocol';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
 import type { Lease } from './leases/machine.ts';
@@ -63,11 +63,11 @@ class Histogram {
 }
 
 export class Metrics {
-  readonly leaseWait = new Histogram('hangar_lease_wait_seconds', 'From asking for a device to holding it.', [0.25, 0.5, 1, 2, 5, 10, 30, 60, 300]);
-  readonly leasesEnded = new Counter('hangar_leases_ended_total', 'Leases that ended, by reason.');
-  readonly opDuration = new Histogram('hangar_op_duration_seconds', 'Device operations that succeeded, by op, as the broker saw them.', [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 10, 60]);
-  readonly framesDropped = new Counter('hangar_stream_frames_dropped_total', 'Frames a viewer skipped because its connection fell behind.');
-  readonly framesSent = new Counter('hangar_stream_frames_sent_total', 'Frames sent to viewers, by codec.');
+  readonly leaseWait = new Histogram('devicepool_lease_wait_seconds', 'From asking for a device to holding it.', [0.25, 0.5, 1, 2, 5, 10, 30, 60, 300]);
+  readonly leasesEnded = new Counter('devicepool_leases_ended_total', 'Leases that ended, by reason.');
+  readonly opDuration = new Histogram('devicepool_op_duration_seconds', 'Device operations that succeeded, by op, as the broker saw them.', [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 10, 60]);
+  readonly framesDropped = new Counter('devicepool_stream_frames_dropped_total', 'Frames a viewer skipped because its connection fell behind.');
+  readonly framesSent = new Counter('devicepool_stream_frames_sent_total', 'Frames sent to viewers, by codec.');
 
   private db: Db;
   private hosts: Hosts;
@@ -108,10 +108,10 @@ export class Metrics {
     }
     const states = ['queued', 'preparing', 'active'] as const;
     return [
-      ...gauge('hangar_devices', 'Devices on connected and recently lost hosts, by state.', [...devices].map(([state, n]) => [{ state }, n])),
-      ...gauge('hangar_leases', 'Live leases, by state.', states.map((state) => [{ state }, this.db.leasesIn([state]).length])),
-      ...gauge('hangar_devices_capture', 'Connected devices by the capture path of their last H.264 stream.', [...capture].map(([path, n]) => [{ path }, n])),
-      ...gauge('hangar_hosts_connected', 'Macs connected to the broker.', [[{}, this.hosts.connectedCount()]]),
+      ...gauge('devicepool_devices', 'Devices on connected and recently lost hosts, by state.', [...devices].map(([state, n]) => [{ state }, n])),
+      ...gauge('devicepool_leases', 'Live leases, by state.', states.map((state) => [{ state }, this.db.leasesIn([state]).length])),
+      ...gauge('devicepool_devices_capture', 'Connected devices by the capture path of their last H.264 stream.', [...capture].map(([path, n]) => [{ path }, n])),
+      ...gauge('devicepool_hosts_connected', 'Macs connected to the broker.', [[{}, this.hosts.connectedCount()]]),
       ...this.leaseWait.render(),
       ...this.leasesEnded.render(),
       ...this.opDuration.render(),

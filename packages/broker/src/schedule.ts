@@ -1,4 +1,4 @@
-import { WEEKDAYS, type Booking, type BookingWindow, type DeviceClass, type Hold, type LeaseEnding, type Priority, type Weekday } from '@hangar/protocol';
+import { WEEKDAYS, type Booking, type BookingWindow, type DeviceClass, type Hold, type LeaseEnding, type Priority, type Weekday } from '@devicepool/protocol';
 import { matches, type Lease, type PoolDevice } from './leases/machine.ts';
 
 const MINUTE = 60_000;
@@ -24,9 +24,9 @@ export function priorityOf(lease: Pick<Lease, 'priority'>): Priority {
 
 // ---- Time ----
 
-/** The broker's time zone: HANGAR_TIME_ZONE, or the host's. */
+/** The broker's time zone: DEVICEPOOL_TIME_ZONE, or the host's. */
 export function brokerTimeZone(env: Record<string, string | undefined>): string {
-  const zone = env.HANGAR_TIME_ZONE?.trim();
+  const zone = env.DEVICEPOOL_TIME_ZONE?.trim();
   if (zone && validTimeZone(zone)) {
     return zone;
   }

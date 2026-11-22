@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FINDING_SEVERITIES } from '@hangar/protocol';
+import { FINDING_SEVERITIES } from '@devicepool/protocol';
 import { findingView, parseFinding } from '../findings.ts';
 import type { ToolDeps } from './util.ts';
 
@@ -8,7 +8,7 @@ export function registerFindingTools({ server, p, db, recordings, publicUrl, pic
     'report_finding',
     {
       description:
-        'File a bug you found on the device: a one-line title and a description of what you did, what you expected and what happened. Hangar attaches the last two minutes of video, the steps taken, the app log, the network requests and a screenshot, and adds it to the night report. Starts a recording if the lease has none, in which case the video starts with the finding.',
+        'File a bug you found on the device: a one-line title and a description of what you did, what you expected and what happened. Devicepool attaches the last two minutes of video, the steps taken, the app log, the network requests and a screenshot, and adds it to the night report. Starts a recording if the lease has none, in which case the video starts with the finding.',
       inputSchema: {
         title: z.string().min(1).max(200),
         description: z.string().max(10_000),

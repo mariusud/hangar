@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ORIENTATIONS, PRIVACY_SERVICES, type Action, type UiNode } from '@hangar/protocol';
+import { ORIENTATIONS, PRIVACY_SERVICES, type Action, type UiNode } from '@devicepool/protocol';
 import type { Content, Result, ToolDeps } from './util.ts';
 
 const point = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).describe('[x, y] as fractions of the screen, 0 to 1');
@@ -138,7 +138,7 @@ export function registerDeviceTools({ server, p, leases, pick, safe, text, insta
   );
 
   const cursor = {
-    bundleId: z.string().optional().describe('The app; defaults to the last app installed or launched through Hangar'),
+    bundleId: z.string().optional().describe('The app; defaults to the last app installed or launched through Devicepool'),
     since: z.number().int().min(0).optional().describe('The `next` of the previous call, to get only newer entries'),
     limit: z.number().int().min(1).max(1000).optional(),
     leaseId: z.string().optional(),
@@ -153,7 +153,7 @@ export function registerDeviceTools({ server, p, leases, pick, safe, text, insta
   server.registerTool(
     'js_evaluate',
     {
-      description: "Evaluate a JavaScript expression in the React Native app through Metro's debugger and return its value as JSON. Needs the Metro tunnel that `hangar run` opens.",
+      description: "Evaluate a JavaScript expression in the React Native app through Metro's debugger and return its value as JSON. Needs the Metro tunnel that `devicepool run` opens.",
       inputSchema: { expression: z.string().min(1).max(100_000), bundleId: z.string().optional(), leaseId: z.string().optional() },
     },
     ({ expression, bundleId, leaseId }) => safe(async () => text((await leases.op(p, pick(leaseId), { op: 'jsEvaluate', expression, ...(bundleId ? { bundleId } : {}) })).result)),

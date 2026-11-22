@@ -1,4 +1,4 @@
-import type { LeaseLimits, LimitRole, TokenLimits } from '@hangar/protocol';
+import type { LeaseLimits, LimitRole, TokenLimits } from '@devicepool/protocol';
 import { DEFAULTS } from './machine.ts';
 
 export type Limits = { idleMs: number; maxMs: number; graceMs: number };

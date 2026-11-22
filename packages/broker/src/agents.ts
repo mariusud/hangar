@@ -2,7 +2,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
-import { decodeMessage, encodeMessage, type AgentMessage } from '@hangar/protocol';
+import { decodeMessage, encodeMessage, type AgentMessage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
@@ -18,7 +18,7 @@ export function attachAgents(db: Db, hosts: Hosts): Upgrades {
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
     const token = auth.lookupToken(db, bearer, Date.now());
     if (token?.kind !== 'host') {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\nThis host token is not valid. Make a new one with `hangar join-token` on the broker.');
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\nThis host token is not valid. Make a new one with `devicepool join-token` on the broker.');
       socket.destroy();
       return true;
     }

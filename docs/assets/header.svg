@@ -16,20 +16,20 @@
     <rect x="12" y="15" width="8" height="13" rx="2" fill="#F5A524"/>
     <rect x="14.6" y="16.6" width="2.8" height="1.1" rx=".55" fill="#0C0E12"/>
   </g>
-  <text x="156" y="84" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="-1.2">Hangar</text>
+  <text x="156" y="84" fill="#F2F4F7" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="-1.2">Devicepool</text>
   <text font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="38" font-weight="650" letter-spacing="-0.8" fill="#F2F4F7">
-    <tspan x="100" y="160">The open source device broker</tspan>
-    <tspan x="100" y="206">for React Native teams.</tspan>
+    <tspan x="100" y="160">The open source,</tspan>
+    <tspan x="100" y="206">self-hosted device farm.</tspan>
   </text>
   <text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" fill="#9AA3AE">
-    <tspan x="100" y="250">A free alternative to Expo Simulators and</tspan>
-    <tspan x="100" y="278">EAS Maestro jobs, on your own Macs.</tspan>
+    <tspan x="100" y="250">iOS simulators and Android emulators for</tspan>
+    <tspan x="100" y="278">your team, your CI and your AI agents.</tspan>
   </text>
-  <rect x="100" y="304" width="178" height="44" rx="10" fill="#161A20" stroke="#2A3038"/>
+  <rect x="100" y="304" width="220" height="44" rx="10" fill="#161A20" stroke="#2A3038"/>
   <text x="120" y="333" fill="#F5A524" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">$</text>
-  <text x="142" y="333" fill="#E6E9ED" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">hangar up</text>
+  <text x="142" y="333" fill="#E6E9ED" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="20">devicepool up</text>
 
-  <!-- the hangar: an arch with ribs -->
+  <!-- the pool: an arch with ribs -->
   <g fill="none" stroke="#2A3038" stroke-width="2">
     <path d="M640 336 A290 270 0 0 1 1220 336"/>
     <path d="M676 336 A254 236 0 0 1 1184 336" stroke="#1E232A"/>

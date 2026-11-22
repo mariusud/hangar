@@ -1,6 +1,6 @@
 # Contributing
 
-Hangar is at the design stage. The most useful contribution right now is review of
+Devicepool is at the design stage. The most useful contribution right now is review of
 [docs/design.md](docs/design.md): open an issue or a discussion with what is wrong or missing.
 
 ## Decisions

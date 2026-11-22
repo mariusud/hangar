@@ -1,0 +1,40 @@
+{
+  "name": "devicepool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open source, self-hosted device farm for iOS simulators and Android emulators. For your team, your CI and your AI agents (MCP).",
+  "keywords": [
+    "device-farm",
+    "ios-simulator",
+    "android-emulator",
+    "mcp",
+    "maestro",
+    "react-native",
+    "expo",
+    "self-hosted",
+    "xcuitest",
+    "espresso"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mariusud/devicepool.git"
+  },
+  "homepage": "https://github.com/mariusud/devicepool#readme",
+  "bugs": {
+    "url": "https://github.com/mariusud/devicepool/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": "./src/client/index.ts",
+  "bin": {
+    "devicepool": "./src/main.ts"
+  },
+  "dependencies": {
+    "@devicepool/protocol": "workspace:*",
+    "@devicepool/broker": "workspace:*",
+    "@devicepool/agent": "workspace:*"
+  }
+}

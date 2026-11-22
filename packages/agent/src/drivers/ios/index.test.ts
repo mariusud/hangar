@@ -19,7 +19,7 @@ test('toNodes normalizes frames against the application frame', () => {
   });
 });
 
-test('real simulator: golden, clone, boot, drive, delete', { skip: !process.env.HANGAR_REAL && 'set HANGAR_REAL=1', timeout: 300_000 }, async () => {
+test('real simulator: golden, clone, boot, drive, delete', { skip: !process.env.DEVICEPOOL_REAL && 'set DEVICEPOOL_REAL=1', timeout: 300_000 }, async () => {
   const rt = (await sim.runtimes()).at(-1);
   assert.ok(rt, 'no iOS runtime installed');
   const type = (await sim.deviceTypes()).find((d) => d.name === 'iPhone 17') ?? (await sim.deviceTypes())[0];

@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { decodeMessage, encodeMessage, type AgentMessage, type BrokerMessage } from '@hangar/protocol';
+import { decodeMessage, encodeMessage, type AgentMessage, type BrokerMessage } from '@devicepool/protocol';
 export type HostAgent = { hello(): Promise<void>; receive(m: BrokerMessage): void; start(): Promise<void>; stop(): Promise<void> };
 
 export type JoinOptions<A extends HostAgent> = {
@@ -42,7 +42,7 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
       // ws emits no close after an HTTP answer to the upgrade.
       socket.on('unexpected-response', (_req, res) => {
         if (res.statusCode === 401) {
-          reject(new Error('The broker refused this host token. Make a new one with `hangar join-token` on the broker.'));
+          reject(new Error('The broker refused this host token. Make a new one with `devicepool join-token` on the broker.'));
           return;
         }
         log(`The broker answered HTTP ${res.statusCode}; retrying.`);

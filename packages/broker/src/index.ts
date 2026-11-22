@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
-import type { AgentMessage } from '@hangar/protocol';
+import type { AgentMessage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import { Db } from './db.ts';
 import { Hosts, type HostLink } from './hosts.ts';
@@ -53,7 +53,7 @@ export type Broker = {
 
 export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   await mkdir(opts.dataDir, { recursive: true });
-  const db = new Db(join(opts.dataDir, 'hangar.db'));
+  const db = new Db(join(opts.dataDir, 'devicepool.db'));
   sealStoredSecrets(db);
   const hosts = new Hosts();
   const leases = new Leases(db, hosts);

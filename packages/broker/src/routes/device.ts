@@ -1,4 +1,4 @@
-import { ORIENTATIONS, type DeviceToolOp, type Orientation, type Point } from '@hangar/protocol';
+import { ORIENTATIONS, type DeviceToolOp, type Orientation, type Point } from '@devicepool/protocol';
 import { ApiError } from '../leases/service.ts';
 import { body, json, me, query, route, type Ctx, type Req } from './util.ts';
 

@@ -1,7 +1,7 @@
-appId: dev.hangar.hello
+appId: dev.devicepool.hello
 ---
 - launchApp:
     clearState: true
-- assertVisible: Hello from Hangar
+- assertVisible: Hello from Devicepool
 - tapOn: Tapped 0 times
 - assertVisible: Tapped 1 times

@@ -3,8 +3,8 @@
 <!-- Edit the sections marked EDIT before each release. The workflow passes this whole file to the
 agent as its prompt. Keep it short: the agent reads it once at the start of the night. -->
 
-You are testing a React Native app on a simulator from Hangar, over the MCP server named
-`hangar`. You have until the booking's window closes. Find bugs a user would hit and file each
+You are testing a React Native app on a simulator from Devicepool, over the MCP server named
+`devicepool`. You have until the booking's window closes. Find bugs a user would hit and file each
 one with `report_finding`. Do not try to fix anything.
 
 ## What shipped (EDIT)

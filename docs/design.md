@@ -1,16 +1,15 @@
-# Hangar design
+# Devicepool design
 
 Status: draft, 2026-11-05. Milestone 1 is partly built; ROADMAP.md says what runs today.
 
-Hangar is an open-source (Apache-2.0) device fleet that a software team runs on its own hardware.
+Devicepool is an open source (Apache-2.0) device farm that a software team runs on its own hardware.
 It is built first for React Native and Expo teams: the fastest way to give every developer, QA
-tester, CI job and AI agent a fresh iOS simulator or Android emulator from a Mac mini in the
-office. One command on the Mac turns it into a pool of devices. People and programs on the team
-lease devices from that pool and give them back. Each device is wiped before anyone else gets it. When one Mac is
-not enough, more Macs, Linux boxes and USB phones join the same pool with one command each.
+tester, CI job and AI agent a fresh iOS simulator or Android emulator from a Mac mini in the office.
+One command on the Mac turns it into a pool of devices. People and programs on the team lease
+devices from that pool and give them back. Each device is wiped before anyone else gets it. When one
+Mac is not enough, more Macs, Linux boxes and USB phones join the same pool with one command each.
 
-It is software you run, not a hosted service, and it has no paid tier. "Hangar" is a working
-name.
+It is software you run, not a hosted service, and it has no paid tier.
 
 This document is the design for review. User docs will live in `docs/` next to it, decisions in
 `docs/decisions/`, and the plan in `ROADMAP.md`.
@@ -18,7 +17,7 @@ This document is the design for review. User docs will live in `docs/` next to i
 ## Easy to use comes first
 
 The tools in section 2 can each do part of this job. What none of them is, yet, is something a
-team sets up in an afternoon without reading a manual. That is Hangar's main goal, and it wins
+team sets up in an afternoon without reading a manual. That is Devicepool's main goal, and it wins
 when it conflicts with features: a feature that needs a config file, an extra service or a
 networking change before it works is either given a default that works, or waits.
 
@@ -27,20 +26,20 @@ networking change before it works is either given a default that works, or waits
 On a Mac with Xcode installed:
 
 ```bash
-npx hangar up
+npx devicepool up
 ```
 
-That command checks the machine (Xcode, runtimes, disk, memory, the tools Hangar needs), installs
-the pinned tools it is missing, starts the broker and the agent in one process, creates a device
-class for each installed simulator runtime, sizes the pool from the Mac's memory, installs itself
-as a service so it survives a reboot, and prints:
+That command checks the machine (Xcode, runtimes, disk, memory, the tools Devicepool needs),
+installs the pinned tools it is missing, starts the broker and the agent in one process, creates a
+device class for each installed simulator runtime, sizes the pool from the Mac's memory, installs
+itself as a service so it survives a reboot, and prints:
 
 ```
-Hangar is running at http://studio-mini.local:7420
+Devicepool is running at http://studio-mini.local:7420
 
   Sign in as admin:   http://studio-mini.local:7420/welcome/7KQ2-XM4P   (one use, 30 min)
-  Add another Mac:    npx hangar join http://studio-mini.local:7420/join/hgr_join_...
-  Connect an agent:   claude mcp add --transport http hangar http://studio-mini.local:7420/mcp
+  Add another Mac:    npx devicepool join http://studio-mini.local:7420/join/hgr_join_...
+  Connect an agent:   claude mcp add --transport http devicepool http://studio-mini.local:7420/mcp
 ```
 
 The admin opens the link, gets a session in the console, and invites teammates by copying invite
@@ -66,13 +65,13 @@ The other first-use targets:
 
 - Adding a host: one command, pasted from the console. No token copying by hand.
 - Connecting an AI agent: one `mcp add` line, shown in the console with the token filled in.
-- A CI suite: one command (`npx hangar run maestro ./flows --build app.zip`) and one secret.
+- A CI suite: one command (`npx devicepool run maestro ./flows --build app.zip`) and one secret.
 
 ### React Native first
 
 The features an RN developer notices on the first day come before broad platform coverage:
 
-- `npx hangar run ios` works like `expo run:ios`. It builds locally or takes an EAS or Bazel
+- `npx devicepool run ios` works like `expo run:ios`. It builds locally or takes an EAS or Bazel
   artifact, installs it on a leased simulator, and connects the app to the Metro server on the
   developer's laptop through the broker, so Fast Refresh works on the remote device.
 
@@ -90,19 +89,19 @@ The features an RN developer notices on the first day come before broad platform
 
 ### Rules that follow from it
 
-- **One process for one Mac.** `hangar up` runs the broker and the agent together, with SQLite
-  and artifacts on local disk. The container, Postgres and S3-compatible storage are for when a
-  team outgrows one machine, and moving there is `hangar export` on the Mac and `hangar import` in
-  the container.
+- **One process for one Mac.** `devicepool up` runs the broker and the agent together, with SQLite
+  and artifacts on local disk. The container, Postgres and S3-compatible storage are for when a team
+  outgrows one machine, and moving there is `devicepool export` on the Mac and `devicepool import`
+  in the container.
 - **No config file by default.** Every setting has a default derived from the machine or the
-  team. Settings live in the console and in `hangar config`; a file is optional, for people who
+  team. Settings live in the console and in `devicepool config`; a file is optional, for people who
   want it in git.
 - **Built-in accounts.** Invite links and passkeys or passwords work with no identity provider.
   OIDC is one setting away for teams that have one, not a requirement.
 - **The stream works on any network.** WebRTC when the viewer can reach the host, and an automatic
   fallback over the broker's own connection when it cannot, so nobody has to run a TURN server to
   watch a device from home or through an ingress.
-- **Doctor before failure.** `hangar doctor` runs the checks `hangar up` runs, explains each
+- **Doctor before failure.** `devicepool doctor` runs the checks `devicepool up` runs, explains each
   problem in a sentence, and fixes the ones it can. A host that fails a check says so in the
   console instead of failing leases.
 - **Errors say what to do.** Every error has a code, a sentence, and the next step: "No iPhone 17
@@ -115,7 +114,7 @@ The features an RN developer notices on the first day come before broad platform
 
 ## 1. Who uses it
 
-| User | What they do | What they need from Hangar |
+| User | What they do | What they need from Devicepool |
 |---|---|---|
 | QA tester | Picks a device in the browser, installs a build, tests by hand, files a bug. | An interactive console with touch input, screenshots and a recording to attach to the bug. |
 | CI pipeline | Runs the Maestro or XCUITest suite on every pull request. | Shard a suite over N devices, retry flaky tests, return JUnit and artifacts, exit non-zero on failure. |
@@ -166,17 +165,17 @@ Notes from reading them:
 
 ### Why a separate project
 
-Hangar needs things none of these combine: iOS simulators and phones in one pool, leases with a
+Devicepool needs things none of these combine: iOS simulators and phones in one pool, leases with a
 fair queue and a wipe on every release, the standard suite runners (Maestro, XCUITest, Appium),
 OIDC, and isolation the host enforces rather than asks for. Simlock has the leases but treats
 `exec` passthrough as a feature and keeps its console read-only by design. tapflow has the QA
 console but is built around sessions and its own flow format. Changing either would mean
 changing what the project is for, so an upstream contribution is unlikely to land.
 
-Hangar borrows where the license allows, with notices kept: Simlock's lease semantics and capacity
-rules (MIT), the scrcpy server (Apache-2.0), serve-sim's capture path (Apache-2.0). Ideas taken
-from the others: Limrun's split of org, instance and stream tokens and its pair of idle and hard
-timeouts; Argent's normalized element frames and batched actions; tapflow's agent that connects
+Devicepool borrows where the license allows, with notices kept: Simlock's lease semantics and
+capacity rules (MIT), the scrcpy server (Apache-2.0), serve-sim's capture path (Apache-2.0). Ideas
+taken from the others: Limrun's split of org, instance and stream tokens and its pair of idle and
+hard timeouts; Argent's normalized element frames and batched actions; tapflow's agent that connects
 out so hosts need no inbound ports, and its Mac picker that shows CPU and RAM headroom; GADS's
 Appium endpoint with a queue in front of it.
 
@@ -209,28 +208,28 @@ which flows from the host to the viewer because relaying video through the broke
 and latency without making anything safer. The host only sends media to a peer that completed
 signaling through the broker with a valid token.
 
-On one Mac, `hangar up` runs the broker and the agent in the same process, connected in memory
+On one Mac, `devicepool up` runs the broker and the agent in the same process, connected in memory
 instead of over a WebSocket. The code is the same; only the transport differs. A team moves the
 broker into a container when it adds hosts on other networks or wants it on Kubernetes. Hosts
 on the same LAN can join a broker that still runs on the first Mac.
 
 ### Broker
 
-- One Node 22 process: inside `hangar up` on a Mac, or alone in a container on Kubernetes or
+- One Node 22 process: inside `devicepool up` on a Mac, or alone in a container on Kubernetes or
   Docker.
 - Serves the REST API, the Appium endpoint, MCP, the console, OIDC sign-in and WHEP signaling.
 - State in SQLite by default, Postgres through a connection string. One broker instance at a time.
 - Artifacts (builds, test bundles, recordings, screenshots, logs) on a local volume, or any
   S3-compatible store such as MinIO. Retention is set per team.
-- In a container, TLS comes from the ingress. On a Mac, `hangar up` serves plain HTTP on the LAN
+- In a container, TLS comes from the ingress. On a Mac, `devicepool up` serves plain HTTP on the LAN
   by default, and the console shows a banner saying tokens travel unencrypted until TLS is set up
-  (`hangar config tls --cert --key`, or a reverse proxy). This trades transport security for a
+  (`devicepool config tls --cert --key`, or a reverse proxy). This trades transport security for a
   setup with no certificate, and the docs say so on the setup page.
 - No outbound calls except to the OIDC issuer and the artifact store, when those are configured.
 
 ### Host agent
 
-- One Node 22 process per machine, running as a dedicated non-admin user `hangar`.
+- One Node 22 process per machine, running as a dedicated non-admin user `devicepool`.
 - Connects out to the broker, reconnects with backoff, opens no listening TCP port.
 - Creates, boots, wipes and deletes devices, keeps the warm pool the broker asks for, and reports
   health, capacity, memory pressure, versions and inventory. When leases queue, the broker sends
@@ -238,9 +237,9 @@ on the same LAN can join a broker that still runs on the first Mac.
   class to make room.
 - Runs test runners (Maestro, `xcodebuild test-without-building`) against leased devices.
 - Keeps its own lease table and refuses any op for a lease it does not hold (section 6).
-- A LaunchDaemon with `UserName=hangar` on macOS, a systemd unit on Linux. `hangar up` and
-  `hangar join` create the user and install the service, asking for the admin password once;
-  `hangar uninstall` removes both.
+- A LaunchDaemon with `UserName=devicepool` on macOS, a systemd unit on Linux. `devicepool up` and
+  `devicepool join` create the user and install the service, asking for the admin password once;
+  `devicepool uninstall` removes both.
 - Installs the pinned versions of the tools it drives (idb companion, scrcpy server, Appium and
   its drivers, Maestro) into its own folder on first start, and from an offline bundle on
   machines without internet access. Xcode and the Android SDK are the only things the team
@@ -248,7 +247,7 @@ on the same LAN can join a broker that still runs on the first Mac.
 
 Spike before anything else is built on it: can CoreSimulator boot devices, and can idb and
 `xcodebuild` drive them, from a LaunchDaemon with no console session? Simlock gave up on this and
-requires auto-login. If the spike fails, Hangar documents auto-login of the `hangar` user.
+requires auto-login. If the spike fails, Devicepool documents auto-login of the `devicepool` user.
 
 ## 4. Concepts
 
@@ -257,7 +256,7 @@ requires auto-login. If the spike fails, Hangar documents auto-login of the `han
 - **Device class.** A selector: `platform` (`ios-simulator`, `android-emulator`, `ios-device`,
   `android-device`), `model`, `os`, and optional `build`. Fields left out mean "any".
 - **Device.** A simulator, emulator or phone on a host. Simulators and emulators are created and
-  deleted by Hangar. Phones are enrolled by an operator and can be assigned to teams.
+  deleted by Devicepool. Phones are enrolled by an operator and can be assigned to teams.
 - **Build.** An app artifact (`.app` zip, `.ipa`, `.apk`) stored by SHA-256 with a name and version,
   uploaded by CI or a person with the scope for it.
 - **Lease.** Exclusive use of one device by one principal for a bounded time.
@@ -267,7 +266,8 @@ requires auto-login. If the spike fails, Hangar documents auto-login of the `han
 ## 5. API
 
 REST and JSON under `/v1`. Every request carries `Authorization: Bearer <token>` or the console's
-session cookie. Errors have one shape: `{ "error": { "code": "LEASE_NOT_ACTIVE", "message": "..." } }`.
+session cookie. Errors have one shape: `{ "error": { "code": "LEASE_NOT_ACTIVE", "message": "..." }
+}`.
 
 ### Leases
 
@@ -368,13 +368,13 @@ Maestro and XCUITest are the suite kinds built so far. For XCUITest, `build` is 
 Build/Products folder of `build-for-testing`, which holds the app too, and `suite.tests` lists
 -only-testing names to shard over; the agent reads results from xcodebuild's output. For
 Espresso, `build` is the app's .apk, `suite.testBuild` the test .apk, and `suite.tests` class
-names (or `["all"]`); Hangar shards by class rather than with `numShards`, so a failed class
-can be retried on its own. `hangar run maestro` uploads the app as a build if it
+names (or `["all"]`); Devicepool shards by class rather than with `numShards`, so a failed class
+can be retried on its own. `devicepool run maestro` uploads the app as a build if it
 is a path, then starts a run with the flows folder inline as a base64 tar of up to 10 MB
 (`suite: { kind: "maestro", archive, flows }`, where `flows` lists the flow files in it). The
 broker's coordinator retries a failed flow on the same device, recorded, rather than on a fresh
 one, so the recording link in the run and in JUnit shows the retry. A run's coordinator lives in
-the broker process; a run that is going when Hangar stops is marked failed on the next start.
+the broker process; a run that is going when Devicepool stops is marked failed on the next start.
 The agent runs `maestro --device <udid>` on the Mac, so each Maestro process sees only its
 lease's device. Per-test artifacts are the recordings linked from each flow, so there is no
 separate artifacts route yet.
@@ -386,10 +386,10 @@ CI parallelises them the usual way.
 
 `/wd/hub` speaks the W3C WebDriver protocol. A new session request becomes a lease: the
 capabilities `platformName`, `appium:deviceName` and `appium:platformVersion` map to a device class,
-and `hangar:build` names a build. The host runs Appium with the XCUITest or UiAutomator2 driver
+and `devicepool:build` names a build. The host runs Appium with the XCUITest or UiAutomator2 driver
 bound to the leased device. The broker rejects capabilities that name a `udid` or that would run
 host commands, and deleting the session releases the lease. Session creation waits in the queue,
-up to `hangar:queueTimeout`.
+up to `devicepool:queueTimeout`.
 
 ### MCP
 
@@ -424,22 +424,23 @@ The broker serves a web console at `/`. People sign in with OIDC.
 
 ### SDK, CLI and CI
 
-The client (`import { Hangar } from 'hangar'`) is a typed wrapper over the REST API. `lease()` returns an object that renews
-itself and releases on dispose (`await using`). The `hangar` CLI is built on it:
+The client (`import { Devicepool } from 'devicepool'`) is a typed wrapper over the REST API.
+`lease()` returns an object that renews itself and releases on dispose (`await using`). The
+`devicepool` CLI is built on it:
 
 ```bash
-hangar run maestro ./flows --build ./MyApp.app --shards 4 --junit report.xml
+devicepool run maestro ./flows --build ./MyApp.app --shards 4 --junit report.xml
 ```
 
-Server commands: `hangar up`, `hangar join <link>`, `hangar doctor`, `hangar status`,
-`hangar config`, `hangar export` and `hangar import`, `hangar uninstall`.
+Server commands: `devicepool up`, `devicepool join <link>`, `devicepool doctor`, `devicepool
+status`, `devicepool config`, `devicepool export` and `devicepool import`, `devicepool uninstall`.
 
-Client commands: `hangar login <url>` (opens the browser once and stores a token),
-`hangar lease --hold`, `hangar install`, `hangar screenshot`, `hangar ui`,
-`hangar tap --label "Sign in"`, `hangar watch` (opens the stream). Every client command works
-through `npx` without a global install, and finds the broker from `HANGAR_URL`, the last
-`hangar login`, or Bonjour on the LAN (`hangar up` advertises itself as `_hangar._tcp`). A GitHub
-Action wraps `hangar run` and uploads the JUnit report.
+Client commands: `devicepool login <url>` (opens the browser once and stores a token), `devicepool
+lease --hold`, `devicepool install`, `devicepool screenshot`, `devicepool ui`, `devicepool tap
+--label "Sign in"`, `devicepool watch` (opens the stream). Every client command works through `npx`
+without a global install, and finds the broker from `DEVICEPOOL_URL`, the last `devicepool login`,
+or Bonjour on the LAN (`devicepool up` advertises itself as `_devicepool._tcp`). A GitHub Action
+wraps `devicepool run` and uploads the JUnit report.
 
 ### Admin API
 
@@ -537,14 +538,14 @@ and whose team is under its quota: the highest priority first, run shards before
 inside a booking, then the team with the fewest active leases relative to its quota, then the
 principal with the fewest active leases, then the oldest request.
 
-An open booking keeps free devices for itself up to its count, never a host's CI floor (1 device
-by default). Only the booking's own tokens lease from it, and only `ci` requests may take a device
-it keeps free. A `ci` request that finds nothing free waits for a device that is coming back;
-failing that, it tells the lowest-priority lease it could use, agent leases before run shards and
-newest first, to end in two minutes (`preempted`). An `interactive` request never ends a booked
-lease, so it waits. Booked leases are told ten minutes before their window closes. The scheduler is a pure function
-from queued requests, ready and returning devices, live leases, bookings, holds, quotas and the
-time to assignments, early endings and reserved devices, so it is tested without a clock or a
+An open booking keeps free devices for itself up to its count, never a host's CI floor (1 device by
+default). Only the booking's own tokens lease from it, and only `ci` requests may take a device it
+keeps free. A `ci` request that finds nothing free waits for a device that is coming back; failing
+that, it tells the lowest-priority lease it could use, agent leases before run shards and newest
+first, to end in two minutes (`preempted`). An `interactive` request never ends a booked lease, so
+it waits. Booked leases are told ten minutes before their window closes. The scheduler is a pure
+function from queued requests, ready and returning devices, live leases, bookings, holds, quotas and
+the time to assignments, early endings and reserved devices, so it is tested without a clock or a
 database (decision 0012).
 
 Admission to boot a new simulator is by memory, not a fixed count: the host reports free memory
@@ -564,7 +565,7 @@ Simlock's RAM budget is the reference.
 ## 7. Security model
 
 The tenants are people and programs in teams that mostly trust each other: one company, or a few
-teams in it. Hangar still enforces boundaries, because a CI job, an AI agent and a contractor
+teams in it. Devicepool still enforces boundaries, because a CI job, an AI agent and a contractor
 should not be able to read each other's devices or run commands on the Macs by accident or on
 purpose.
 
@@ -577,16 +578,16 @@ purpose.
 | `operator` | Everything everywhere: hosts, teams, quotas, classes, revoking leases, the audit log. |
 | `host` | Connect at `/v1/agent/connect` as one specific host. Nothing else. |
 
-Scopes narrow tokens further. A bearer token acts with its account's role only when it carries
-the `operator` scope, so a token an operator makes for an agent or CI job is a member's. Agent
-tokens never carry it. `install:upload` allows uploading app and test bundles under any name, and
+Scopes narrow tokens further. A bearer token acts with its account's role only when it carries the
+`operator` scope, so a token an operator makes for an agent or CI job is a member's. Agent tokens
+never carry it. `install:upload` allows uploading app and test bundles under any name, and
 `install:upload:<prefix>` only builds whose name starts with the prefix. Both are off by default,
-and only operators can grant them. The operator's own CLI token from `hangar up` or `hangar login`
-carries `operator` and `install:upload`.
+and only operators can grant them. The operator's own CLI token from `devicepool up` or `devicepool
+login` carries `operator` and `install:upload`.
 
 People sign in one of three ways, and all of them end in an HttpOnly, SameSite=Lax session cookie:
 
-- **Built-in accounts, the default.** `hangar up` prints a one-use admin link that expires in 30
+- **Built-in accounts, the default.** `devicepool up` prints a one-use admin link that expires in 30
   minutes. Admins invite people with links that expire after 7 days and carry a role. A person
   sets a passkey or a password the first time. Nothing else is needed.
 - **OIDC**, when the team sets an issuer (authorization code with PKCE). Config maps OIDC groups to
@@ -630,12 +631,12 @@ exception below.
 ### The Metro tunnel
 
 The tunnel's port is on the Mac's loopback, which every simulator on that Mac shares. Another
-lease's app on the same Mac could connect to it and reach the developer's Metro, which serves
-their app's source. Teams that do not trust each other's apps use separate Macs, as for app
-uploads below. The tunnel only ever reaches the lease holder's own machine, and only the ports
-their CLI chose. Extra ports (`hangar run --port 4000`) are listened on at the same number when it
-is free and on a free port otherwise, since another lease on the Mac may hold it; on Android,
-`adb reverse` gives each emulator the number asked for.
+lease's app on the same Mac could connect to it and reach the developer's Metro, which serves their
+app's source. Teams that do not trust each other's apps use separate Macs, as for app uploads below.
+The tunnel only ever reaches the lease holder's own machine, and only the ports their CLI chose.
+Extra ports (`devicepool run --port 4000`) are listened on at the same number when it is free and on
+a free port otherwise, since another lease on the Mac may hold it; on Android, `adb reverse` gives
+each emulator the number asked for.
 
 ### Tokens for one lease
 
@@ -647,7 +648,7 @@ limit at the latest.
 ### Maestro flows
 
 A flow can run JavaScript (`runScript`, `evalScript`) in Maestro's own script engine on the Mac,
-with HTTP access. Hangar treats a flows folder like a test bundle: it runs on the host next to
+with HTTP access. Devicepool treats a flows folder like a test bundle: it runs on the host next to
 the device. Today any member can send flows to their own lease; whether that needs the
 `install:upload` scope is open question 8.
 
@@ -655,12 +656,12 @@ the device. Today any member can send flows to their own lease; whether that nee
 
 An iOS simulator app, or an XCUITest bundle, is a native macOS process running as the host
 agent's user. The simulator puts no security boundary between that process and the Mac.
-Installing an arbitrary `.app` is close to running code on the host as `hangar`. So:
+Installing an arbitrary `.app` is close to running code on the host as `devicepool`. So:
 
 - By default only registered builds can be installed. Uploads need `install:upload`, which team
   admins grant to CI and to people they choose.
-- The `hangar` user is not an admin and holds no SSH keys or cloud credentials. Its only secret is
-  the host token, which can act as that one host and nothing else.
+- The `devicepool` user is not an admin and holds no SSH keys or cloud credentials. Its only secret
+  is the host token, which can act as that one host and nothing else.
 - Android emulators are VMs, so app code stays in the guest. Phones have their own OS sandbox. The
   gap is specific to iOS simulators.
 - Teams that do not trust each other's code should get separate hosts. Hosts can be assigned to
@@ -677,7 +678,7 @@ broker certificate against the system store or a pinned CA file. Plain `ws://` n
 
 ### Not in scope
 
-Hostile operators, physical access to the Macs, an attacker who already has the `hangar` user's
+Hostile operators, physical access to the Macs, an attacker who already has the `devicepool` user's
 shell.
 
 ### Apple's license
@@ -685,14 +686,14 @@ shell.
 The macOS license (Tahoe, section 2I) rules out using macOS for a "service bureau, time-sharing,
 terminal sharing, relay service or other similar types of services", and says that applies inside
 your own organization too. Leasing Macs to others needs at least 24 hours of exclusive use per
-lessee and notice to Apple (section 3). Internal CI farms on Mac minis are common practice, but
-this is not legal advice. Hangar is software a team runs on Macs it owns for its own development and
+lessee and notice to Apple (section 3). Internal CI farms on Mac minis are common practice, but this
+is not legal advice. Devicepool is software a team runs on Macs it owns for its own development and
 testing. The README will say that, point to Apple's license, and not offer or encourage running it
 as a service for others. Simulators are not macOS VMs, so the two-VM limit does not apply to them.
 
 ### No telemetry
 
-Hangar sends nothing anywhere. Logs go to stdout and the audit table. Metrics are a Prometheus
+Devicepool sends nothing anywhere. Logs go to stdout and the audit table. Metrics are a Prometheus
 endpoint you scrape.
 
 ## 8. Drivers
@@ -748,7 +749,7 @@ screenshot, read the tree, tap by label, run a two-flow Maestro suite, wipe, ver
 
 Decision 0007 has the reasoning and the measurements.
 
-- Capture and encode are native. A small Swift helper per streamed device (`hangar-screen`,
+- Capture and encode are native. A small Swift helper per streamed device (`devicepool-screen`,
   built from source with the Xcode toolchain on first use) reads the simulator's display
   IOSurface through SimulatorKit, and encodes only when the display reports damage, with
   VideoToolbox H.264 in low-latency mode. The IOSurface goes to the encoder without a copy.
@@ -789,13 +790,13 @@ Message types: `hello`, `welcome`, `pool`, `inventory`, `health`, `lease.prepare
 ## 11. Milestones
 
 The milestones, their done criteria and the spikes that come first are in
-[ROADMAP.md](../ROADMAP.md). In short:
+[ROADMAP.md](https://github.com/mariusud/devicepool/blob/main/ROADMAP.md). In short:
 
-1. One Mac, iOS simulators: `hangar up`, leases, the device API, MCP, SDK, CLI, built-in accounts,
-   the console with the native H.264 stream, and the benchmarks.
-2. React Native workflow: `hangar run ios`, Metro through the broker, the debugger and dev menu
+1. One Mac, iOS simulators: `devicepool up`, leases, the device API, MCP, SDK, CLI, built-in
+   accounts, the console with the native H.264 stream, and the benchmarks.
+2. React Native workflow: `devicepool run ios`, Metro through the broker, the debugger and dev menu
    through the lease, and Maestro runs sharded over devices.
-3. Android emulators and phones, several hosts through `hangar join`, the Appium endpoint, OIDC,
+3. Android emulators and phones, several hosts through `devicepool join`, the Appium endpoint, OIDC,
    teams and quotas.
 4. Device images and physical iPhones.
 
@@ -817,7 +818,7 @@ One pnpm workspace with five packages, one per process plus what both ends share
 merged the driver packages into the agent and the client into the CLI.
 
 ```
-hangar/
+devicepool/
   README.md  ROADMAP.md  CONTRIBUTING.md  SECURITY.md  LICENSE  NOTICE
   Dockerfile  action.yml
   packages/
@@ -835,14 +836,14 @@ hangar/
     agent/
       src/index.ts        the iOS host: warm pool, leases, ops
       src/android.ts      the Android host
-      src/connect.ts      `hangar join`: the socket to a broker, reconnect
+      src/connect.ts      `devicepool join`: the socket to a broker, reconnect
       src/drivers/ios/    simctl and the idb companion's gRPC
       src/drivers/android/ adb and the emulator
       native/screen.swift capture, H.264, recordings, JPEG conversion
     console/              web console, plain JavaScript, served by the broker
-    hangar/
-      src/main.ts         the hangar command
-      src/client/         the TypeScript client, exported as `hangar`
+    devicepool/
+      src/main.ts         the devicepool command
+      src/client/         the TypeScript client, exported as `devicepool`
   e2e/  bench/            end-to-end tests and benchmarks on a real Mac
   deploy/helm/            chart for the broker
   docs/                   design, decisions, guides
@@ -869,5 +870,5 @@ exists, not what is planned.
    that users build themselves. A macOS VM loses the hardware video encoder and is capped at two
    per Mac, so it cannot be the default.
 8. Should sending Maestro flows need the `install:upload` scope, like apps and test bundles?
-   And should members be allowed to upload their own debug builds (which `hangar run ios`
+   And should members be allowed to upload their own debug builds (which `devicepool run ios`
    needs), perhaps on hosts marked for it?

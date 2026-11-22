@@ -2,7 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { Lease } from './leases/machine.ts';
 import type { Run } from './runs.ts';
-import type { Finding } from '@hangar/protocol';
+import type { Finding } from '@devicepool/protocol';
 
 const SCHEMA = `
 create table if not exists accounts (
@@ -208,7 +208,7 @@ export class Db {
     this.sql.exec(SCHEMA);
     // Tokens once took their account's role. The operator's own CLI tokens keep it; every other token becomes a member's.
     this.sql.exec(`update tokens set scopes = trim(scopes || ' operator install:upload')
-      where kind = 'member' and (label like 'hangar up on %' or label like 'CLI on %') and ' ' || scopes || ' ' not like '% operator %'
+      where kind = 'member' and (label like 'devicepool up on %' or label like 'CLI on %') and ' ' || scopes || ' ' not like '% operator %'
       and account_id in (select id from accounts where role = 'operator')`);
   }
 
@@ -674,9 +674,9 @@ function numOrNull(v: unknown): number | null {
 
 export type RunSuite = { sha256: string; testSha256: string; archive: string; envKeys: string[] };
 
-type Booking = import('@hangar/protocol').Booking;
-type Hold = import('@hangar/protocol').Hold;
-export type TokenPriorityRow = { priority: import('@hangar/protocol').Priority; bookingId: string | null };
+type Booking = import('@devicepool/protocol').Booking;
+type Hold = import('@devicepool/protocol').Hold;
+export type TokenPriorityRow = { priority: import('@devicepool/protocol').Priority; bookingId: string | null };
 
 function parseBooking(row: Record<string, unknown>): Booking {
   const b: Booking = JSON.parse(String(row.data));

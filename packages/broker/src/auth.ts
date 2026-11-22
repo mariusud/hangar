@@ -72,7 +72,7 @@ export function createAccount(db: Db, name: string, role: Account['role']): Acco
   return account;
 }
 
-export const SESSION_COOKIE = 'hangar_session';
+export const SESSION_COOKIE = 'devicepool_session';
 const SESSION_MS = 30 * 24 * 60 * 60_000;
 
 export function startSession(db: Db, accountId: string, now: number): string {

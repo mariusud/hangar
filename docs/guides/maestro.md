@@ -1,18 +1,19 @@
 # Maestro flows
 
-`hangar run maestro` splits a folder of Maestro flows over fresh devices, retries a failed flow on
-the same device, marks flows that pass on a retry as flaky, and writes one JUnit report.
+`devicepool run maestro` splits a folder of Maestro flows over fresh devices, retries a failed flow
+on the same device, marks flows that pass on a retry as flaky, and writes one JUnit report.
 
 ```bash
-hangar run maestro .maestro --app build/Build/Products/Release-iphonesimulator/MyApp.app \
-  --shards 3 --junit hangar-maestro.xml -e TEST_USER=qa@example.com
+devicepool run maestro .maestro --app build/Build/Products/Release-iphonesimulator/MyApp.app \
+  --shards 3 --junit devicepool-maestro.xml -e TEST_USER=qa@example.com
 ```
 
-`--app` is a built simulator `.app`, an archive of one, or the name of a build already on Hangar.
-Use a Release build, so the JavaScript is in the app and no Metro is needed. The options:
+`--app` is a built simulator `.app`, an archive of one, or the name of a build already on
+Devicepool. Use a Release build, so the JavaScript is in the app and no Metro is needed. The
+options:
 
 - `--shards N` leases N devices and gives each a share of the flows, longest first by each flow's
-  last timing. Shards wait in Hangar's queue like any lease.
+  last timing. Shards wait in Devicepool's queue like any lease.
 - `--retries N` retries a failed flow N times (default 1, at most 3), each retry recorded.
 - `-e KEY=VALUE` passes a variable to the flows; repeat it for more.
 - `--model M` asks for a simulator model, such as `iPhone 17`.
@@ -28,7 +29,7 @@ comment, reruns of one flow and flake rates.
 ## Keep the device a flow failed on
 
 ```bash
-hangar run maestro .maestro --app MyApp.app --shards 3 --hold 30m
+devicepool run maestro .maestro --app MyApp.app --shards 3 --hold 30m
 ```
 
 With `--hold`, a shard whose flow still fails after its retries isn't wiped. Its device stays as
@@ -39,15 +40,15 @@ flow:
 ```
 FAIL  login.yaml (shard 2, 2 attempts)
       Assertion is false: "Welcome" is visible
-      recording (first attempt): https://hangar.example.ts.net/recordings/...
-      recording (last attempt): https://hangar.example.ts.net/recordings/...
-      device held until 14:32:10: hangar held <run-id> login.yaml
+      recording (first attempt): https://devicepool.example.ts.net/recordings/...
+      recording (last attempt): https://devicepool.example.ts.net/recordings/...
+      device held until 14:32:10: devicepool held <run-id> login.yaml
 ```
 
 Take the device with that command:
 
 ```bash
-hangar held <run-id> login.yaml
+devicepool held <run-id> login.yaml
 ```
 
 It prints a lease id and the link to watch and drive the device in the console. The live screen

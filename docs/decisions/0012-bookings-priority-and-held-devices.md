@@ -6,7 +6,7 @@
 
 ## Context
 
-Hangar's scheduler is fair between teams and then between principals, and every active lease
+Devicepool's scheduler is fair between teams and then between principals, and every active lease
 ends at `min(lastRenew + ttl, activatedAt + max, lastActivity + idle)` with a fixed 5 minute
 idle timeout. That fits a CI shard and a person in the console. It doesn't fit three newer uses:
 
@@ -19,7 +19,7 @@ idle timeout. That fits a CI shard and a person in the console. It doesn't fit t
 
 Decision 0011 proposed running agent-device on a lease for logs, network and JavaScript. Its
 runner takes 4 to 10 s to start and about 290 MB per device, and its proxy reaches the whole
-daemon, which gets around the lease scoping. Hangar gets the app log from `simctl`, and
+daemon, which gets around the lease scoping. Devicepool gets the app log from `simctl`, and
 JavaScript, console and network from the Metro and Hermes inspector it already tunnels, with no
 extra process per device.
 
@@ -38,7 +38,7 @@ extra process per device.
 
 4. A booking holds a number of devices of one class (usually an image) for a window on given days,
    in the broker's time zone. It belongs to a team and has a name.
-5. Only tokens made for a booking (`hangar connect <booking>`) lease from it, and only while the
+5. Only tokens made for a booking (`devicepool connect <booking>`) lease from it, and only while the
    window is open. A request that arrives early waits in the queue until the window opens.
 6. CI keeps a floor: a number of devices per host that bookings never count as theirs. The floor
    and the bookings together may not exceed a host's capacity; the broker refuses a booking that
@@ -47,7 +47,7 @@ extra process per device.
 ### Priority and preemption
 
 7. Every lease has a priority, from its token: `ci` above `interactive` above `booked`. Inside a
-   booking, `hangar run` shards come before agent leases.
+   booking, `devicepool run` shards come before agent leases.
 8. When a higher-priority request can't be served and every matching device is busy, the
    scheduler picks the lowest-priority lease that matches, newest first, and sends it a
    `lease_ending` event with the reason. The lease ends two minutes later with reason
@@ -83,6 +83,6 @@ extra process per device.
 - `LeaseEndReason` gains `preempted` and `window_closed`; the device state machine gains `held`.
 - Tokens gain `idleMs`, `maxMs`, `priority` and an optional booking.
 - The broker needs the time zone, which it takes from the host it runs on unless
-  `HANGAR_TIME_ZONE` says otherwise.
-- agent-device stays out of the agent. Making Hangar an agent-device provider plugin, so
-  agent-device users can lease Hangar devices, is still possible and is in "Later".
+  `DEVICEPOOL_TIME_ZONE` says otherwise.
+- agent-device stays out of the agent. Making Devicepool an agent-device provider plugin, so
+  agent-device users can lease Devicepool devices, is still possible and is in "Later".

@@ -7,7 +7,7 @@ import * as auth from './auth.ts';
 import { startBroker } from './index.ts';
 
 test("an operator's agent and CI tokens are members, and a prefix token uploads only builds under its prefix", async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-tokens-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-tokens-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const call = async (token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: { token?: string; role?: string; error?: { code: string } } }> => {
@@ -39,7 +39,7 @@ test("an operator's agent and CI tokens are members, and a prefix token uploads 
 });
 
 test("after the upgrade an operator's CLI token is still an operator's, and its other tokens are members", async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-tokens-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-tokens-test-'));
   const first = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const ops = auth.createAccount(first.db, 'ops', 'operator');
   const cli = auth.mintToken(first.db, 'member', { accountId: ops.id, label: 'CLI on laptop' });

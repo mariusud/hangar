@@ -59,7 +59,7 @@ route(
   '/v1/oidc/start',
   async (req, res, ctx) => {
     if (!ctx.oidc) {
-      throw new ApiError(404, 'NO_SSO', 'Single sign-on is not set up. An operator sets HANGAR_OIDC_ISSUER and HANGAR_OIDC_CLIENT_ID.');
+      throw new ApiError(404, 'NO_SSO', 'Single sign-on is not set up. An operator sets DEVICEPOOL_OIDC_ISSUER and DEVICEPOOL_OIDC_CLIENT_ID.');
     }
     res.writeHead(302, { location: await ctx.oidc.start(oidcRedirect(ctx), query(req).get('next') ?? '/') });
     res.end();
@@ -214,5 +214,5 @@ route('PUT', '/v1/people/:name/team', async (req, res, ctx) => {
 
 route('POST', '/v1/tokens', async (req, res, ctx) => {
   const { token, limits } = mintMemberToken(ctx.db, me(req, ctx), await body<TokenRequest>(req));
-  json(res, 201, { token, limits, mcp: `claude mcp add --transport http hangar ${ctx.publicUrl()}/mcp --header "Authorization: Bearer ${token}"` });
+  json(res, 201, { token, limits, mcp: `claude mcp add --transport http devicepool ${ctx.publicUrl()}/mcp --header "Authorization: Bearer ${token}"` });
 });

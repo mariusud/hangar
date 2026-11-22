@@ -1,17 +1,17 @@
 # Put a live device screen in your own app
 
 A support tool, an internal dashboard or a chat bot can show a leased device and take taps on
-it. The browser usually can't reach the broker, and it should never hold a Hangar token, so
+it. The browser usually can't reach the broker, and it should never hold a Devicepool token, so
 your server passes the stream on and adds the token itself.
 
 ## The server
 
-`proxyStream` from the `hangar` client library forwards a WebSocket upgrade to the lease's
+`proxyStream` from the `devicepool` client library forwards a WebSocket upgrade to the lease's
 stream and adds the token as an `Authorization` header. Frames and input go through unchanged.
 
 ```ts
 import { createServer } from 'node:http';
-import { proxyStream } from 'hangar';
+import { proxyStream } from 'devicepool';
 
 const server = createServer(app);
 server.on('upgrade', (req, socket, head) => {
@@ -20,7 +20,7 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  proxyStream(req, socket, head, { url: process.env.HANGAR_URL, token: process.env.HANGAR_TOKEN, leaseId });
+  proxyStream(req, socket, head, { url: process.env.DEVICEPOOL_URL, token: process.env.DEVICEPOOL_TOKEN, leaseId });
 });
 ```
 
@@ -31,11 +31,11 @@ device. `codec` is `h264` by default; pass `codec: 'jpeg'` for browsers without 
 ## The page
 
 The broker serves the console's viewer as one file at `/screen.js`. Copy it next to your page,
-or serve it through your server, and use the `<hangar-screen>` element:
+or serve it through your server, and use the `<devicepool-screen>` element:
 
 ```html
 <script type="module" src="/screen.js"></script>
-<hangar-screen src="/device-stream" style="width: 320px; aspect-ratio: 402 / 874"></hangar-screen>
+<devicepool-screen src="/device-stream" style="width: 320px; aspect-ratio: 402 / 874"></devicepool-screen>
 ```
 
 `src` is your server's socket path. A path or `http(s)` URL is turned into `ws(s)`, and the

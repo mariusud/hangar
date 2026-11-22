@@ -1,7 +1,7 @@
 
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import type { Booking, DeviceClass, MaestroResult, TestCase, TestResult } from '@hangar/protocol';
+import type { Booking, DeviceClass, MaestroResult, TestCase, TestResult } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Db, RunSuite } from './db.ts';
 import { ApiError, type Leases } from './leases/service.ts';
@@ -259,7 +259,7 @@ export class Runs {
     this.publicUrl = publicUrl;
     this.events.setMaxListeners(0);
     for (const run of db.recentRuns(1000).filter((r) => r.state === 'running')) {
-      this.save({ ...run, state: 'failed', error: 'Hangar restarted during the run.', endedAt: Date.now() });
+      this.save({ ...run, state: 'failed', error: 'Devicepool restarted during the run.', endedAt: Date.now() });
     }
   }
 
@@ -334,17 +334,17 @@ export class Runs {
     }
     const stored = this.db.getRunSuite(id);
     if (!stored) {
-      throw new ApiError(409, 'NO_SUITE', 'This run started before Hangar kept what it needs to rerun a flow.', 'Start a new run instead.');
+      throw new ApiError(409, 'NO_SUITE', 'This run started before Devicepool kept what it needs to rerun a flow.', 'Start a new run instead.');
     }
     if (req.env !== undefined && (typeof req.env !== 'object' || req.env === null || Object.values(req.env).some((v) => typeof v !== 'string'))) {
       throw new ApiError(400, 'BAD_ENV', 'Send `env` as an object of strings, such as {"USER": "test"}.');
     }
     const env = req.env ?? this.envs.get(id) ?? (stored.envKeys.length ? null : {});
     if (!env) {
-      throw new ApiError(409, 'ENV_NEEDED', 'Hangar restarted since this run, and it keeps environment values in memory only.', `Send \`env\` with ${stored.envKeys.join(', ')} in the request body.`);
+      throw new ApiError(409, 'ENV_NEEDED', 'Devicepool restarted since this run, and it keeps environment values in memory only.', `Send \`env\` with ${stored.envKeys.join(', ')} in the request body.`);
     }
     if (!this.db.getBuild(stored.sha256)) {
-      throw new ApiError(404, 'BUILD_NOT_FOUND', `The build of this run (${run.build}) is no longer on Hangar.`, 'Upload it again and start a new run.');
+      throw new ApiError(404, 'BUILD_NOT_FOUND', `The build of this run (${run.build}) is no longer on Devicepool.`, 'Upload it again and start a new run.');
     }
     this.envs.set(id, env);
     const next = this.save({

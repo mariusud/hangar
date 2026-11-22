@@ -2,7 +2,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { Action, StreamCodec, ViewerInput } from '@hangar/protocol';
+import type { Action, StreamCodec, ViewerInput } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';

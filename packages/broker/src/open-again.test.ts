@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type Action, type BrokerMessage, type Finding, type Night, type OpenAgain, type UiNode } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type Action, type BrokerMessage, type Finding, type Night, type OpenAgain, type UiNode } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import { findNode, planReplay, recordOp, REPLAY_PAUSE_MS, storedActions, targetAt, type RecordedAction } from './findings.ts';
 import { startBroker, type Broker } from './index.ts';
@@ -59,7 +59,7 @@ test('planReplay says how each step replays, caps pauses and skips what failed o
     { at: 60_100, failed: null, kind: 'action', action: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2] }, target: null },
     { at: 60_200, failed: 'not found', kind: 'action', action: { type: 'waitFor', element: { label: 'Home' } }, target: null },
     { at: 60_300, failed: null, kind: 'action', action: { type: 'type', text: 'secret' }, target: null },
-    { at: 60_400, failed: null, kind: 'skip', what: 'Run Maestro: f.yaml', reason: 'Hangar does not run tests again. Start a run for that.' },
+    { at: 60_400, failed: null, kind: 'skip', what: 'Run Maestro: f.yaml', reason: 'Devicepool does not run tests again. Start a run for that.' },
   ];
   const plan = planReplay(actions);
   assert.deepEqual(
@@ -72,7 +72,7 @@ test('planReplay says how each step replays, caps pauses and skips what failed o
       ['Swipe (50%, 80%) to (50%, 20%)', 0, 'coordinates', null],
       ['Wait for "Home"', 100, null, 'It failed on the original lease: not found'],
       ['Type 6 characters', 100, null, null],
-      ['Run Maestro: f.yaml', 100, null, 'Hangar does not run tests again. Start a run for that.'],
+      ['Run Maestro: f.yaml', 100, null, 'Devicepool does not run tests again. Start a run for that.'],
     ],
   );
   assert.deepEqual(planReplay([]), []);
@@ -163,7 +163,7 @@ function caller(broker: Broker, token: string): <T = Record<string, unknown>>(me
 test('open again leases a fresh device for the team, records it and replays by label where it can', async () => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-open-again-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-open-again-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const client = new Client({ name: 'test', version: '0' });
   try {

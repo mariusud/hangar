@@ -17,37 +17,37 @@ importers:
 
   bench:
     dependencies:
-      '@hangar/agent':
+      '@devicepool/agent':
         specifier: workspace:*
         version: link:../packages/agent
-      '@hangar/broker':
+      '@devicepool/broker':
         specifier: workspace:*
         version: link:../packages/broker
-      '@hangar/protocol':
+      '@devicepool/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
-      hangar:
+      devicepool:
         specifier: workspace:*
-        version: link:../packages/hangar
+        version: link:../packages/devicepool
 
   e2e:
     dependencies:
-      '@hangar/agent':
+      '@devicepool/agent':
         specifier: workspace:*
         version: link:../packages/agent
-      '@hangar/broker':
+      '@devicepool/broker':
         specifier: workspace:*
         version: link:../packages/broker
-      '@hangar/protocol':
+      '@devicepool/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
-      hangar:
+      devicepool:
         specifier: workspace:*
-        version: link:../packages/hangar
+        version: link:../packages/devicepool
 
   packages/agent:
     dependencies:
-      '@hangar/protocol':
+      '@devicepool/protocol':
         specifier: workspace:*
         version: link:../protocol
       ws:
@@ -60,7 +60,7 @@ importers:
 
   packages/broker:
     dependencies:
-      '@hangar/protocol':
+      '@devicepool/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@modelcontextprotocol/sdk':
@@ -76,21 +76,21 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
-      hangar:
+      devicepool:
         specifier: workspace:*
-        version: link:../hangar
+        version: link:../devicepool
 
   packages/console: {}
 
-  packages/hangar:
+  packages/devicepool:
     dependencies:
-      '@hangar/agent':
+      '@devicepool/agent':
         specifier: workspace:*
         version: link:../agent
-      '@hangar/broker':
+      '@devicepool/broker':
         specifier: workspace:*
         version: link:../broker
-      '@hangar/protocol':
+      '@devicepool/protocol':
         specifier: workspace:*
         version: link:../protocol
 

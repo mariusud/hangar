@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { TestCase, TestResult } from '@hangar/protocol';
+import type { TestCase, TestResult } from '@devicepool/protocol';
 import { download, OpError } from './index.ts';
 
 const run = promisify(execFile);
@@ -35,7 +35,7 @@ export function checkItems(items: string[]): void {
 
 export async function xcuitest(udid: string, url: string, sha256: string, items: string[]): Promise<TestResult> {
   checkItems(items);
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-xcuitest-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-xcuitest-'));
   try {
     const archive = join(dir, 'products');
     await download(url, sha256, archive);

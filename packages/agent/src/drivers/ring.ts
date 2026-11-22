@@ -1,4 +1,4 @@
-import type { Page } from '@hangar/protocol';
+import type { Page } from '@devicepool/protocol';
 
 // A bounded buffer with a cursor. Pushing with a key that is already held moves that item to the end with a new seq.
 export class Ring<T> {

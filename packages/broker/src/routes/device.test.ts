@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type BrokerMessage, type Op } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type BrokerMessage, type Op } from '@devicepool/protocol';
 import * as auth from '../auth.ts';
 import { startBroker, type Broker } from '../index.ts';
 import { isOrientation, pageQuery } from './device.ts';
@@ -51,7 +51,7 @@ test('pageQuery reads bundleId, since and limit and refuses junk', () => {
 test('device tool routes and MCP tools reach the agent as ops, and UNSUPPORTED comes back as is', async () => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-devicetools-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-devicetools-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const client = new Client({ name: 'test', version: '0' });
   try {

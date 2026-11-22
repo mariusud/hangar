@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@devicepool/protocol';
 import * as auth from '../auth.ts';
 import { startBroker, type Broker } from '../index.ts';
 import { onWindowClosed } from '../schedule.ts';
@@ -83,9 +83,9 @@ async function until<T>(get: () => Promise<T>, ok: (v: T) => boolean, ms = 5000)
 }
 
 async function withBroker(fn: (broker: Broker, member: (name: string, team: string) => string) => Promise<void>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-bookings-test-'));
-  const zone = process.env.HANGAR_TIME_ZONE;
-  process.env.HANGAR_TIME_ZONE = 'UTC';
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-bookings-test-'));
+  const zone = process.env.DEVICEPOOL_TIME_ZONE;
+  process.env.DEVICEPOOL_TIME_ZONE = 'UTC';
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   const member = (name: string, team: string): string => {
     const account = auth.createAccount(broker.db, name, 'member');
@@ -98,9 +98,9 @@ async function withBroker(fn: (broker: Broker, member: (name: string, team: stri
   } finally {
     await broker.close();
     if (zone === undefined) {
-      delete process.env.HANGAR_TIME_ZONE;
+      delete process.env.DEVICEPOOL_TIME_ZONE;
     } else {
-      process.env.HANGAR_TIME_ZONE = zone;
+      process.env.DEVICEPOOL_TIME_ZONE = zone;
     }
     await rm(dir, { recursive: true, force: true });
   }

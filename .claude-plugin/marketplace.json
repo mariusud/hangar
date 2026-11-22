@@ -1,11 +1,11 @@
 {
-  "name": "hangar",
-  "owner": { "name": "Hangar" },
+  "name": "devicepool",
+  "owner": { "name": "Devicepool" },
   "plugins": [
     {
-      "name": "hangar",
-      "source": "./plugins/hangar",
-      "description": "Lease iOS simulators and Android emulators from your own Hangar and drive them over MCP."
+      "name": "devicepool",
+      "source": "./plugins/devicepool",
+      "description": "Lease iOS simulators and Android emulators from your own Devicepool and drive them over MCP."
     }
   ]
 }

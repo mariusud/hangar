@@ -6,7 +6,7 @@
 ## Context
 
 0005 planned binary frames with an 8-byte header for screenshots and log batches, and HTTPS for
-builds and recordings. By the time agents on other Macs were built, `hangar up` already passed
+builds and recordings. By the time agents on other Macs were built, `devicepool up` already passed
 `AgentMessage` and `BrokerMessage` values between broker and agent in one process, with video
 frames and Metro tunnel data as bytes and screenshots as base64 in responses.
 

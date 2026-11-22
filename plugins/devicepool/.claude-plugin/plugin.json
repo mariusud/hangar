@@ -1,0 +1,11 @@
+{
+  "name": "devicepool",
+  "version": "0.1.0",
+  "description": "Lease iOS simulators and Android emulators from your own Devicepool and drive them over MCP. Reads DEVICEPOOL_URL and DEVICEPOOL_TOKEN.",
+  "author": {
+    "name": "Devicepool contributors"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/mariusud/devicepool",
+  "repository": "https://github.com/mariusud/devicepool"
+}

@@ -1,5 +1,5 @@
 
-import type { DeviceClass, LeaseEndReason, LeaseEnding, LeaseState, Platform, Priority } from '@hangar/protocol';
+import type { DeviceClass, LeaseEndReason, LeaseEnding, LeaseState, Platform, Priority } from '@devicepool/protocol';
 
 export type Lease = {
   id: string;
@@ -118,6 +118,10 @@ export function deadline(lease: Lease): { at: number; reason: LeaseEndReason } |
 
 export function matches(cls: DeviceClass, device: PoolDevice): boolean {
   if (cls.platform && cls.platform !== (device.platform ?? 'ios-simulator')) {
+    return false;
+  }
+  // A phone is leased only by asking for one: there are few, and its wipe covers less than deleting an emulator.
+  if (!cls.platform && device.platform === 'android-device') {
     return false;
   }
   if (cls.model && !looseEquals(cls.model, device.model)) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { DeviceImage } from '@hangar/protocol';
+import type { DeviceImage } from '@devicepool/protocol';
 import { buildImage, goldenImageName, planImages, readyImages, redact, retirable, signInEnv, type ImageSlot, type ImageSteps } from './golden.ts';
 
 function fakeSteps(): { calls: string[]; steps: ImageSteps } {
@@ -97,7 +97,7 @@ function img(name: string, id: string): DeviceImage {
 }
 
 test('a golden device is named after the image id, model and runtime', () => {
-  assert.equal(goldenImageName('abc', 'iPhone 17 Pro', '26.1'), 'hangar-golden-image-abc-iPhone-17-Pro-26.1');
+  assert.equal(goldenImageName('abc', 'iPhone 17 Pro', '26.1'), 'devicepool-golden-image-abc-iPhone-17-Pro-26.1');
 });
 
 test('a refreshed image keeps leases on the old golden and retires it once they end', () => {

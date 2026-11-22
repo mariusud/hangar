@@ -21,7 +21,7 @@ import {
   type MaestroResult,
   type Op,
   type UiNode,
-} from '@hangar/protocol';
+} from '@devicepool/protocol';
 import * as sim from './drivers/ios/index.ts';
 import { cursor, LeaseTools, pageLimit } from './drivers/devtools.ts';
 import type { JsTools } from './drivers/cdp.ts';
@@ -522,7 +522,7 @@ export class Agent {
       }
     }
     const screen = await this.helper(leaseId);
-    const dir = await mkdtemp(join(tmpdir(), 'hangar-recording-'));
+    const dir = await mkdtemp(join(tmpdir(), 'devicepool-recording-'));
     screen.record(join(dir, 'video.mp4'));
     this.recordings.set(leaseId, { dir, uploads, log: sim.appLog(d.deviceId, join(dir, 'log.ndjson')), finished: null });
   }
@@ -680,7 +680,7 @@ export class Agent {
       case 'useMetro': {
         const tunnel = d.leaseId ? this.tunnels.port(d.leaseId) : undefined;
         if (!tunnel) {
-          throw new OpError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease. Run `hangar run ios`, which opens one.');
+          throw new OpError('NO_METRO_TUNNEL', 'No Metro tunnel is open for this lease. Run `devicepool run ios`, which opens one.');
         }
         await sim.setDefault(udid, body.bundleId, 'RCT_jsLocation', `localhost:${tunnel}`);
         return { result: { url: `http://localhost:${tunnel}` } };
@@ -823,7 +823,7 @@ export class Agent {
   }
 
   private async install(udid: string, url: string, sha256: string): Promise<{ bundleId: string; name: string }> {
-    const dir = await mkdtemp(join(tmpdir(), 'hangar-install-'));
+    const dir = await mkdtemp(join(tmpdir(), 'devicepool-install-'));
     try {
       const archive = join(dir, 'archive');
       await download(this.resolve(url), sha256, archive);
@@ -858,7 +858,7 @@ export async function maestro(device: string, archive: string, flows: string[], 
   if (vars.some(([k]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))) {
     throw new OpError('BAD_ENV', 'Environment variable names are letters, digits and underscores.');
   }
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-maestro-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-maestro-'));
   try {
     const root = join(dir, 'flows');
     await mkdir(root);

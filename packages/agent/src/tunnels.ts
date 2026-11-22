@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from 'node:net';
-import type { AgentMessage } from '@hangar/protocol';
+import type { AgentMessage } from '@devicepool/protocol';
 
 type Tunnel = { servers: Server[]; port: number; ports: Record<string, number>; sockets: Map<number, Socket> };
 

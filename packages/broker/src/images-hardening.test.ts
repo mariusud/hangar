@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type AgentMessage, type BrokerMessage, type DeviceImage } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentMessage, type BrokerMessage, type DeviceImage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import { Db } from './db.ts';
 import { imageHosts, openSecret, sealSecret, type ImageStatus } from './images.ts';
@@ -40,8 +40,8 @@ test('a sealed secret opens only with its key and under its name', () => {
 });
 
 test('plaintext secrets are encrypted when the broker starts, and hosts still get the values', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-secrets-test-'));
-  const old = new Db(join(dir, 'hangar.db'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-secrets-test-'));
+  const old = new Db(join(dir, 'devicepool.db'));
   old.saveImageSecret('USER_PASSWORD', 'hunter2', 1000);
   old.sql.close();
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
@@ -85,7 +85,7 @@ test('plaintext secrets are encrypted when the broker starts, and hosts still ge
 });
 
 test('an image declared with follow takes a new upload of its app, and other images do not', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-follow-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-follow-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const call = caller(broker);
@@ -149,7 +149,7 @@ test('a host image status shows per host, and a failed image refuses new leases 
 });
 
 test('a failed golden build is shown as failed and new leases on it get IMAGE_FAILED', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'hangar-image-status-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'devicepool-image-status-test-'));
   const broker = await startBroker({ dataDir: dir, port: 0, host: '127.0.0.1' });
   try {
     const call = caller(broker);
@@ -184,7 +184,7 @@ test('a failed golden build is shown as failed and new leases on it get IMAGE_FA
     const error = field(lease.json, 'error');
     assert.equal(field(error, 'code'), 'IMAGE_FAILED');
     assert.match(String(field(error, 'message')), /fake-mac: App\.app is not built for the simulator\./);
-    assert.match(String(field(error, 'hint')), /hangar image set/);
+    assert.match(String(field(error, 'hint')), /devicepool image set/);
 
     // The status survives a reconnect hello, and a new build attempt clears it.
     send({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [plain], devices: [], leases: [] });

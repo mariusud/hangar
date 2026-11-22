@@ -5,7 +5,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import type { LogLine, NetworkEntry, Op, UiNode } from '@hangar/protocol';
+import type { LogLine, NetworkEntry, Op, UiNode } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Principal } from './auth.ts';
 import type { Db, RecordingRow } from './db.ts';

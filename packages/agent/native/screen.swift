@@ -18,7 +18,7 @@ var args = Array(CommandLine.arguments.dropFirst())
 let imagesMode = args.first == "--images"
 let udid = args.first ?? ""
 if !imagesMode && (udid.isEmpty || udid.hasPrefix("-")) {
-  fail("USAGE", "hangar-screen <udid> [--fps 60] [--bitrate 8000000] [--max-size 0]")
+  fail("USAGE", "devicepool-screen <udid> [--fps 60] [--bitrate 8000000] [--max-size 0]")
 }
 func option(_ name: String, _ fallback: Int) -> Int {
   if let i = args.firstIndex(of: name), i + 1 < args.count, let v = Int(args[i + 1]) {

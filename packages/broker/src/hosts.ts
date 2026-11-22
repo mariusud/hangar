@@ -1,6 +1,6 @@
 
 import { randomUUID } from 'node:crypto';
-import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type ImageBuildState, type Platform, type StreamCodec } from '@hangar/protocol';
+import { PROTOCOL_VERSION, type AgentDevice, type AgentMessage, type BrokerMessage, type ImageBuildState, type Platform, type StreamCodec } from '@devicepool/protocol';
 
 export type HostLink = {
   send(message: BrokerMessage): void;
