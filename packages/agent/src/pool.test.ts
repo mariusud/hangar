@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spareDevice } from './index.ts';
+import { keepWarm, RECENT_LEASE_MS, spareDevice } from './index.ts';
 
 const always = (): boolean => true;
 
@@ -36,4 +36,19 @@ test('overdue lists leases past their deadline plus the grace period', async () 
   const deadlines = new Map([['late', 1000], ['inside-grace', 50_000], ['open', 500_000]]);
   assert.deepEqual(overdue(deadlines, 61_001, 60_000), ['late']);
   assert.deepEqual(overdue(deadlines, 1000, 60_000), []);
+});
+
+test('images leased lately stay warm, after the ones waiting leases want', () => {
+  const now = 10 * RECENT_LEASE_MS;
+  const leasedAt = new Map<string | undefined, number>([
+    ['bison', now - 60_000],
+    [undefined, now - RECENT_LEASE_MS - 1],
+  ]);
+  assert.deepEqual(keepWarm(['signed-in'], leasedAt, now), ['signed-in', 'bison']);
+  assert.deepEqual(keepWarm([], new Map(), now), []);
+  const devices = [
+    { deviceId: 'bison-busy', state: 'busy', image: 'bison', leaseId: 'l1' },
+    { deviceId: 'plain-ready', state: 'ready', leaseId: null },
+  ];
+  assert.equal(spareDevice(devices, keepWarm([], leasedAt, now), 2, always), 'plain-ready');
 });

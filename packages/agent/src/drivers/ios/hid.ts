@@ -34,6 +34,11 @@ function int(n: number, v: number): number[] {
 
 const point = (p: [number, number]): number[] => [...double(1, p[0]), ...double(2, p[1])];
 
+/** The accessibility_info request for the element at a point, in screen points. */
+export function pointQuery(p: [number, number]): Buffer {
+  return Buffer.from(field(2, point(p)));
+}
+
 export function encode(e: HidEvent): Buffer {
   let bytes: number[];
   if ('press' in e) {

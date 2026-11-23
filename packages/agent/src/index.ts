@@ -85,6 +85,16 @@ export class OpError extends Error {
   }
 }
 
+/** An image leased within this long stays warm, so its next lease does not wait for a clone. */
+export const RECENT_LEASE_MS = 24 * 60 * 60_000;
+
+/** keepWarm lists the images to keep a ready device of: the ones waiting leases want, then the ones
+ * leased lately. Empty means no history yet, and every image gets a ready device. */
+export function keepWarm(wanted: (string | undefined)[], leasedAt: Map<string | undefined, number>, now: number): (string | undefined)[] {
+  const recent = [...leasedAt].filter(([, at]) => now - at < RECENT_LEASE_MS).map(([image]) => image);
+  return [...new Set([...wanted, ...recent])];
+}
+
 // About 2.5 GB per booted simulator, keeping 8 GB for macOS.
 export function defaultMaxDevices(memoryBytes = totalmem(), cores = cpus().length): number {
   const byMemory = Math.floor((memoryBytes / 2 ** 30 - 8) / 2.5);
@@ -104,6 +114,7 @@ export class Agent {
   private fingers = new Set<string>();
   private inputs = new Map<string, Promise<void>>();
   private wanted: (string | undefined)[] = [];
+  private leasedAt = new Map<string | undefined, number>();
   private kept = new Set<string>();
   private isStopped = false;
   private tunnels: Tunnels;
@@ -345,8 +356,20 @@ export class Agent {
     try {
       for (;;) {
         const all = [...this.devices.values()];
-        if (all.length >= this.maxDevices || this.isStopped) {
+        const warmImages = keepWarm(this.wanted, this.leasedAt, Date.now());
+        if (this.isStopped) {
           break;
+        }
+        if (all.length >= this.maxDevices) {
+          // A full pool swaps an idle device nobody leases for one of an image people do.
+          const spare = spareDevice(all, warmImages, this.maxDevices, (image) => image === undefined || Boolean(this.images.get(image)?.golden));
+          const d = spare ? this.devices.get(spare) : undefined;
+          if (!d) {
+            break;
+          }
+          this.log(`Replacing an idle device with one of a recently leased image`);
+          await this.wipe(d);
+          continue;
         }
         const targets: { image: string | undefined; golden: Golden }[] = [{ image: undefined, golden: this.golden }];
         for (const slot of this.images.values()) {
@@ -355,7 +378,7 @@ export class Agent {
           }
         }
         targets.sort((a, b) => Number(this.wanted.includes(b.image)) - Number(this.wanted.includes(a.image)));
-        const target = targets.find((t) => all.filter((d) => d.state === 'ready' && d.image === t.image).length < this.warm);
+        const target = targets.filter((t) => !warmImages.length || warmImages.includes(t.image)).find((t) => all.filter((d) => d.state === 'ready' && d.image === t.image).length < this.warm);
         if (!target) {
           break;
         }
@@ -400,6 +423,7 @@ export class Agent {
         return;
       }
       d.leaseId = m.leaseId;
+      this.leasedAt.set(d.image, Date.now());
       this.deadlines.set(m.leaseId, m.deadline);
       d.state = 'busy';
       this.publish();

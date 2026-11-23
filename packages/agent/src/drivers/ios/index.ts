@@ -103,7 +103,9 @@ async function idb(udid: string, ...args: string[]): Promise<string> {
 
 function stderrOf(err: unknown): string {
   if (err && typeof err === 'object' && 'stderr' in err && typeof err.stderr === 'string' && err.stderr.trim()) {
-    return err.stderr.trim().split('\n').slice(-1)[0] ?? '';
+    // simctl's first line names the error domain and code, its last line says what failed.
+    const lines = err.stderr.trim().split('\n');
+    return lines.length > 1 ? `${lines[lines.length - 1]?.trim()} (${lines[0]?.trim()})` : (lines[0] ?? '');
   }
   return err instanceof Error ? err.message : String(err);
 }
@@ -261,7 +263,39 @@ export async function describe(udid: string): Promise<{ screen: Frame; nodes: Ui
     throw new DriverError('DESCRIBE_FAILED', `Reading the element tree of ${udid} failed: ${err.message}`);
   });
   const raw: IdbElement[] = JSON.parse(hid.bytesField(res, 1).toString('utf8'));
-  return toNodes(raw);
+  return toNodes([...raw, ...(await hiddenChildren(companion.socket, raw))]);
+}
+
+const isElement = (v: unknown): v is IdbElement => typeof v === 'object' && v !== null && !Array.isArray(v) && 'frame' in v;
+
+/** Probes along a container are this far apart, in points. */
+const PROBE_STEP = 24;
+
+const inside = (outer: Frame, e: IdbElement): boolean => {
+  const cx = e.frame.x + e.frame.width / 2;
+  const cy = e.frame.y + e.frame.height / 2;
+  return e.frame !== outer && cx >= outer.x && cx <= outer.x + outer.width && cy >= outer.y && cy <= outer.y + outer.height;
+};
+
+/** idb's full tree leaves out the children of some containers, such as the buttons of an iOS 26
+ * tab bar, which then shows as one empty group. The element at a point still finds them, so
+ * hiddenChildren asks along the middle of each container that has nothing inside it. */
+async function hiddenChildren(socket: string, raw: IdbElement[]): Promise<IdbElement[]> {
+  const empty = raw.filter((e) => e.type === 'Group' && e.frame.width > PROBE_STEP && !raw.some((o) => inside(e.frame, o)));
+  const found = new Map<string, IdbElement>();
+  for (const g of empty) {
+    const y = g.frame.y + g.frame.height / 2;
+    for (let x = g.frame.x + PROBE_STEP / 2; x < g.frame.x + g.frame.width; x += PROBE_STEP) {
+      const res = await hid.unary(socket, 'accessibility_info', hid.pointQuery([x, y])).catch(() => null);
+      const text = res ? hid.bytesField(res, 1).toString('utf8') : '';
+      const parsed: unknown = text ? JSON.parse(text) : null;
+      const e = isElement(parsed) ? parsed : null;
+      if (e && (e.frame.width !== g.frame.width || e.frame.height !== g.frame.height)) {
+        found.set(`${e.AXLabel}@${e.frame.x},${e.frame.y}`, e);
+      }
+    }
+  }
+  return [...found.values()];
 }
 
 export function toNodes(raw: IdbElement[]): { screen: Frame; nodes: UiNode[] } {
@@ -456,8 +490,23 @@ export async function install(udid: string, appPath: string): Promise<void> {
   await simctl('install', udid, appPath);
 }
 
+/** Right after boot, SpringBoard refuses launches with this error for a few seconds. */
+const NOT_READY = /FBSOpenApplicationServiceErrorDomain, code=4/;
+const LAUNCH_WAIT_MS = 30_000;
+
 export async function launch(udid: string, bundleId: string, args: string[] = []): Promise<void> {
-  await simctl('launch', udid, bundleId, ...args);
+  const until = Date.now() + LAUNCH_WAIT_MS;
+  for (;;) {
+    try {
+      await simctl('launch', udid, bundleId, ...args);
+      return;
+    } catch (err) {
+      if (!(err instanceof Error && NOT_READY.test(err.message)) || Date.now() > until) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
 }
 
 export async function terminate(udid: string, bundleId: string): Promise<void> {
