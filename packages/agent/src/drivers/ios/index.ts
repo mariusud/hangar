@@ -81,7 +81,7 @@ export function stopCompanion(udid: string): void {
   }
   companion?.proc.kill();
   companions.delete(udid);
-  inputs.delete(udid);
+  void endLiveInput(udid);
 }
 
 export function companionSocket(udid: string): string | null {
@@ -293,6 +293,7 @@ async function sendHid(udid: string, events: hid.HidEvent[]): Promise<void> {
   if (!companion) {
     throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
   }
+  await endLiveInput(udid);
   try {
     await hid.send(companion.socket, events);
   } catch (err) {
@@ -313,23 +314,39 @@ export async function tap(udid: string, x: number, y: number, durationS?: number
   await sendHid(udid, press({ touch: [x, y] }, durationS));
 }
 
-const inputs = new Map<string, hid.HidStream>();
+/** The companion runs one HID call at a time, so the live call closes this long after the last
+ * input, and before any other HID call or idb command. */
+const LIVE_IDLE_MS = 100;
+const inputs = new Map<string, { stream: hid.HidStream; idle?: NodeJS.Timeout }>();
 
-/** liveInput writes viewer input to the device's one long-lived HID call, so touches and keys reach
- * the simulator in the order they were sent, without a call per event. */
+/** liveInput writes viewer input to the device's live HID call, so touches and keys reach the
+ * simulator in the order they were sent, without a call per event. */
 export function liveInput(udid: string, events: hid.HidEvent[]): void {
-  let s = inputs.get(udid);
-  if (!s?.isOpen()) {
+  let live = inputs.get(udid);
+  if (!live?.stream.isOpen()) {
     const companion = companions.get(udid);
     if (!companion) {
       throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
     }
-    s = hid.open(companion.socket);
-    inputs.set(udid, s);
+    live = { stream: hid.open(companion.socket) };
+    inputs.set(udid, live);
   }
   for (const e of events) {
-    s.write(e);
+    live.stream.write(e);
   }
+  clearTimeout(live.idle);
+  live.idle = setTimeout(() => void endLiveInput(udid), LIVE_IDLE_MS);
+}
+
+/** endLiveInput closes the live HID call and waits until the companion has run what it holds. */
+export async function endLiveInput(udid: string): Promise<void> {
+  const live = inputs.get(udid);
+  if (!live) {
+    return;
+  }
+  inputs.delete(udid);
+  clearTimeout(live.idle);
+  await live.stream.end().catch(() => {});
 }
 
 export function touchEvent(x: number, y: number, isUp: boolean): hid.HidEvent {
@@ -387,6 +404,7 @@ export async function typeText(udid: string, text: string): Promise<void> {
     await sendHid(udid, events);
     return;
   }
+  await endLiveInput(udid);
   await idb(udid, 'ui', 'text', '--', text);
 }
 
