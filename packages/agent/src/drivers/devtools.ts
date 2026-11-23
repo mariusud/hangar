@@ -16,7 +16,6 @@ export function cursor(since: number | undefined): number | undefined {
 
 type Held = { app: string | null; logs: Map<string, LogStream>; js: JsTools | null };
 
-// What one agent keeps per lease for the log, JavaScript and network tools. All of it is dropped when the lease ends.
 export class LeaseTools {
   private leases = new Map<string, Held>();
   private spawn: Spawn;

@@ -1,6 +1,5 @@
 import type { Page } from '@devicepool/protocol';
 
-// A bounded buffer with a cursor. Pushing with a key that is already held moves that item to the end with a new seq.
 export class Ring<T> {
   private items = new Map<string, { seq: number; item: T }>();
   private last = 0;
@@ -38,7 +37,6 @@ export class Ring<T> {
     return [...this.items.values()].map((e) => e.item);
   }
 
-  // Empties the buffer without counting it as lost; seq keeps counting so cursors stay valid.
   clear(): void {
     this.items.clear();
   }
@@ -47,7 +45,6 @@ export class Ring<T> {
     return this.items.get(key)?.item;
   }
 
-  // Without `since`, the newest `limit` items. With it, the first `limit` items after it.
   page(since: number | undefined, limit: number): Page<T> {
     const n = Math.max(1, Math.min(Math.floor(limit) || 1, this.capacity));
     const all = [...this.items.values()];

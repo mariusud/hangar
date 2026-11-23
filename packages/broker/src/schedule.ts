@@ -5,15 +5,10 @@ const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const WEEK_MINUTES = 7 * 24 * 60;
 
-/** A preempted lease ends this long after it is told. */
 export const PREEMPT_NOTICE_MS = 2 * MINUTE;
-/** Booked leases are told this long before their window closes. */
 export const WINDOW_NOTICE_MS = 10 * MINUTE;
-/** How long a request that preempted a lease waits for that device before it may preempt another. */
 export const REPLACE_MS = MINUTE;
-/** Devices per host that bookings never count as theirs, until an operator sets another floor. */
 export const DEFAULT_CI_FLOOR = 1;
-/** The longest a failed flow's device can be held. */
 export const MAX_HOLD_MS = 4 * 60 * MINUTE;
 
 const RANK: Record<Priority, number> = { ci: 0, interactive: 1, booked: 2 };
@@ -22,9 +17,6 @@ export function priorityOf(lease: Pick<Lease, 'priority'>): Priority {
   return lease.priority ?? 'interactive';
 }
 
-// ---- Time ----
-
-/** The broker's time zone: DEVICEPOOL_TIME_ZONE, or the host's. */
 export function brokerTimeZone(env: Record<string, string | undefined>): string {
   const zone = env.DEVICEPOOL_TIME_ZONE?.trim();
   if (zone && validTimeZone(zone)) {
@@ -45,7 +37,6 @@ export function validTimeZone(zone: string): boolean {
 const formatters = new Map<string, Intl.DateTimeFormat>();
 const SHORT_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-/** The weekday (0 is Monday) and minute of the day at `now` in a time zone. */
 export function localTime(now: number, timeZone: string): { day: number; minute: number } {
   let f = formatters.get(timeZone);
   if (!f) {
@@ -57,13 +48,11 @@ export function localTime(now: number, timeZone: string): { day: number; minute:
   return { day: Math.max(0, SHORT_DAYS.indexOf(part('weekday'))), minute: Number(part('hour')) * 60 + Number(part('minute')) };
 }
 
-/** Minutes after midnight for HH:MM, or null. */
 export function parseClock(value: string): number | null {
   const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
-/** Days from "mon-thu", "mon,wed,fri", "weekdays" or "daily"; null when a part is not a day. */
 export function parseDays(value: string | string[]): Weekday[] | null {
   const parts = (Array.isArray(value) ? value : value.split(',')).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
   const out = new Set<Weekday>();
@@ -95,14 +84,12 @@ function weekday(i: number): Weekday {
   return WEEKDAYS[((i % 7) + 7) % 7] ?? 'mon';
 }
 
-// A window that ends at or before it starts runs past midnight.
 function span(b: Pick<Booking, 'from' | 'to'>): { from: number; minutes: number } {
   const from = parseClock(b.from) ?? 0;
   const to = parseClock(b.to) ?? 0;
   return { from, minutes: (to - from + 1440) % 1440 || 1440 };
 }
 
-/** The booking's window open at `now`, or null. */
 export function windowAt(b: Booking, now: number, timeZone: string): BookingWindow | null {
   const { day, minute } = localTime(now, timeZone);
   const { from, minutes } = span(b);
@@ -119,7 +106,6 @@ export function windowAt(b: Booking, now: number, timeZone: string): BookingWind
   return null;
 }
 
-/** The window open now, or the next one to open. */
 export function nextWindow(b: Booking, now: number, timeZone: string): BookingWindow | null {
   const open = windowAt(b, now, timeZone);
   if (open) {
@@ -140,7 +126,6 @@ export function nextWindow(b: Booking, now: number, timeZone: string): BookingWi
   return null;
 }
 
-// The minutes of the week a booking is open, as [start, end) pairs.
 function weekSpans(b: Booking): [number, number][] {
   const { from, minutes } = span(b);
   const out: [number, number][] = [];
@@ -156,11 +141,8 @@ function weekSpans(b: Booking): [number, number][] {
   return out;
 }
 
-// ---- Capacity ----
-
 export type HostCapacity = { name: string; devices: PoolDevice[]; floor: number };
 
-// An image goes on any plain simulator of its platform, so capacity counts devices without looking at images.
 function base(cls: DeviceClass): DeviceClass {
   const { image: _image, build: _build, ...rest } = cls;
   return cls.image && !rest.platform ? { ...rest, platform: 'ios-simulator' } : rest;
@@ -171,14 +153,12 @@ function plain(d: PoolDevice): PoolDevice {
   return { ...rest, build: null };
 }
 
-/** Devices bookings of this class may count as theirs: on each host, those that match, less the CI floor. */
 export function bookable(cls: DeviceClass, hosts: HostCapacity[]): number {
   return hosts.reduce((sum, h) => sum + Math.max(0, h.devices.filter((d) => matches(base(cls), plain(d))).length - h.floor), 0);
 }
 
 export type BookingCheck = { ok: true } | { ok: false; message: string; hint: string };
 
-/** Refuses a booking that, with the bookings open at the same time on the same devices and the CI floor, needs more devices than the hosts have. */
 export function checkBooking(b: Booking, others: Booking[], hosts: HostCapacity[]): BookingCheck {
   const capacity = bookable(b.class, hosts);
   const floor = hosts.reduce((s, h) => s + h.floor, 0);
@@ -214,23 +194,16 @@ export function checkBooking(b: Booking, others: Booking[], hosts: HostCapacity[
   return { ok: true };
 }
 
-// ---- Scheduling ----
-
 export type PlanDevice = PoolDevice & { hostId: string };
 
 export type PlanInput = {
   now: number;
   timeZone: string;
   queued: Lease[];
-  // Devices in the pool, ready for a lease.
   ready: PlanDevice[];
-  // Devices that are busy or wiping with no live lease and no hold: they come back soon.
   returning: PlanDevice[];
-  // Preparing and active leases.
   live: Lease[];
-  // Every device a live lease holds, by id.
   devices: Map<string, PlanDevice>;
-  // Devices per host, and its CI floor.
   hostSizes: Map<string, number>;
   floors: Map<string, number>;
   bookings: Booking[];
@@ -242,21 +215,12 @@ export type Assignment = { leaseId: string; deviceId: string; windowEndsAt: numb
 
 export type Plan = {
   assignments: Assignment[];
-  // Leases to tell they end early, and when.
   endings: { leaseId: string; ending: LeaseEnding }[];
-  // Queued requests that made a lease end early this time.
   preempting: string[];
   open: BookingWindow[];
-  // Free devices kept for a booking, by device id.
   reserved: Map<string, string>;
 };
 
-/**
- * The scheduler. Requests go by priority (ci, interactive, booked), inside a booking run shards first, then by
- * the team with the fewest leases for its quota, the principal with the fewest leases, and the oldest. Open
- * bookings keep free devices for themselves, never the CI floor. A ci or interactive request that finds nothing
- * free makes the lowest-priority lease it could use end in two minutes, newest first.
- */
 export function plan(input: PlanInput): Plan {
   const { now } = input;
   const open = new Map<string, BookingWindow>();
@@ -285,7 +249,6 @@ export function plan(input: PlanInput): Plan {
     }
   }
 
-  // Each open booking keeps free devices up to its count, never a host's CI floor.
   const perBooking = new Map<string, number>();
   const perHost = new Map<string, number>();
   const add = (m: Map<string, number>, k: string, n = 1): void => void m.set(k, (m.get(k) ?? 0) + n);
@@ -393,7 +356,6 @@ export function plan(input: PlanInput): Plan {
     assignments.push({ leaseId: pick.id, deviceId: device.deviceId, windowEndsAt: w ? w.to : null });
   }
 
-  // Requests left waiting: a ci or interactive one takes a device that is about to come back, or ends a lower one.
   const claimed = new Set<string>();
   const preempting: string[] = [];
   const usable = (r: Lease, d: PlanDevice | undefined): boolean => Boolean(d && matches(r.class, d) && (priorityOf(r) === 'ci' || !reserved.has(d.deviceId)));
@@ -419,7 +381,6 @@ export function plan(input: PlanInput): Plan {
       continue;
     }
     const victims = input.live
-      // A booked lease's device stays its booking's, so only ci may end one.
       .filter((l) => l.state === 'active' && !claimed.has(l.id) && RANK[priorityOf(l)] > RANK[p] && (p === 'ci' || !l.bookingId))
       .filter((l) => usable(r, l.deviceId ? input.devices.get(l.deviceId) : undefined))
       .sort((a, b) => RANK[priorityOf(b)] - RANK[priorityOf(a)] || Number(Boolean(a.shard)) - Number(Boolean(b.shard)) || (b.activatedAt ?? b.createdAt) - (a.activatedAt ?? a.createdAt));
@@ -440,30 +401,22 @@ export function plan(input: PlanInput): Plan {
   };
 }
 
-// ---- Held devices ----
-
-/** Holds whose time is up. */
 export function holdsDue(holds: Hold[], now: number): Hold[] {
   return holds.filter((h) => now >= h.until);
 }
 
-/** Only a person (not an agent or booking token) on the run's team may lease a held device. */
 export function mayTakeHold(hold: Hold, who: { teamId: string; person: boolean }): boolean {
   return who.person && who.teamId === hold.teamId;
 }
 
-// ---- Window ends ----
-
 export type WindowClosed = { bookingId: string; name: string; from: number; to: number };
 
-/** Windows that were open before and are not now. */
 export function closedWindows(before: BookingWindow[], open: BookingWindow[]): WindowClosed[] {
   return before.filter((w) => !open.some((o) => o.bookingId === w.bookingId && o.from === w.from)).map((w) => ({ bookingId: w.bookingId, name: w.name, from: w.from, to: w.to }));
 }
 
 const closedListeners = new Set<(w: WindowClosed) => void>();
 
-/** Calls `cb` each time a booking's window closes, with the window. Returns the function that stops it. */
 export function onWindowClosed(cb: (w: WindowClosed) => void): () => void {
   closedListeners.add(cb);
   return () => void closedListeners.delete(cb);

@@ -14,6 +14,8 @@ const TO: Point = [0.5, 0.35];
 
 type Point = [number, number];
 type Frame = { at: number; bytes: number };
+type Percentiles = { p50: number; p95: number };
+type StreamResult = { trials: number; missed: number; inputToFrame: Percentiles; motionFps: number; motionKBps: number };
 type Tool = {
   name: string;
   frames: Frame[];
@@ -29,7 +31,7 @@ function q(values: number[], p: number): number {
   return s.length ? Math.round(s[Math.min(s.length - 1, Math.floor(s.length * p))]!) : NaN;
 }
 
-async function measureStream(tool: Tool) {
+async function measureStream(tool: Tool): Promise<StreamResult> {
   const input: number[] = [];
   const fps: number[] = [];
   const bytesPerSecond: number[] = [];
@@ -122,7 +124,7 @@ async function openSocket(url: string, headers: Record<string, string> = {}): Pr
   return ws;
 }
 
-async function devicepoolTool(): Promise<Tool & { leases: () => Promise<{ p50: number; p95: number }> }> {
+async function devicepoolTool(): Promise<Tool & { leases: () => Promise<Percentiles> }> {
   const h = await start(1, () => {});
   const { devicepool, token } = h.client('bench');
   const ready = async (): Promise<void> => {
@@ -135,7 +137,7 @@ async function devicepoolTool(): Promise<Tool & { leases: () => Promise<{ p50: n
   const ws = await openSocket(`${h.broker.url.replace('http', 'ws')}/v1/leases/${lease.id}/stream?codec=h264&token=${token}`);
   ws.onmessage = (e) => {
     if (typeof e.data !== 'string') {
-      frames.push({ at: performance.now(), bytes: (e.data as ArrayBuffer).byteLength });
+      frames.push({ at: performance.now(), bytes: e.data.byteLength });
     }
   };
   return {
@@ -170,7 +172,8 @@ async function serveSimTool(pkg: string): Promise<Tool> {
   await run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
   const cli = join(pkg, 'dist/serve-sim.js');
   const out = await run('node', [cli, '--detach', '-q', '-p', '3150', udid]);
-  const { url } = JSON.parse(out.stdout.trim().split('\n').at(-1)!) as { url: string };
+  const started: { url: string } = JSON.parse(out.stdout.trim().split('\n').at(-1)!);
+  const { url } = started;
   const base = `${url}/helper/${udid}`;
   const frames: Frame[] = [];
   const res = await fetch(`${base}/stream.avcc`);
@@ -193,7 +196,7 @@ async function serveSimTool(pkg: string): Promise<Tool> {
   };
 }
 
-async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<{ p50: number; p95: number }> }> {
+async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<Percentiles> }> {
   // daemon.sock has to fit in a unix socket path, so the home stays short.
   const home = await mkdtemp('/tmp/slk-');
   const port = 4801;
@@ -225,7 +228,7 @@ async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<
     if (!r.ok) {
       throw new Error(`Simlock ${r.status}: ${await r.text()}`);
     }
-    return (await r.json()) as T;
+    return r.json();
   };
   type Request = { id: string; state: string; lease?: { id: string; udid: string } };
   const lease = async (): Promise<{ id: string; udid: string }> => {
@@ -262,7 +265,6 @@ async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<
       const times: number[] = [];
       for (let i = 0; i < Math.min(TRIALS, 5); i++) {
         process.stderr.write(`Simlock lease ${i + 1}\r`);
-        // Simlock has no ready count, so give a released device time to settle.
         await sleep(15_000);
         const t0 = performance.now();
         const l = await lease();
@@ -280,12 +282,14 @@ async function simlockTool(pkg: string): Promise<Tool & { leases: () => Promise<
 }
 
 const results: Record<string, unknown> = { date: new Date().toISOString().slice(0, 10), trials: TRIALS };
-const makers: [string, () => Promise<Tool & { leases?: () => Promise<{ p50: number; p95: number }> }>][] = [['Devicepool', devicepoolTool]];
-if (process.env.SERVE_SIM) {
-  makers.push(['serve-sim', () => serveSimTool(process.env.SERVE_SIM!)]);
+const makers: [string, () => Promise<Tool & { leases?: () => Promise<Percentiles> }>][] = [['Devicepool', devicepoolTool]];
+const serveSimPackage = process.env.SERVE_SIM;
+if (serveSimPackage) {
+  makers.push(['serve-sim', () => serveSimTool(serveSimPackage)]);
 }
-if (process.env.SIMLOCK) {
-  makers.push(['Simlock', () => simlockTool(process.env.SIMLOCK!)]);
+const simlockPackage = process.env.SIMLOCK;
+if (simlockPackage) {
+  makers.push(['Simlock', () => simlockTool(simlockPackage)]);
 }
 for (const [name, make] of makers) {
   let tool: Awaited<ReturnType<typeof make>> | undefined;
@@ -294,7 +298,7 @@ for (const [name, make] of makers) {
     const stream = await measureStream(tool);
     results[name] = { stream, lease: tool.leases ? await tool.leases() : 'no leases' };
   } catch (err) {
-    results[name] = { error: (err as Error).message };
+    results[name] = { error: err instanceof Error ? err.message : String(err) };
   } finally {
     await tool?.close();
   }

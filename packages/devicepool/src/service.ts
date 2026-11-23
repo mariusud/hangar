@@ -19,7 +19,6 @@ function xml(s: string): string {
   return s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!);
 }
 
-/** The launchd job. With a user it is a LaunchDaemon that runs as that user from boot, with nobody logged in. */
 export function servicePlist(program: string[], env: Record<string, string>, log: string, user?: string): string {
   const daemon = user
     ? `
@@ -51,7 +50,6 @@ ${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}
 `;
 }
 
-/** The arguments `devicepool up` was given, without the service flags, for the service to pass on. */
 export function serviceUpArgs(args: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -72,7 +70,6 @@ export function validUserName(name: string): boolean {
   return /^[a-z_][a-z0-9_.-]{0,31}$/i.test(name) && name !== 'root';
 }
 
-/** sudo resets PATH, so the daemon gets the usual places for Node, Homebrew, idb and Maestro. */
 export function daemonPath(home: string, nodeDir: string): string {
   const dirs = [nodeDir, join(home, '.local', 'bin'), join(home, '.maestro', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
   return [...new Set(dirs)].join(':');
@@ -178,8 +175,8 @@ async function installDaemon(upArgs: string[], user: string | undefined): Promis
     if (!file) {
       continue;
     }
-    const readable = await run('sudo', ['-u', user, '/bin/test', '-r', file]).then(() => true, () => false);
-    if (!readable) {
+    const isReadable = await run('sudo', ['-u', user, '/bin/test', '-r', file]).then(() => true, () => false);
+    if (!isReadable) {
       console.log(`${user} cannot read ${file}. Put Node and Devicepool where every user can read them (for example under /usr/local or /opt), then run this again.`);
       process.exitCode = 1;
       return;

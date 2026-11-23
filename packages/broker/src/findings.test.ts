@@ -59,9 +59,7 @@ test('nightMembers takes the team leases that overlap the window, and the runs t
   const run = (id: string, leaseIds: string[]): Run => ({ id, accountId: 'a', state: 'passed', build: 'b', shards: 1, retries: 0, class: {}, flows: [], leaseIds, error: null, createdAt: 0, endedAt: 1 });
   const runs = [run('r1', ['inside']), run('r2', ['before']), run('r3', ['other-team'])];
   assert.deepEqual(nightMembers(night({ closedAt: 200 }), leases, runs, 1000), { leaseIds: ['across', 'inside', 'still'], runIds: ['r1'] });
-  // While open, the window runs to now.
   assert.deepEqual(nightMembers(night(), leases, runs, 350).leaseIds, ['across', 'inside', 'still', 'after']);
-  // Leases and runs given at close win.
   const given = night({ closedAt: 200, data: { openedBy: 'a', closedBy: null, leaseIds: ['other-team'], runIds: ['r3'] } });
   assert.deepEqual(nightMembers(given, leases, runs, 1000), { leaseIds: ['other-team'], runIds: ['r3'] });
 });
@@ -148,7 +146,6 @@ function fakeAgent(broker: Broker): { ops: string[] } {
         if (m.type === 'lease.prepare') {
           handlers.message({ type: 'response', id: m.id, ok: true });
         } else if (m.type === 'lease.end') {
-          // The broker may close before this lands.
           void upload(m.leaseId).catch(() => {});
         } else if (m.type === 'op') {
           const b = m.body;
@@ -159,7 +156,6 @@ function fakeAgent(broker: Broker): { ops: string[] } {
           } else if (b.op === 'recordStop') {
             void upload(m.leaseId).then(() => handlers.message({ type: 'response', id: m.id, ok: true }));
           } else if (b.op === 'appLog') {
-            // Two new lines per read, so the recorder's cursor matters.
             const since = b.since ?? 0;
             const items = [since + 1, since + 2].map((seq) => ({ seq, time: 1_000 + seq, level: 'info', message: `line ${seq}` }));
             logSeq = since + 2;
@@ -235,7 +231,6 @@ test('a finding carries the video span, steps, app log, network and a screenshot
     assert.equal((await call('POST', '/v1/nights', { booking: 'nightly' })).json.error?.code, 'NIGHT_OPEN');
     assert.equal((await call('POST', '/v1/nights', { booking: '' })).json.error?.code, 'BAD_BOOKING');
 
-    // A lease that records from the start.
     const first = await call('POST', '/v1/leases?wait=5', {});
     const leaseId = String(first.json.id);
     assert.equal((await call('POST', `/v1/leases/${leaseId}/recording`)).status, 201);
@@ -264,7 +259,6 @@ test('a finding carries the video span, steps, app log, network and a screenshot
     assert.equal((await call('GET', `/v1/findings/${f.id}`)).json.title, 'Profile shows an error');
     assert.equal((await call('POST', `/v1/leases/${leaseId}/findings`, { description: 'no title' })).json.error?.code, 'BAD_TITLE');
 
-    // Stopping keeps the app log and network requests with the recording, without duplicates.
     const stopped = await call('POST', `/v1/leases/${leaseId}/recording/stop`);
     const recId = String(stopped.json.id);
     const appLog = (await call<{ lines: { message: string }[]; dropped: boolean }>('GET', `/v1/recordings/${recId}/applog.json`)).json;
@@ -274,7 +268,6 @@ test('a finding carries the video span, steps, app log, network and a screenshot
     const network = (await call<{ requests: { id: string }[] }>('GET', `/v1/recordings/${recId}/network.json`)).json;
     assert.deepEqual(network.requests.map((r) => r.id), ['req-1']);
 
-    // Through MCP on a lease with no recording: Devicepool starts one and says so.
     await client.connect(new StreamableHTTPClientTransport(new URL(`${broker.url}/mcp`), { requestInit: { headers: { authorization: `Bearer ${qaToken}` } } }));
     const r = await client.callTool({ name: 'report_finding', arguments: { title: 'Second bug', description: 'Again.', leaseId } });
     assert.ok(!r.isError, JSON.stringify(r));
@@ -290,7 +283,6 @@ test('a finding carries the video span, steps, app log, network and a screenshot
     const closed = await call('POST', `/v1/nights/${nightId}/close`);
     assert.equal(closed.json.state, 'closed');
     assert.equal(closed.json.closedBy, 'qa-agent');
-    // A lease after the close is not part of the night.
     await call('POST', '/v1/leases?wait=5', {});
     const details = (await call<{ leases: { id: string }[]; findings: Finding[] }>('GET', `/v1/nights/${nightId}`)).json;
     assert.deepEqual(details.leases.map((l) => l.id), [leaseId]);

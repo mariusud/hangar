@@ -10,10 +10,8 @@ export const LIMIT_ROLES: LimitRole[] = ['member', 'operator', 'agent'];
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
-// What a token gets when it asks for nothing: the limits every lease had before tokens carried them.
 export const TOKEN_DEFAULTS: Limits = { idleMs: DEFAULTS.idleMs, maxMs: DEFAULTS.maxMs, graceMs: 60_000 };
 
-// The most a token may allow, per role, until an operator sets other caps.
 export const DEFAULT_CAPS: Record<LimitRole, Limits> = {
   member: { idleMs: 2 * HOUR, maxMs: 12 * HOUR, graceMs: 10 * MINUTE },
   operator: { idleMs: 2 * HOUR, maxMs: 12 * HOUR, graceMs: 10 * MINUTE },
@@ -32,7 +30,6 @@ export function capFor(role: LimitRole, overrides: Overrides): Limits {
   return { ...DEFAULT_CAPS[role], ...stripUnset(overrides[role] ?? {}) };
 }
 
-// A token's limits: what it asked for, or the defaults, never above the cap for its role.
 export function tokenLimits(ask: Ask, cap: Limits, agent = false): TokenLimits {
   return {
     agent,
@@ -46,8 +43,6 @@ export type LeaseAsk = { idleMs?: number; maxMs?: number; ttlMs?: number | null 
 
 export type Resolved = { ok: true; limits: LeaseLimits } | { ok: false; field: 'idle' | 'max'; allowedMs: number };
 
-// A lease may ask for less than its token allows, never more. Without a ttl the lease renews by use, so it ends
-// only when idle or at its longest; agent tokens get that by default, because an agent can't renew in the background.
 export function leaseLimits(token: TokenLimits, ask: LeaseAsk): Resolved {
   if (ask.idleMs !== undefined && ask.idleMs > token.idleMs) {
     return { ok: false, field: 'idle', allowedMs: token.idleMs };

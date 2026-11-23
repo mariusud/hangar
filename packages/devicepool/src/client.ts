@@ -10,23 +10,23 @@ import { isAndroid, WEEKDAYS, type ElementSelector, type Point, type PrivacyServ
 export const CLIENT_HELP = `Client
   devicepool login <url>                       sign in from this computer (opens the browser)
   devicepool connect claude | cursor | codex | ci
-                                           give an agent or a CI job its own token, ready to use
+                                               give an agent or a CI job its own token, ready to use
   devicepool connect ci <prefix>               a CI token that uploads only builds whose name starts with <prefix>
   devicepool book <name> --devices N --from HH:MM --to HH:MM --days mon-thu [--image X] [--team T]
-                                           hold devices for your team on those days and hours,
-                                           in the broker's time zone
+                                               hold devices for your team on those days and hours,
+                                               in the broker's time zone
   devicepool bookings                          bookings and whether their window is open
   devicepool book rm <name>                    remove a booking; its leases end
   devicepool connect <booking>                 a token that leases only from that booking, with
-                                           MCP settings and a GitHub Actions example
+                                               MCP settings and a GitHub Actions example
   devicepool held <run-id> <flow>              lease the device a failed flow was left on
-                                           (runs started with --hold)
+                                               (runs started with --hold)
   devicepool devices                           list devices
   devicepool lease [--android | --phone] [--model M] [--os V] [--image NAME] [--hold] [--record] [--purpose TEXT]
                [--idle SECONDS] [--max SECONDS]
-                                           lease a device; --hold keeps it until Ctrl-C;
-                                           --phone asks for an Android phone on USB;
-                                           --purpose shows on the Fleet page
+                                               lease a device; --hold keeps it until Ctrl-C;
+                                               --phone asks for an Android phone on USB;
+                                               --purpose shows on the Fleet page
   devicepool attach <lease-id> [--hold]        pick up a lease again after a restart, with the same token
   devicepool keepalive                         count as activity without touching the device
   devicepool tests                             each test's passes, flaky passes and failures
@@ -34,9 +34,9 @@ export const CLIENT_HELP = `Client
   devicepool image set <name> [--app A]... [--locale nb_NO] [--appearance dark]
   devicepool image refresh <name> --app A...
                  [--grant photos,location] [--sign-in flow.yaml [--env NAME]...]
-                                           declare an image (operators); --app is a path or build;
-                                           the sign-in flow runs once per Mac, reading each --env
-                                           name from the broker's secrets or the Mac's environment
+                                               declare an image (operators); --app is a path or build;
+                                               the sign-in flow runs once per Mac, reading each --env
+                                               name from the broker's secrets or the Mac's environment
   devicepool image capture <name> <lease-id>   save a leased device, set up by hand, as an image
   devicepool image secret <NAME> [--rm]        store a value for a sign-in flow, read from stdin
   devicepool image rm <name>
@@ -52,7 +52,7 @@ export const CLIENT_HELP = `Client
   devicepool location <lat,lon | clear>
   devicepool appearance <light|dark>
   devicepool language <bundle-id> <nb-NO>
-  devicepool dev-menu | devicepool reload          React Native debug builds
+  devicepool dev-menu | devicepool reload      React Native debug builds
   devicepool record [stop]                     record the screen, app log and actions; stop prints the bug link
   devicepool recordings                        your recordings
   devicepool watch                             open the live screen in the browser
@@ -167,8 +167,6 @@ Then add this step after your Release simulator build:
 The runner must reach ${client.url}, on the same network or through a VPN.`);
 }
 
-// An agent goes quiet while it thinks, so its token allows half an hour idle and a working day in all.
-// The operator's caps can lower both.
 const AGENT_IDLE_SECONDS = 30 * 60;
 const AGENT_MAX_SECONDS = 8 * 60 * 60;
 
@@ -542,16 +540,18 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool push <bundle-id> <payload.json | json>');
       }
       const raw = payload.trim().startsWith('{') ? payload : await readFile(payload, 'utf8');
-      await (await currentLease(await Devicepool.fromEnv(), values.lease)).push(bundleId, JSON.parse(raw) as Record<string, unknown>);
+      const body: Record<string, unknown> = JSON.parse(raw);
+      await (await currentLease(await Devicepool.fromEnv(), values.lease)).push(bundleId, body);
       return true;
     }
     case 'permission': {
       const { values, positionals } = parseArgs({ args, options: common, allowPositionals: true });
       const [action, service, bundleId] = positionals;
-      if (!action || !service || !bundleId || !['grant', 'revoke', 'reset'].includes(action)) {
+      const permissionAction = (['grant', 'revoke', 'reset'] as const).find((a) => a === action);
+      if (!permissionAction || !service || !bundleId) {
         throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool permission <grant|revoke|reset> <service> <bundle-id>, for example devicepool permission grant location com.example.app');
       }
-      await (await currentLease(await Devicepool.fromEnv(), values.lease)).permission(bundleId, service as PrivacyService, action as 'grant' | 'revoke' | 'reset');
+      await (await currentLease(await Devicepool.fromEnv(), values.lease)).permission(bundleId, service as PrivacyService, permissionAction);
       return true;
     }
     case 'location': {

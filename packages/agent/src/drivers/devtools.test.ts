@@ -39,7 +39,6 @@ test('log line parsers read simctl ndjson and logcat epoch lines', () => {
   assert.equal(iosPredicate('/a/"b"/c\\d'), 'processImagePath BEGINSWITH "/a/\\"b\\"/c\\\\d"');
 });
 
-// A fake log process: a node child that prints the given lines and then waits until it is killed.
 function fakeSpawn(lines: string[], calls: string[][]): Spawn {
   return (command, args) => {
     calls.push([command, ...args]);
@@ -123,7 +122,6 @@ function portOf(server: Server): number {
 
 type FakeMetro = { port: number; received: { method: string; params: Record<string, unknown> }[]; sockets: WebSocket[]; close: () => Promise<void> };
 
-// A fake Metro: /json/list plus an inspector socket that answers CDP like Hermes does.
 async function fakeMetro(opts: { network: boolean }): Promise<FakeMetro> {
   const received: FakeMetro['received'] = [];
   const sockets: WebSocket[] = [];

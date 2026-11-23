@@ -14,7 +14,6 @@ export type Prebuilt = { url: string; sha256: string };
 
 const RELEASES = 'https://github.com/facebook/idb/releases/download/';
 
-/** True when version a is older than b, compared on b's major and minor numbers. */
 export function isOlder(a: string, b: string): boolean {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
@@ -31,7 +30,6 @@ export function isOlder(a: string, b: string): boolean {
   return false;
 }
 
-/** Reads the url and sha256 of the prebuilt companion from a Homebrew formula's text. */
 export function parseFormula(text: string): Prebuilt | null {
   const url = /^\s*url\s+"([^"]+)"/m.exec(text)?.[1];
   const sha256 = /^\s*sha256\s+"([0-9a-f]{64})"/m.exec(text)?.[1];
@@ -41,7 +39,6 @@ export function parseFormula(text: string): Prebuilt | null {
   return { url, sha256 };
 }
 
-/** The fix when Homebrew refuses idb-companion because the Command Line Tools are older than Xcode, or null when that is not the case. */
 export function companionFix(clt: string | null, xcode: string | null, prebuilt: Prebuilt | null): string | null {
   if (!clt || !xcode || !isOlder(clt, xcode)) {
     return null;

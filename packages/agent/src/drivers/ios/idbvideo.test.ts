@@ -16,7 +16,6 @@ function varint(n: number): Buffer {
   return Buffer.from(out);
 }
 
-// idb.VideoStreamResponse { payload = 2 { data = 2 } } in a gRPC frame.
 function videoMessage(data: Buffer): Buffer {
   const payload = Buffer.concat([Buffer.from([(2 << 3) | 2]), varint(data.length), data]);
   const body = Buffer.concat([Buffer.from([(2 << 3) | 2]), varint(payload.length), payload]);
@@ -27,7 +26,6 @@ function videoMessage(data: Buffer): Buffer {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-// A fake idb_companion that answers each video_stream with the captured sample, in pieces.
 async function fakeCompanion(delayMs: number): Promise<{ socket: string; streams: () => number; close: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), 'hv-'));
   const socket = join(dir, 'c.sock');

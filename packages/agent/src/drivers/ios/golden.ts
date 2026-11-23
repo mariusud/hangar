@@ -12,18 +12,18 @@ export type Runtime = { identifier: string; version: string; name: string };
 export type DeviceType = { identifier: string; name: string };
 
 export async function runtimes(): Promise<Runtime[]> {
-  const json = JSON.parse(await simctl('list', 'runtimes', '-j')) as {
+  const json: {
     runtimes: { identifier: string; version: string; name: string; isAvailable: boolean; platform?: string }[];
-  };
+  } = JSON.parse(await simctl('list', 'runtimes', '-j'));
   return json.runtimes
     .filter((r) => r.isAvailable && r.identifier.includes('iOS'))
     .map(({ identifier, version, name }) => ({ identifier, version, name }));
 }
 
 export async function deviceTypes(): Promise<DeviceType[]> {
-  const json = JSON.parse(await simctl('list', 'devicetypes', '-j')) as {
+  const json: {
     devicetypes: { identifier: string; name: string; productFamily?: string }[];
-  };
+  } = JSON.parse(await simctl('list', 'devicetypes', '-j'));
   return json.devicetypes
     .filter((d) => d.productFamily === 'iPhone' || d.productFamily === 'iPad')
     .map(({ identifier, name }) => ({ identifier, name }));
@@ -71,7 +71,6 @@ export function imageSteps(install: ImageSteps['install']): ImageSteps {
   };
 }
 
-// Broker secrets win; any other name comes from this host's environment.
 export function signInEnv(signIn: ImageSignIn, hostEnv: Record<string, string | undefined>): Record<string, string> {
   const env: Record<string, string> = {};
   const missing: string[] = [];
@@ -100,7 +99,6 @@ export function redact(text: string, values: string[]): string {
   return out;
 }
 
-// Install, grant, set up, then sign in last so the flow sees the image as leases will.
 export async function buildImage(udid: string, image: DeviceImage, steps: ImageSteps, hostEnv: Record<string, string | undefined> = process.env): Promise<void> {
   const signIn = image.setup?.signIn;
   const env = signIn ? signInEnv(signIn, hostEnv) : {};
@@ -155,16 +153,10 @@ export function goldenImageName(imageId: string, model: string, os: string): str
   return `${NAME_PREFIX}golden-image-${imageId}-${model.replace(/\s+/g, '-')}-${os}`;
 }
 
-// golden is the udid of the built golden device for `image`, or null until it is built.
-// message says why the last build failed.
 export type ImageSlot = { image: DeviceImage; golden: string | null; failed: boolean; message?: string };
 
-// drop: images whose warm clones must go now. retire: goldens to delete once no device cloned from them is left.
 export type ImagePlan = { slots: Map<string, ImageSlot>; drop: string[]; retire: string[] };
 
-// A new declaration of an image (a new build, setup or locale) gets a new id and a new golden.
-// Leases on clones of the old golden keep running; new leases wait for the new one.
-// A failed build is tried again each time the broker sends images, for example after a secret is set.
 export function planImages(current: ReadonlyMap<string, ImageSlot>, wanted: DeviceImage[]): ImagePlan {
   const byName = new Map(wanted.map((i) => [i.name, i]));
   const slots = new Map<string, ImageSlot>();
@@ -189,7 +181,6 @@ export function planImages(current: ReadonlyMap<string, ImageSlot>, wanted: Devi
   return { slots, drop, retire };
 }
 
-// cloneOf maps a device to the golden it was cloned from; live holds the devices that still exist.
 export function retirable(retiring: readonly string[], cloneOf: ReadonlyMap<string, string>, live: ReadonlySet<string>): string[] {
   const used = new Set<string>();
   for (const [device, golden] of cloneOf) {
@@ -200,14 +191,12 @@ export function retirable(retiring: readonly string[], cloneOf: ReadonlyMap<stri
   return retiring.filter((g) => !used.has(g));
 }
 
-// A host offers an image only once the golden for its current declaration is built.
 export function readyImages(slots: ReadonlyMap<string, ImageSlot>): string[] {
   return [...slots.values()].filter((s) => s.golden !== null && !s.failed).map((s) => s.image.name).sort();
 }
 
 const MAX_STATUS_MESSAGE = 2000;
 
-// What the host tells the broker about a slot. A slot that waits for its turn says nothing.
 export function imageStatus(slot: ImageSlot, building: boolean): ImagesStatus | null {
   const base: { type: 'images.status'; image: string; id: string } = { type: 'images.status', image: slot.image.name, id: slot.image.id };
   if (slot.failed) {

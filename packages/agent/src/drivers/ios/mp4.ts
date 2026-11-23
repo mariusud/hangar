@@ -1,11 +1,6 @@
-// Writes H.264 frame records (see annexb.ts) to an MP4 file with no second encode: the idb capture
-// path has no AVAssetWriter, so this is the muxer for it. One video track, one sample per chunk,
-// parameter sets in the avcC box and left in band as well.
 import { open, type FileHandle } from 'node:fs/promises';
 
-/** Track and movie timescale: 90 kHz, the usual one for video. */
 export const TIMESCALE = 90_000;
-/** Duration given to the last sample, which has no next sample to measure against. */
 const LAST_SAMPLE = TIMESCALE / 30;
 const START = Buffer.from([0, 0, 1]);
 
@@ -13,7 +8,6 @@ export type Frame = { keyframe: boolean; ms: number; width: number; height: numb
 export type SampleEntry = { size: number; offset: number; ms: number; keyframe: boolean };
 export type Track = { sps: Buffer; pps: Buffer; width: number; height: number };
 
-/** Reads a frame record: u8 flags, f64 ms, u16 width, u16 height, then Annex B NAL units. */
 export function parseRecord(record: Buffer): Frame | null {
   if (record.length < 13) {
     return null;
@@ -39,7 +33,6 @@ export function parseRecord(record: Buffer): Frame | null {
 
 const nalType = (nal: Buffer): number => (nal[0] ?? 0) & 0x1f;
 
-/** The sample bytes for a frame: each NAL unit with a 4-byte length, access unit delimiters dropped. */
 export function sampleBytes(nals: Buffer[]): Buffer {
   const parts: Buffer[] = [];
   for (const nal of nals) {
@@ -86,7 +79,6 @@ function fullBox(type: string, version: number, flags: number, ...parts: Buffer[
 
 const MATRIX = Buffer.concat([0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000].map(u32));
 
-/** ftyp, then an mdat header with a 64-bit size that finish() fills in. */
 export function header(): Buffer {
   const ftyp = box('ftyp', Buffer.from('isom', 'latin1'), u32(0x200), Buffer.from('isomiso2avc1mp41', 'latin1'));
   return Buffer.concat([ftyp, u32(1), Buffer.from('mdat', 'latin1'), u64(0)]);
@@ -94,7 +86,6 @@ export function header(): Buffer {
 
 export const HEADER_SIZE = header().length;
 
-/** Decode times in TIMESCALE units from the first sample, each at least one unit after the last. */
 export function decodeTimes(samples: { ms: number }[]): number[] {
   const first = samples[0]?.ms ?? 0;
   const out: number[] = [];
@@ -123,7 +114,6 @@ function avcC(track: Track): Buffer {
   );
 }
 
-/** The moov box for a finished recording. Pure, so tests can read it back. */
 export function movie(track: Track, samples: SampleEntry[]): Buffer {
   const times = decodeTimes(samples);
   const deltas = times.map((t, i) => (times[i + 1] ?? t + LAST_SAMPLE) - t);
@@ -184,11 +174,6 @@ export function movie(track: Track, samples: SampleEntry[]): Buffer {
   return box('moov', mvhd, box('trak', tkhd, mdia));
 }
 
-/**
- * Records frame records to an MP4 file. Nothing is written until the first keyframe that carries
- * its SPS and PPS. Frames of another size (after a rotation) are dropped, like the screen helper
- * does, because one track holds one size.
- */
 export class Mp4Recorder {
   readonly path: string;
   private track: Track | null = null;
@@ -229,7 +214,6 @@ export class Mp4Recorder {
     this.offset += data.length;
   }
 
-  /** Writes the moov box and closes the file. Resolves false when no keyframe ever came, and no file exists. */
   finish(): Promise<boolean> {
     this.done ??= this.close();
     return this.done;

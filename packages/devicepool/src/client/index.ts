@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { connect as connectSocket, type Socket } from 'node:net';
 import { homedir } from 'node:os';
@@ -9,7 +10,6 @@ import type { Action, Booking, BookingWindow, DeviceClass, ElementSelector, Fram
 
 const run = promisify(execFile);
 
-/** The server's view of a lease. */
 export type LeaseInfo = {
   id: string;
   state: LeaseState;
@@ -21,14 +21,11 @@ export type LeaseInfo = {
   detachedAt?: number | null;
   priority?: Priority;
   booking?: string | null;
-  /** Set once the lease is told it ends early: preempted, or its booking's window closes. */
   ending?: LeaseEnding | null;
 };
 
-/** A booking as the server shows it, with its open window or the next one. */
 export type BookingInfo = Booking & { team: string; timeZone: string; open: BookingWindow | null; next: BookingWindow | null; leases: number };
 
-/** A recording and the links to its files. */
 export type RecordingInfo = {
   id: string;
   leaseId: string;
@@ -43,7 +40,6 @@ export type RecordingInfo = {
   files: { video: string; log: string; screenshot: string; timeline: string };
 };
 
-/** An error returned by the Devicepool API. */
 export class DevicepoolError extends Error {
   readonly code: string;
   readonly status: number;
@@ -58,16 +54,15 @@ export class DevicepoolError extends Error {
 
 export const CONFIG_FILE = join(process.env.DEVICEPOOL_HOME ?? join(homedir(), '.devicepool'), 'client.json');
 
-/** Reads the URL and token that `devicepool login` saved. */
 export async function savedConfig(): Promise<{ url?: string; token?: string }> {
   try {
-    return JSON.parse(await readFile(CONFIG_FILE, 'utf8')) as { url?: string; token?: string };
+    const config: { url?: string; token?: string } = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
+    return config;
   } catch {
     return {};
   }
 }
 
-/** Client for the Devicepool REST API. */
 export class Devicepool {
   readonly url: string;
   readonly token: string;
@@ -105,7 +100,7 @@ export class Devicepool {
       throw new DevicepoolError(0, 'UNREACHABLE', `Cannot reach Devicepool at ${this.url}.`, 'Is `devicepool up` running, and is this machine on the same network?');
     }
     if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as { error?: { code: string; message: string; hint?: string } } | null;
+      const data: { error?: { code: string; message: string; hint?: string } } | null = await res.json().catch(() => null);
       const e = data?.error ?? { code: `HTTP_${res.status}`, message: `Request failed with HTTP ${res.status}.` };
       throw new DevicepoolError(res.status, e.code, e.message, e.hint);
     }
@@ -113,7 +108,8 @@ export class Devicepool {
   }
 
   async json<T>(method: string, path: string, body?: unknown): Promise<T> {
-    return (await (await this.request(method, path, body)).json()) as T;
+    const res = await this.request(method, path, body);
+    return res.json();
   }
 
   async devices(): Promise<{ platform: Platform; model: string; os: string; image: string | null; host: string; state: string; note?: string | null }[]> {
@@ -150,7 +146,6 @@ export class Devicepool {
     return new Lease(this, info, opts.autoRenew ?? true, ttlOf(info, opts.ttlSeconds));
   }
 
-  /** Picks up a lease again after a restart or a lost connection. Use the token that made the lease. */
   async reattach(leaseId: string, opts: { autoRenew?: boolean } = {}): Promise<Lease> {
     const info = await this.json<LeaseInfo>('POST', `/v1/leases/${encodeURIComponent(leaseId)}/attach`, {});
     return new Lease(this, info, opts.autoRenew ?? true, ttlOf(info));
@@ -161,7 +156,6 @@ export class Devicepool {
   }
 }
 
-/** A leased device, driven through the API. */
 export class Lease {
   readonly id: string;
   info: LeaseInfo;
@@ -187,7 +181,6 @@ export class Lease {
     return this.info;
   }
 
-  /** Counts as activity without touching the device, so the lease does not end as idle. */
   async keepalive(): Promise<LeaseInfo> {
     this.info = await this.client.json('POST', this.path('/keepalive'), {});
     return this.info;
@@ -242,18 +235,16 @@ export class Lease {
   }
 
   async install(appOrBuild: string, name?: string): Promise<{ bundleId: string; name: string }> {
-    const isPath = await stat(appOrBuild).then(() => true, () => false);
-    if (!isPath) {
+    const local = await stat(appOrBuild).catch(() => null);
+    if (!local) {
       return this.client.json('POST', this.path('/apps'), { build: appOrBuild });
     }
     const label = encodeURIComponent(name ?? basename(appOrBuild));
-    const s = await stat(appOrBuild);
-    if (s.isFile()) {
-      const { createReadStream } = await import('node:fs');
-      return (await this.client.request('POST', this.path(`/apps?name=${label}`), createReadStream(appOrBuild), { 'content-type': 'application/octet-stream' })).json() as Promise<{ bundleId: string; name: string }>;
+    if (local.isFile()) {
+      return (await this.client.request('POST', this.path(`/apps?name=${label}`), createReadStream(appOrBuild), { 'content-type': 'application/octet-stream' })).json();
     }
     const tar = spawn('tar', ['-cf', '-', '-C', dirname(appOrBuild), basename(appOrBuild)], { stdio: ['ignore', 'pipe', 'inherit'] });
-    return (await this.client.request('POST', this.path(`/apps?name=${label}`), tar.stdout, { 'content-type': 'application/x-tar' })).json() as Promise<{ bundleId: string; name: string }>;
+    return (await this.client.request('POST', this.path(`/apps?name=${label}`), tar.stdout, { 'content-type': 'application/x-tar' })).json();
   }
 
   async launch(bundleId: string, args?: string[]): Promise<void> {
@@ -300,15 +291,10 @@ export class Lease {
     return this.client.json('POST', this.path('/metro'), { bundleId });
   }
 
-  /** A token that drives only this lease and ends with it. Give it to code you trust less than your own token. */
   async token(): Promise<{ token: string; expiresAt: number }> {
     return this.client.json('POST', this.path('/tokens'), {});
   }
 
-  /**
-   * Forwards Metro on `localPort`, and each of `ports`, to the device. The result's `ports` says where each of
-   * `ports` is on the device: the same number unless another lease on that Mac already uses it.
-   */
   metroTunnel(localPort: number, ports: number[] = []): Promise<{ port: number; ports: Record<string, number>; close: () => void }> {
     const extra = ports.length ? `&ports=${ports.join(',')}` : '';
     const ws = new WebSocket(`${this.client.url.replace(/^http/, 'ws')}${this.path('/tunnel')}?token=${encodeURIComponent(this.client.token)}${extra}`);
@@ -327,16 +313,15 @@ export class Lease {
     return new Promise((resolve, reject) => {
       ws.onmessage = (e) => {
         if (typeof e.data === 'string') {
-          const m = JSON.parse(e.data) as { type: string; port: number; ports?: Record<string, number> };
+          const m: { type: string; port: number; ports?: Record<string, number> } = JSON.parse(e.data);
           if (m.type === 'ready') {
             resolve({ port: m.port, ports: m.ports ?? {}, close: () => ws.close() });
           }
           return;
         }
-        const b = Buffer.from(e.data as ArrayBuffer);
+        const b = Buffer.from(e.data);
         const conn = b.readUInt32BE(1);
         if (b[0] === 1) {
-          // localhost, so a Metro bound to ::1 or 127.0.0.1 both work.
           const socket = connectSocket({ port: b.length >= 7 ? b.readUInt16BE(5) : localPort, host: 'localhost', autoSelectFamily: true });
           sockets.set(conn, socket);
           socket.on('data', (d) => frame(2, conn, d));
@@ -371,12 +356,10 @@ function ttlOf(info: LeaseInfo, asked?: number): number {
   if (asked) {
     return asked;
   }
-  // Renewing a third of the shorter of ttl and idle keeps a held lease from ending either way.
   const ms = info.limits ? Math.min(info.limits.ttlMs, info.limits.idleMs) : 600_000;
   return Math.max(3, Math.round(ms / 1000));
 }
 
-/** Opens a URL in the default browser, on macOS and Linux. */
 export async function openInBrowser(url: string): Promise<void> {
   if (process.env.DEVICEPOOL_NO_OPEN) {
     return;

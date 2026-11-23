@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-export default function App() {
+export default function App(): ReactElement {
   const [count, setCount] = useState(0);
   return (
     <View style={styles.container}>

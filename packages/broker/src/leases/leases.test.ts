@@ -7,7 +7,6 @@ import { PROTOCOL_VERSION, type AgentDevice } from '@devicepool/protocol';
 import * as auth from '../auth.ts';
 import { startBroker, type Broker } from '../index.ts';
 
-// One host with one simulator that answers every request.
 function fakeHost(broker: Broker): void {
   let devices: AgentDevice[] = [{ deviceId: 'dev-1', model: 'iPhone 17', os: '26.5', state: 'ready', platform: 'ios-simulator' }];
   let n = 1;

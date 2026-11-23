@@ -30,7 +30,6 @@ test("an operator's agent and CI tokens are members, and a prefix token uploads 
     const pr = (await call(admin, 'POST', '/v1/tokens', { scopes: ['install:upload:pr-'] })).json.token ?? '';
     assert.equal((await call(pr, 'GET', '/v1/me')).json.role, 'member');
     assert.equal((await call(pr, 'POST', '/v1/builds?name=App.app')).json.error?.code, 'UPLOAD_NOT_ALLOWED');
-    // Allowed past the scope check, so the upload itself fails on the empty body.
     assert.notEqual((await call(pr, 'POST', '/v1/builds?name=pr-12')).json.error?.code, 'UPLOAD_NOT_ALLOWED');
   } finally {
     await broker.close();

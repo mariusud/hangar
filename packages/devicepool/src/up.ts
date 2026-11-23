@@ -91,7 +91,7 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
 
   const bonjour = spawn('dns-sd', ['-R', 'Devicepool', '_devicepool._tcp', 'local', String(port)], { stdio: 'ignore' });
 
-  const signedIn = await access(CONFIG_FILE).then(() => false, async () => {
+  const hasSignedInCommands = await access(CONFIG_FILE).then(() => false, async () => {
     await mkdir(dirname(CONFIG_FILE), { recursive: true });
     await writeFile(CONFIG_FILE, JSON.stringify({ url: publicUrl, token: broker.adminToken(`devicepool up on ${hostname()}`) }, null, 2), { mode: 0o600 });
     return true;
@@ -103,17 +103,17 @@ Devicepool is running at ${publicUrl}
   Sign in as admin:   ${broker.welcomeLink()}   (one use, 30 min)
   Connect an agent:   devicepool connect claude   (or cursor)
   Connect CI:         devicepool connect ci
-${signedIn ? '\n  The devicepool commands on this Mac are signed in as admin.\n' : ''}
+${hasSignedInCommands ? '\n  The devicepool commands on this Mac are signed in as admin.\n' : ''}
 ${publicUrl.startsWith('https:') ? '' : '  Traffic is plain HTTP on your network. Set up TLS before using Devicepool beyond a trusted LAN.\n'}
   Press Ctrl-C to stop. Leased devices are deleted when Devicepool stops.
 `);
 
-  let stopping = false;
+  let isStopping = false;
   const stop = async (): Promise<void> => {
-    if (stopping) {
+    if (isStopping) {
       return;
     }
-    stopping = true;
+    isStopping = true;
     console.log('\nStopping: deleting devices...');
     bonjour.kill();
     await androidAgent?.stop();

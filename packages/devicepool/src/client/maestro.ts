@@ -8,7 +8,6 @@ import { Devicepool, DevicepoolError } from './index.ts';
 
 const run = promisify(execFile);
 
-/** The result of one flow or test. */
 export type FlowResult = {
   flow: string;
   status: 'queued' | 'running' | 'passed' | 'failed' | 'flaky';
@@ -16,14 +15,11 @@ export type FlowResult = {
   attempts: number;
   message?: string;
   recording?: string;
-  /** The first attempt's failure, kept when a retry or rerun passes. */
   firstMessage?: string;
   firstRecording?: string;
-  /** The device this flow failed on, kept as it was until `until` (runs started with a hold). */
   held?: { until: number };
 };
 
-/** The broker's record of a run. */
 export type RunInfo = {
   id: string;
   kind?: 'maestro' | 'xcuitest' | 'espresso';
@@ -34,10 +30,8 @@ export type RunInfo = {
   url: string;
 };
 
-/** The outcome of a finished run. */
 export type MaestroRun = { id: string; kind?: RunInfo['kind']; passed: boolean; flows: FlowResult[]; junit: string; durationMs: number; url: string };
 
-/** Options for a Maestro run. */
 export type MaestroOptions = {
   app: string;
   flowsDir: string;
@@ -45,14 +39,11 @@ export type MaestroOptions = {
   retries?: number;
   env?: Record<string, string>;
   device?: DeviceClass;
-  /** Keep a failed flow's device as it was for this many seconds, for people on your team. */
   holdSeconds?: number;
-  /** Lease the shards inside this booking of your team, ahead of the booking's agents. */
   booking?: string;
   log?: (line: string) => void;
 };
 
-/** Seconds from "30m", "2h", "90s" or a plain number of seconds; null when it is none of those. */
 export function parseDuration(value: string): number | null {
   const m = /^(\d+(?:\.\d+)?)\s*(s|m|h)?$/.exec(value.trim().toLowerCase());
   if (!m) {
@@ -64,7 +55,6 @@ export function parseDuration(value: string): number | null {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Uploads a path as a build and returns its hash; anything else is already a build name. */
 export async function buildRef(devicepool: Devicepool, app: string): Promise<string> {
   const s = await stat(app).catch(() => null);
   if (!s) {
@@ -75,7 +65,8 @@ export async function buildRef(devicepool: Devicepool, app: string): Promise<str
   const body = tar ? tar.stdout : createReadStream(app);
   try {
     const res = await devicepool.request('POST', `/v1/builds?name=${name}`, body, { 'content-type': s.isFile() ? 'application/octet-stream' : 'application/x-tar' });
-    return ((await res.json()) as { sha256: string }).sha256;
+    const build: { sha256: string } = await res.json();
+    return build.sha256;
   } finally {
     // A refused upload leaves tar blocked on a full pipe, which would keep the command from exiting.
     tar?.kill();
@@ -83,7 +74,6 @@ export async function buildRef(devicepool: Devicepool, app: string): Promise<str
   }
 }
 
-/** Runs Maestro flows on leased devices and follows the run until it ends. */
 export async function runMaestro(devicepool: Devicepool, opts: MaestroOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
   const flows = (await readdir(opts.flowsDir)).filter((f) => /\.ya?ml$/.test(f) && !/^config\.ya?ml$/.test(f)).sort();
@@ -104,7 +94,6 @@ export async function runMaestro(devicepool: Devicepool, opts: MaestroOptions): 
   });
 }
 
-/** Options for an XCUITest run. */
 export type XcuitestOptions = {
   products: string;
   tests?: string[];
@@ -115,7 +104,6 @@ export type XcuitestOptions = {
   log?: (line: string) => void;
 };
 
-/** Lists the test targets an .xctestrun names. */
 export async function testTargets(xctestrun: string): Promise<string[]> {
   const { stdout } = await run('plutil', ['-convert', 'json', '-o', '-', xctestrun]);
   const plist: Record<string, unknown> & { TestConfigurations?: { TestTargets?: { BlueprintName?: string }[] }[] } = JSON.parse(stdout);
@@ -125,7 +113,6 @@ export async function testTargets(xctestrun: string): Promise<string[]> {
   return [...new Set(names.filter(Boolean))].sort();
 }
 
-/** Runs XCUITest from build-for-testing on leased devices. */
 export async function runXcuitest(devicepool: Devicepool, opts: XcuitestOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
   let tests = opts.tests ?? [];
@@ -142,7 +129,6 @@ export async function runXcuitest(devicepool: Devicepool, opts: XcuitestOptions)
   return follow(devicepool, log, '/v1/runs', { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1, ...(opts.booking ? { booking: opts.booking } : {}) });
 }
 
-/** Options for an Espresso run. */
 export type EspressoOptions = {
   app: string;
   testApp: string;
@@ -153,7 +139,6 @@ export type EspressoOptions = {
   log?: (line: string) => void;
 };
 
-/** Runs an Espresso suite on leased emulators. */
 export async function runEspresso(devicepool: Devicepool, opts: EspressoOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
   const build = await buildRef(devicepool, opts.app);
@@ -162,7 +147,6 @@ export async function runEspresso(devicepool: Devicepool, opts: EspressoOptions)
   return follow(devicepool, log, '/v1/runs', { build, suite: { kind: 'espresso', testBuild, tests }, shards: opts.shards ?? 1, retries: opts.retries ?? 1, ...(opts.booking ? { booking: opts.booking } : {}) });
 }
 
-/** Runs one flow of a finished run again on a fresh device, recorded, and follows the run until it ends. */
 export async function rerunFlow(devicepool: Devicepool, runId: string, flow: string, opts: { env?: Record<string, string>; log?: (line: string) => void } = {}): Promise<MaestroRun> {
   const path = `/v1/runs/${encodeURIComponent(runId)}/flows/${encodeURIComponent(flow)}/rerun`;
   return follow(devicepool, opts.log ?? (() => {}), path, opts.env ? { env: opts.env } : {});

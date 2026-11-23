@@ -17,15 +17,10 @@ const run = promisify(execFile);
 export type AndroidAgentOptions = {
   send: (m: AgentMessage) => void;
   brokerUrl: string;
-  /** The Android virtual device to run emulators from. Left out, the host runs no emulators. */
   avd?: string;
-  /** Offer the Android phones attached to this Mac. */
   phones?: boolean;
-  /** Where the baseline of a leased phone is kept until its wipe is verified. */
   stateDir?: string;
-  /** How the agent reaches adb for phones. Tests pass a fake phone here. */
   adb?: PhoneAdb;
-  /** The driver calls that change which apps a phone holds. Tests pass their own. */
   driver?: PhoneDriver;
   maxDevices?: number;
   warm?: number;
@@ -33,7 +28,6 @@ export type AndroidAgentOptions = {
 };
 
 export type PhoneAdb = {
-  /** The output of `adb devices -l`. */
   list: () => Promise<string>;
   open: (serial: string) => android.Adb;
 };
@@ -41,13 +35,10 @@ export type PhoneDriver = Pick<typeof android, 'install' | 'launch'>;
 
 type Shared = AgentDevice & { serial: string; leaseId: string | null; screen: { width: number; height: number } };
 type EmulatorDevice = Shared & { kind: 'emulator'; emulator: android.Emulator; port: number };
-// `touched` are the packages the lease installed or launched; `baseline` is the phone as the lease found it.
-// `running` are the operations of the lease that have not answered yet; the wipe waits for them.
 type PhoneDevice = Shared & { kind: 'phone'; adb: android.Adb; touched: Set<string>; baseline: phone.PhoneState | null; running: Set<Promise<void>> };
 type Device = EmulatorDevice | PhoneDevice;
 
 const PHONE_SCAN_MS = 3000;
-// How long a wipe waits for operations of the ended lease that are still running on the phone.
 const RUNNING_OPS_MS = 60_000;
 const REPLUG = 'unplug it, wait ten seconds and plug it in again';
 
@@ -57,27 +48,22 @@ const FIRST_PORT = 5600;
 export class AndroidAgent {
   private devices = new Map<string, Device>();
   private booting = 0;
-  private stopped = false;
+  private isStopped = false;
   private model = { model: 'Android', os: '' };
   private streams = new Map<string, Promise<android.ScreenStream>>();
   private tunnels: Tunnels;
   private tools = new LeaseTools();
   private next = 0;
-  // Phones adb lists but cannot use, by serial, with what the operator should do.
   private unusable = new Map<string, string>();
   private skipped = new Map<string, string>();
   private enrolling = new Set<string>();
-  // Phones in state `device` that did not answer when they were enrolled, by serial.
   private failed = new Map<string, string>();
-  // Scans in a row that each known phone has been missing.
   private misses = new Map<string, number>();
-  // The lease a phone held when it left. If the phone comes back before the broker ends that lease, the lease goes on.
   private lost = new Map<string, string>();
-  // One queue of work per phone: recording, wiping and enrolling never overlap on the same phone.
   private chains = new Map<string, Promise<void>>();
   private adb: PhoneAdb;
   private driver: PhoneDriver;
-  private scanning = false;
+  private isScanning = false;
   private scanError = '';
   private scanTimer: NodeJS.Timeout | null = null;
   private stateDir: string;
@@ -129,7 +115,7 @@ export class AndroidAgent {
   }
 
   async stop(): Promise<void> {
-    this.stopped = true;
+    this.isStopped = true;
     if (this.scanTimer) {
       clearInterval(this.scanTimer);
     }
@@ -138,7 +124,6 @@ export class AndroidAgent {
     for (const s of this.streams.values()) {
       await (await s).stop();
     }
-    // A leased phone keeps its baseline on disk and is wiped when this host next sees it.
     await Promise.all(this.emulators().map((d) => android.kill(d.emulator)));
   }
 
@@ -172,7 +157,6 @@ export class AndroidAgent {
       }
       devices.push(device);
     }
-    // A known phone that is offline for a scan or two is already listed above.
     for (const [serial, note] of [...this.unusable, ...this.failed]) {
       const deviceId = phone.deviceIdFor(serial);
       if (!devices.some((d) => d.deviceId === deviceId)) {
@@ -180,6 +164,10 @@ export class AndroidAgent {
       }
     }
     return devices;
+  }
+
+  private respondError(id: number, code: string, message: string): void {
+    this.opts.send({ type: 'response', id, ok: false, error: { code, message } });
   }
 
   private publish(): void {
@@ -213,14 +201,14 @@ export class AndroidAgent {
 
   private async fill(): Promise<void> {
     const avd = this.opts.avd;
-    while (avd && !this.stopped) {
+    while (avd && !this.isStopped) {
       const ready = this.emulators().filter((d) => d.state === 'ready').length + this.booting;
       if (ready >= this.warm || this.emulators().length + this.booting >= this.maxDevices) {
         return;
       }
       await this.boot(avd).catch((err: Error) => {
         this.log(`Could not boot an emulator: ${err.message}`);
-        this.stopped = true;
+        this.isStopped = true;
       });
     }
   }
@@ -229,7 +217,7 @@ export class AndroidAgent {
     if (m.type === 'lease.prepare') {
       const d = this.devices.get(m.deviceId);
       if (!d || d.state !== 'ready') {
-        this.opts.send({ type: 'response', id: m.id, ok: false, error: { code: 'DEVICE_NOT_READY', message: 'That device is not ready.' } });
+        this.respondError(m.id, 'DEVICE_NOT_READY', 'That device is not ready.');
         return;
       }
       d.leaseId = m.leaseId;
@@ -258,7 +246,7 @@ export class AndroidAgent {
     } else if (m.type === 'tunnel.start') {
       const d = this.held(m.leaseId);
       if (!d) {
-        this.opts.send({ type: 'response', id: m.id, ok: false, error: { code: 'LEASE_NOT_HELD', message: 'This host holds no device for that lease.' } });
+        this.respondError(m.id, 'LEASE_NOT_HELD', 'This host holds no device for that lease.');
         return;
       }
       const adb = join(android.sdkRoot() ?? '', 'platform-tools', 'adb');
@@ -305,7 +293,6 @@ export class AndroidAgent {
     }
     const d = this.held(leaseId);
     if (d?.kind === 'phone') {
-      // From here no operation of the lease starts, and the wipe has its place in the phone's queue.
       d.leaseId = null;
       const stopped = this.stopStream(leaseId).catch(() => {});
       await this.enqueue(d.deviceId, async () => {
@@ -327,7 +314,6 @@ export class AndroidAgent {
     void this.fill();
   }
 
-  // Runs work for one phone after the work already queued for it. Other phones are not held up.
   private enqueue(deviceId: string, job: () => Promise<void>): Promise<void> {
     const next = (this.chains.get(deviceId) ?? Promise.resolve()).then(job).catch((err: unknown) => {
       this.log(`Work on a phone failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -341,30 +327,28 @@ export class AndroidAgent {
     return next;
   }
 
-  /** Resolves when no phone has work queued. */
   async idle(): Promise<void> {
     while (this.chains.size) {
       await Promise.all(this.chains.values());
     }
   }
 
-  /** Looks at `adb devices` for phones that were plugged in, unplugged, or need the operator. It does not wait for a phone's wipe. */
   async scanPhones(): Promise<void> {
-    if (this.scanning) {
+    if (this.isScanning) {
       return;
     }
-    this.scanning = true;
+    this.isScanning = true;
     try {
       const known = [...this.phones().map((d) => d.serial), ...this.enrolling];
       const changes = phone.phoneChanges(known, phone.parseDevices(await this.adb.list()), this.misses);
       this.misses = changes.misses;
       this.scanError = '';
-      let offersChanged = false;
+      let shouldHello = false;
       for (const serial of changes.left) {
         const d = this.phones().find((p) => p.serial === serial);
         if (d) {
           this.dropPhone(d);
-          offersChanged = true;
+          shouldHello = true;
         }
       }
       const notes = (m: Map<string, string>): string => JSON.stringify([...m].sort());
@@ -389,7 +373,7 @@ export class AndroidAgent {
       }
       this.unusable = changes.unusable;
       this.skipped = changes.skipped;
-      if (offersChanged) {
+      if (shouldHello) {
         await this.hello();
       } else if (notes(new Map([...this.unusable, ...this.failed])) !== before) {
         this.publish();
@@ -401,11 +385,10 @@ export class AndroidAgent {
       }
       this.scanError = message;
     } finally {
-      this.scanning = false;
+      this.isScanning = false;
     }
   }
 
-  // Adds a phone adb can talk to. A phone with a record on disk left a lease unwiped, so it is not `ready` until that is dealt with.
   private enrol(serial: string): void {
     const deviceId = phone.deviceIdFor(serial);
     this.enrolling.add(serial);
@@ -437,7 +420,6 @@ export class AndroidAgent {
         d.baseline = stored.baseline;
         d.touched = new Set(stored.touched);
         if (leaseId) {
-          // The broker decides whether the lease is over: hello names it, and the broker answers lease.end if it is.
           d.leaseId = leaseId;
           d.state = 'busy';
           this.log(`${d.model} is back and its lease may still be open; it is wiped when the lease ends`);
@@ -462,10 +444,9 @@ export class AndroidAgent {
     this.log(`${d.model} was unplugged${d.baseline ? '; its lease is wiped when it is plugged in again' : ''}`);
   }
 
-  // Records the phone as the lease finds it, on disk too, before the lease may change anything.
   private async preparePhone(d: PhoneDevice, id: number, leaseId: string): Promise<void> {
     const refuse = (message: string): void => {
-      this.opts.send({ type: 'response', id, ok: false, error: { code: 'DEVICE_NOT_READY', message } });
+      this.respondError(id, 'DEVICE_NOT_READY', message);
     };
     if (this.devices.get(d.deviceId) !== d || d.leaseId !== leaseId) {
       refuse('The lease ended, or the phone was unplugged, before the phone was recorded.');
@@ -477,7 +458,6 @@ export class AndroidAgent {
       await phone.saveBaseline(this.stateDir, d.deviceId, baseline);
       d.baseline = baseline;
     } catch (err) {
-      // Nothing was changed on the phone, so it needs no wipe and keeps no record.
       const message = err instanceof Error ? err.message : String(err);
       await phone.dropBaseline(this.stateDir, d.deviceId).catch(() => {});
       this.log(`${d.model} could not be recorded before a lease, so the lease did not start. ${message}`);
@@ -492,7 +472,6 @@ export class AndroidAgent {
     try {
       await phone.wake(d.adb);
     } catch (err) {
-      // Waking changes the stay-awake setting, so the phone goes through its wipe.
       refuse(`Could not wake the phone for the lease: ${err instanceof Error ? err.message : String(err)}`);
       if (d.leaseId === leaseId) {
         d.leaseId = null;
@@ -503,7 +482,6 @@ export class AndroidAgent {
     this.opts.send({ type: 'response', id, ok: true });
   }
 
-  // Marks a package as used by the lease, on disk, before the caller goes on.
   private async touch(d: Device, pkg: string): Promise<void> {
     if (d.kind !== 'phone' || d.touched.has(pkg)) {
       return;
@@ -512,7 +490,6 @@ export class AndroidAgent {
     d.touched.add(pkg);
   }
 
-  // Runs after everything queued for the phone when its lease ended, so a lease that ends while it is being prepared waits.
   private async finishPhoneLease(d: PhoneDevice): Promise<void> {
     if (d.running.size) {
       let timer: NodeJS.Timeout | undefined;
@@ -527,7 +504,6 @@ export class AndroidAgent {
       return;
     }
     if (!d.baseline) {
-      // The phone was never recorded for this lease, so the lease did nothing to it.
       if (d.state === 'busy' && d.leaseId === null) {
         d.state = 'ready';
         this.publish();
@@ -543,7 +519,6 @@ export class AndroidAgent {
     this.log(`${d.model} is quarantined. ${note}`);
   }
 
-  // A phone is `ready` again only when what is read back from it matches its baseline. Call it from the phone's queue.
   private async wipePhone(d: PhoneDevice): Promise<void> {
     d.state = 'wiping';
     delete d.note;
@@ -555,9 +530,9 @@ export class AndroidAgent {
     if (this.devices.get(d.deviceId) !== d) {
       return;
     }
-    const kept = result.ok ? await phone.dropBaseline(this.stateDir, d.deviceId).then(() => '', (err: unknown) => (err instanceof Error ? err.message : String(err))) : '';
-    if (kept) {
-      this.quarantine(d, `The phone was wiped and checked, but its record could not be deleted (${kept}). Delete the files for ${d.deviceId} in ${this.stateDir}, then ${REPLUG}.`);
+    const recordError = result.ok ? await phone.dropBaseline(this.stateDir, d.deviceId).then(() => '', (err: unknown) => (err instanceof Error ? err.message : String(err))) : '';
+    if (recordError) {
+      this.quarantine(d, `The phone was wiped and checked, but its record could not be deleted (${recordError}). Delete the files for ${d.deviceId} in ${this.stateDir}, then ${REPLUG}.`);
     } else if (result.ok) {
       d.baseline = null;
       d.touched = new Set();
@@ -572,7 +547,7 @@ export class AndroidAgent {
   private async op(id: number, leaseId: string, body: Op): Promise<void> {
     const d = this.held(leaseId);
     if (!d) {
-      this.opts.send({ type: 'response', id, ok: false, error: { code: 'LEASE_NOT_HELD', message: 'This host holds no device for that lease.' } });
+      this.respondError(id, 'LEASE_NOT_HELD', 'This host holds no device for that lease.');
       return;
     }
     try {
@@ -585,7 +560,7 @@ export class AndroidAgent {
       this.opts.send({ type: 'response', id, ok: true, ...(await work) });
     } catch (err) {
       const code = err instanceof OpError || err instanceof android.DriverError || err instanceof ToolError ? err.code : 'OP_FAILED';
-      this.opts.send({ type: 'response', id, ok: false, error: { code, message: err instanceof Error ? err.message : String(err) } });
+      this.respondError(id, code, err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -615,7 +590,6 @@ export class AndroidAgent {
         try {
           const apk = join(dir, 'app.apk');
           await download(new URL(body.artifactUrl, this.opts.brokerUrl).toString(), body.sha256, apk);
-          // The package name is only known once the APK is installed, so it is recorded right after.
           const pkg = await this.driver.install(serial, apk);
           await this.touch(d, pkg);
           if (d.leaseId) {
@@ -675,8 +649,8 @@ export class AndroidAgent {
       case 'orientation': {
         await android.orientation(serial, body.orientation);
         const size = await android.screenSize(serial);
-        const sideways = body.orientation === 'landscapeLeft' || body.orientation === 'landscapeRight';
-        d.screen = sideways ? { width: size.height, height: size.width } : size;
+        const isSideways = body.orientation === 'landscapeLeft' || body.orientation === 'landscapeRight';
+        d.screen = isSideways ? { width: size.height, height: size.width } : size;
         return {};
       }
       case 'gesture':
@@ -723,7 +697,11 @@ export class AndroidAgent {
     const dir = await mkdtemp(join(tmpdir(), 'devicepool-shot-'));
     try {
       await writeFile(join(dir, 'in.png'), png);
-      const args = ['-s', 'format', format, ...(maxSize ? ['-Z', String(maxSize)] : []), join(dir, 'in.png'), '--out', join(dir, `out.${format}`)];
+      const args = ['-s', 'format', format];
+      if (maxSize) {
+        args.push('-Z', String(maxSize));
+      }
+      args.push(join(dir, 'in.png'), '--out', join(dir, `out.${format}`));
       await run('sips', args);
       return await readFile(join(dir, `out.${format}`));
     } finally {
@@ -766,8 +744,8 @@ export class AndroidAgent {
       case 'waitFor': {
         const until = Date.now() + (a.timeoutMs ?? 5000);
         for (;;) {
-          const found = findAll((await android.describe(serial)).nodes, a.element).length > 0;
-          if (found !== Boolean(a.gone)) {
+          const isFound = findAll((await android.describe(serial)).nodes, a.element).length > 0;
+          if (isFound !== Boolean(a.gone)) {
             return;
           }
           if (Date.now() > until) {

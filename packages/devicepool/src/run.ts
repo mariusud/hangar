@@ -10,7 +10,7 @@ import { parseDuration, rerunFlow } from './client/maestro.ts';
 
 const run = promisify(execFile);
 const children: ChildProcess[] = [];
-let stopped = false;
+let isStopped = false;
 
 export const RUN_HELP = `  devicepool run ios [--app App.app | --build NAME] [--port 8081] [--port 4000]... [--scheme S] [--model M] [--lease ID]
                                            build, install and run your app on a leased
@@ -60,8 +60,7 @@ export async function runMaestroCommand(args: string[]): Promise<void> {
     if (!values.rerun || !values.flow) {
       throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool run maestro --rerun <run-id> --flow <flow>. The run id is in the run link.');
     }
-    const log = (line: string): void => void process.stderr.write(`${line}\n`);
-    const result = await rerunFlow(await Devicepool.fromEnv(), values.rerun, values.flow, { ...(values.env ? { env } : {}), log });
+    const result = await rerunFlow(await Devicepool.fromEnv(), values.rerun, values.flow, { ...(values.env ? { env } : {}), log: logLine });
     await report(result, values.junit, suiteName(result.kind));
     return;
   }
@@ -78,7 +77,7 @@ export async function runMaestroCommand(args: string[]): Promise<void> {
     ...(values.model ? { device: { model: values.model } } : {}),
     ...(holdSeconds ? { holdSeconds } : {}),
     ...(values.booking ? { booking: values.booking } : {}),
-    log: (line) => process.stderr.write(`${line}\n`),
+    log: logLine,
   });
   await report(result, values.junit, 'Maestro');
 }
@@ -95,12 +94,12 @@ export async function runXcuitestCommand(args: string[]): Promise<void> {
   }
   const result = await runXcuitest(await Devicepool.fromEnv(), {
     products,
-    ...(values.tests ? { tests: values.tests.split(',').map((t) => t.trim()).filter(Boolean) } : {}),
+    ...(values.tests ? { tests: splitList(values.tests) } : {}),
     shards: Number(values.shards ?? 1),
     retries: Number(values.retries ?? 1),
     ...(values.model ? { device: { model: values.model } } : {}),
     ...(values.booking ? { booking: values.booking } : {}),
-    log: (line) => process.stderr.write(`${line}\n`),
+    log: logLine,
   });
   await report(result, values.junit, 'XCUITest');
 }
@@ -117,13 +116,21 @@ export async function runEspressoCommand(args: string[]): Promise<void> {
   const result = await runEspresso(await Devicepool.fromEnv(), {
     app: values.app,
     testApp,
-    ...(values.tests ? { tests: values.tests.split(',').map((t) => t.trim()).filter(Boolean) } : {}),
+    ...(values.tests ? { tests: splitList(values.tests) } : {}),
     shards: Number(values.shards ?? 1),
     retries: Number(values.retries ?? 1),
     ...(values.booking ? { booking: values.booking } : {}),
-    log: (line) => process.stderr.write(`${line}\n`),
+    log: logLine,
   });
   await report(result, values.junit, 'Espresso');
+}
+
+function logLine(line: string): void {
+  process.stderr.write(`${line}\n`);
+}
+
+function splitList(value: string): string[] {
+  return value.split(',').map((t) => t.trim()).filter(Boolean);
 }
 
 function suiteName(kind: MaestroRun['kind']): string {
@@ -140,7 +147,6 @@ function counts(flows: FlowResult[]): Record<'passed' | 'flaky' | 'failed', numb
   return out;
 }
 
-// A flow's recordings, first attempt first, with no link twice.
 function recordingLinks(f: FlowResult): { label: string; url: string }[] {
   const links: { label: string; url: string }[] = [];
   if (f.firstRecording) {
@@ -155,22 +161,18 @@ function recordingLinks(f: FlowResult): { label: string; url: string }[] {
 const CELL_ESCAPES: Record<string, string> = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '|': '\\|', '`': "'" };
 const cell = (s: string): string => s.replace(/[\r\n]+/g, ' ').replace(/[<>&|`]/g, (c) => CELL_ESCAPES[c] ?? c).slice(0, 300);
 
-/** The key that finds this job's comment again: the workflow, the job and the action's comment-key. */
 export function commentKey(env: NodeJS.ProcessEnv): string {
   return createHash('sha256').update(`${env.GITHUB_WORKFLOW ?? ''}\n${env.GITHUB_JOB ?? ''}\n${env.DEVICEPOOL_COMMENT_KEY ?? ''}`).digest('hex').slice(0, 16);
 }
 
-/** The run page with a held flow picked, where a person on the team takes over its device. */
 export function heldLink(runUrl: string, flow: string): string {
   return `${runUrl}?flow=${encodeURIComponent(flow)}`;
 }
 
-// The runner's time zone is rarely the reader's, so the comment says UTC.
 function clock(ms: number): string {
   return `${new Date(ms).toISOString().slice(11, 16)} UTC`;
 }
 
-/** The pull request comment for a run. Its first line marks it, so a later job or a rerun updates it. */
 export function commentBody(result: MaestroRun, key: string): string {
   const c = counts(result.flows);
   const lines = [`<!-- devicepool-run key=${key} run=${result.id} -->`, `### ${suiteName(result.kind)} on Devicepool: ${c.failed ? `${c.failed} failed` : 'passed'}`, ''];
@@ -227,7 +229,7 @@ async function report(result: MaestroRun, junit: string | undefined, suite: stri
 type Project = { root: string; isExpo: boolean; hasDevClient: boolean };
 
 async function project(root: string): Promise<Project> {
-  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8').catch(() => '{}')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  const pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8').catch(() => '{}'));
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   if (!deps['react-native']) {
     throw new DevicepoolError(0, 'NOT_REACT_NATIVE', 'This folder is not a React Native app (no react-native in package.json).', 'Run it from the app folder.');
@@ -261,7 +263,8 @@ async function build(p: Project, scheme: string | undefined): Promise<string> {
     throw new DevicepoolError(0, 'BUILD_FAILED', `xcodebuild failed:\n${errors.slice(-10).join('\n')}\nFull log: ${logFile}`, 'If your app builds another way (expo run:ios, EAS, Bazel), pass that .app with --app.');
   }
   const { stdout } = await run('xcodebuild', [...args, '-showBuildSettings', '-json'], { maxBuffer: 64 * 1024 * 1024 });
-  const settings = (JSON.parse(stdout) as { buildSettings: Record<string, string> }[]).find((s) => s.buildSettings.WRAPPER_EXTENSION === 'app')?.buildSettings;
+  const targets: { buildSettings: Record<string, string> }[] = JSON.parse(stdout);
+  const settings = targets.find((s) => s.buildSettings.WRAPPER_EXTENSION === 'app')?.buildSettings;
   if (!settings) {
     throw new DevicepoolError(0, 'NO_APP', `The ${name} scheme builds no .app.`, 'Pass --scheme with the app scheme, or --app.');
   }
@@ -283,7 +286,7 @@ async function metro(p: Project, port: number): Promise<ChildProcess | null> {
     return null;
   }
   const args = p.isExpo ? ['expo', 'start', '--localhost', '--port', String(port)] : ['react-native', 'start', '--host', '127.0.0.1', '--port', String(port)];
-  if (stopped) {
+  if (isStopped) {
     return null;
   }
   process.stderr.write(`Starting Metro: npx ${args.join(' ')}\n`);
@@ -305,7 +308,7 @@ async function metro(p: Project, port: number): Promise<ChildProcess | null> {
 }
 
 function stopChildren(): void {
-  stopped = true;
+  isStopped = true;
   for (const c of children) {
     try {
       process.kill(-c.pid!, 'SIGTERM');
@@ -326,12 +329,12 @@ async function buildWithMetro(build: Promise<string> | string, metroStarted: Pro
 }
 
 function stopOnCtrlC(lease: () => Lease | null): void {
-  let stopping = false;
+  let isStopping = false;
   process.on('SIGINT', () => {
-    if (stopping) {
+    if (isStopping) {
       return;
     }
-    stopping = true;
+    isStopping = true;
     stopChildren();
     void (async () => {
       const held = lease();
@@ -401,12 +404,12 @@ export async function runAndroid(args: string[]): Promise<void> {
 }
 
 async function expoSlug(root: string): Promise<string | null> {
-  const app = JSON.parse(await readFile(join(root, 'app.json'), 'utf8').catch(() => '{}')) as { expo?: { slug?: string } };
+  const app: { expo?: { slug?: string } } = JSON.parse(await readFile(join(root, 'app.json'), 'utf8').catch(() => '{}'));
   if (app.expo?.slug) {
     return app.expo.slug;
   }
   const config = await run('npx', ['expo', 'config', '--json', '--type', 'public'], { cwd: root, maxBuffer: 16 * 1024 * 1024 }).then(
-    ({ stdout }) => JSON.parse(stdout) as { slug?: string },
+    ({ stdout }): { slug?: string } => JSON.parse(stdout),
     () => ({ slug: undefined }),
   );
   return config.slug ?? null;
@@ -447,7 +450,6 @@ export async function runIos(args: string[]): Promise<void> {
   let lease: Lease | null = null;
   stopOnCtrlC(() => (leaseId ? null : lease));
 
-  // The lease comes after the build: a long build would outlast the lease's idle timeout.
   const app = await buildWithMetro(values.build ?? values.app ?? build(p, values.scheme), metro(p, port));
   lease = leaseId ? client.attach(leaseId) : await client.lease(values.model ? { model: values.model } : {}, { via: 'devicepool run ios' });
   const localId = values.build ? null : await plist(app, 'CFBundleIdentifier', 'raw');
@@ -460,7 +462,8 @@ export async function runIos(args: string[]): Promise<void> {
   const installed = await lease.install(app);
   const bundleId = localId ?? installed.bundleId;
   await lease.useMetro(bundleId);
-  const schemes = values.build ? [] : (JSON.parse((await plist(app, 'CFBundleURLTypes', 'json')) ?? '[]') as { CFBundleURLSchemes?: string[] }[]).flatMap((t) => t.CFBundleURLSchemes ?? []);
+  const urlTypes: { CFBundleURLSchemes?: string[] }[] = values.build ? [] : JSON.parse((await plist(app, 'CFBundleURLTypes', 'json')) ?? '[]');
+  const schemes = urlTypes.flatMap((t) => t.CFBundleURLSchemes ?? []);
   const slug = values.build && p.hasDevClient ? await expoSlug(p.root) : null;
   const devClient = p.hasDevClient ? (slug ? `exp+${slug}` : schemes.find((s) => s.startsWith('exp+'))) : undefined;
   if (devClient) {
@@ -481,7 +484,7 @@ export async function devtoolsUrl(port: number, bundleId: string, waitMs = 60_00
   const base = `http://127.0.0.1:${port}`;
   const until = Date.now() + waitMs;
   while (Date.now() < until) {
-    const targets = (await fetch(`${base}/json/list`).then((r) => r.json(), () => [])) as { title?: string; appId?: string; devtoolsFrontendUrl?: string }[];
+    const targets: { title?: string; appId?: string; devtoolsFrontendUrl?: string }[] = await fetch(`${base}/json/list`).then((r) => r.json(), () => []);
     const target = targets.find((t) => t.appId === bundleId || t.title?.startsWith(bundleId));
     if (target?.devtoolsFrontendUrl) {
       return base + target.devtoolsFrontendUrl.replace(/ws=localhost(%3A|:)/, 'ws=127.0.0.1$1');

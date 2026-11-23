@@ -9,7 +9,6 @@ import { buildRef } from './maestro.ts';
 
 test('a refused folder upload fails with the server’s error instead of hanging', { timeout: 20_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'devicepool-buildref-test-'));
-  // Like the broker without install:upload: it answers before it reads the body.
   const server = createServer((_req, res) => {
     res.writeHead(403, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: { code: 'UPLOAD_NOT_ALLOWED', message: 'Uploading a build needs the install:upload permission.' } }));

@@ -20,11 +20,11 @@ export async function saveUpload(req: IncomingMessage, ctx: Ctx, name: string): 
       req,
       async function* (source) {
         for await (const chunk of source) {
-          size += (chunk as Buffer).length;
+          size += chunk.length;
           if (size > MAX_UPLOAD) {
             throw new ApiError(413, 'BODY_TOO_LARGE', 'Builds are limited to 4 GB.');
           }
-          hash.update(chunk as Buffer);
+          hash.update(chunk);
           yield chunk;
         }
       },

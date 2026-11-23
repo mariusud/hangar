@@ -1,6 +1,3 @@
-// Turns an H.264 Annex B byte stream that arrives in arbitrary chunks into the frame records the
-// screen helper writes: u8 flags (1 = keyframe), f64 capture ms since epoch, u16 width, u16 height,
-// then the frame's NAL units with 4-byte start codes.
 
 const START = Buffer.from([0, 0, 1]);
 const START4 = Buffer.from([0, 0, 0, 1]);
@@ -8,8 +5,7 @@ const START4 = Buffer.from([0, 0, 0, 1]);
 const nalType = (nal: Buffer): number => (nal[0] ?? 0) & 0x1f;
 const isVcl = (type: number): boolean => type >= 1 && type <= 5;
 
-// SEI, SPS, PPS and delimiters open a new access unit, and so does a slice with first_mb_in_slice
-// 0, whose ue(v) code is then a single 1 bit.
+// A slice with first_mb_in_slice 0 starts a new access unit; its ue(v) code is a single 1 bit.
 function startsAccessUnit(nal: Buffer): boolean {
   const type = nalType(nal);
   return isVcl(type) ? ((nal[1] ?? 0) & 0x80) !== 0 : type === 6 || type === 7 || type === 8 || type === 9;
@@ -71,7 +67,6 @@ function unescape(nal: Buffer): Buffer {
 
 const HIGH_PROFILES = new Set([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]);
 
-/** The picture size an H.264 sequence parameter set describes, after cropping, or null if it cannot be read. */
 export function spsSize(nal: Buffer): Size | null {
   if (nalType(nal) !== 7) {
     return null;
@@ -158,7 +153,6 @@ export class AnnexBFrames {
     this.now = now;
   }
 
-  /** Adds bytes. Emits every frame that a later NAL unit proves complete. */
   push(chunk: Buffer): void {
     this.pending = this.pending.length ? Buffer.concat([this.pending, chunk]) : chunk;
     let start = this.pending.indexOf(START);
@@ -174,14 +168,12 @@ export class AnnexBFrames {
       start = next;
     }
     this.pending = this.pending.subarray(start);
-    // The first two bytes of the next NAL unit already tell whether the held frame is finished.
     const head = this.pending.subarray(3, 5);
     if (head.length === 2 && startsAccessUnit(head) && this.nals.some((n) => isVcl(nalType(n)))) {
       this.emit();
     }
   }
 
-  /** Treats the bytes held so far as a whole NAL unit and emits the frame they finish. */
   flush(): void {
     if (this.pending.length > 3 && this.pending.subarray(0, 3).equals(START)) {
       this.add(trimZeros(this.pending.subarray(3)));

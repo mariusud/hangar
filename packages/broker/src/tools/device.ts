@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { ORIENTATIONS, PRIVACY_SERVICES, type Action, type UiNode } from '@devicepool/protocol';
+import { ORIENTATIONS, PRIVACY_SERVICES, type Action } from '@devicepool/protocol';
+import { nodesOf } from '../findings.ts';
 import type { Content, Result, ToolDeps } from './util.ts';
 
 const point = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).describe('[x, y] as fractions of the screen, 0 to 1');
@@ -23,9 +24,9 @@ const action = z.discriminatedUnion('type', [
 
 export function registerDeviceTools({ server, p, leases, pick, safe, text, install }: ToolDeps): void {
   const observe = async (id: string): Promise<Result> => {
-    const ui = (await leases.op(p, id, { op: 'describe' })).result as { nodes: UiNode[] };
+    const nodes = nodesOf((await leases.op(p, id, { op: 'describe' })).result);
     const shot = await leases.op(p, id, { op: 'screenshot', format: 'jpeg', maxSize: 1000 });
-    const elements = ui.nodes
+    const elements = nodes
       .filter((n) => n.role !== 'application' && (n.label || n.identifier))
       .map((n) => ({ role: n.role, label: n.label, identifier: n.identifier, value: n.value, enabled: n.enabled, center: [round(n.normalized.x + n.normalized.width / 2), round(n.normalized.y + n.normalized.height / 2)] }));
     return {

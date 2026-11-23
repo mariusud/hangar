@@ -28,14 +28,12 @@ function double(n: number, v: number): number[] {
   return [...varint((n << 3) | 1), ...b];
 }
 
-// proto3 leaves out fields that hold their default.
 function int(n: number, v: number): number[] {
   return v === 0 ? [] : [...varint(n << 3), ...varint(v)];
 }
 
 const point = (p: [number, number]): number[] => [...double(1, p[0]), ...double(2, p[1])];
 
-// idb.HIDEvent: press = 1, swipe = 2, delay = 3.
 export function encode(e: HidEvent): Buffer {
   let bytes: number[];
   if ('press' in e) {

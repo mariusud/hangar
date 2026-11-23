@@ -23,7 +23,6 @@ export function caps(db: Db): Record<LimitRole, Limits> {
   return { member: capFor('member', o), operator: capFor('operator', o), agent: capFor('agent', o) };
 }
 
-// What a principal's leases may have now: the token's own limits, under today's cap for its role.
 export function limitsOf(db: Db, p: auth.Principal): TokenLimits {
   const agent = p.token?.agent ?? false;
   return tokenLimits(p.token ?? {}, capFor(roleOf(p.role, agent), overrides(db)), agent);
@@ -31,7 +30,6 @@ export function limitsOf(db: Db, p: auth.Principal): TokenLimits {
 
 export type TokenRequest = { label?: unknown; scopes?: unknown; agent?: unknown; idleSeconds?: unknown; maxSeconds?: unknown; graceSeconds?: unknown; priority?: unknown };
 
-// The priority a principal's leases get, and the booking they lease from. Without a token row, interactive.
 export function priorityOf(db: Db, p: auth.Principal): TokenPriorityRow {
   return (p.token ? db.tokenPriority(p.token.hash) : null) ?? { priority: 'interactive', bookingId: null };
 }
@@ -48,7 +46,6 @@ export function mintMemberToken(db: Db, p: auth.Principal, b: TokenRequest, book
   return { ...minted, priority };
 }
 
-// operator, install:upload, or install:upload:<prefix> for build names that start with the prefix.
 const TOKEN_SCOPE = /^(operator|install:upload(:[\w.-]+)?)$/;
 
 function mintPlainToken(db: Db, p: auth.Principal, b: TokenRequest): { token: string; limits: TokenLimits } {
@@ -75,7 +72,6 @@ function mintPlainToken(db: Db, p: auth.Principal, b: TokenRequest): { token: st
   return { token, limits };
 }
 
-// A positive whole number of seconds as milliseconds, or null when left out.
 export function seconds(value: unknown, field: string): number | null {
   if (value === undefined || value === null) {
     return null;

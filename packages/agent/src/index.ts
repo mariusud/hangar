@@ -44,7 +44,7 @@ type Device = AgentDevice & { leaseId: string | null; screen: Frame | null };
 
 type Golden = { udid: string; model: string; os: string };
 
-type Stream = { jpeg: { stop: boolean } | null; h264: Promise<sim.ScreenStream> | null; wantH264: boolean };
+type Stream = { jpeg: { shouldStop: boolean } | null; h264: Promise<sim.ScreenStream> | null; shouldStreamH264: boolean };
 
 type Recording = { dir: string; uploads: { video: string; log: string; screenshot: string }; log: sim.AppLog; finished: Promise<void> | null };
 
@@ -95,11 +95,11 @@ export class Agent {
   private cloneOf = new Map<string, string>();
   private imageWork: Promise<void> = Promise.resolve();
   private buildingImage: string | null = null;
-  private filling = false;
+  private isFilling = false;
   private streams = new Map<string, Stream>();
   private wanted: (string | undefined)[] = [];
   private kept = new Set<string>();
-  private stopped = false;
+  private isStopped = false;
   private tunnels: Tunnels;
   private recordings = new Map<string, Recording>();
   private tools = new LeaseTools();
@@ -165,7 +165,7 @@ export class Agent {
   }
 
   async stop(): Promise<void> {
-    this.stopped = true;
+    this.isStopped = true;
     this.tunnels.stopAll();
     this.tools.closeAll();
     for (const leaseId of this.streams.keys()) {
@@ -205,7 +205,6 @@ export class Agent {
     await this.buildImages();
   }
 
-  // A golden from an older declaration goes once no device cloned from it is left.
   private async retireGoldens(): Promise<void> {
     const live = new Set(this.devices.keys());
     for (const [device] of this.cloneOf) {
@@ -234,7 +233,7 @@ export class Agent {
       }
     }
     for (const slot of this.images.values()) {
-      if (slot.golden || slot.failed || this.stopped) {
+      if (slot.golden || slot.failed || this.isStopped) {
         continue;
       }
       const name = sim.goldenImageName(slot.image.id, base.model, base.os);
@@ -316,14 +315,14 @@ export class Agent {
 
   private async fill(): Promise<void> {
     void this.retireGoldens();
-    if (this.filling || this.stopped || !this.golden) {
+    if (this.isFilling || this.isStopped || !this.golden) {
       return;
     }
-    this.filling = true;
+    this.isFilling = true;
     try {
       for (;;) {
         const all = [...this.devices.values()];
-        if (all.length >= this.maxDevices || this.stopped) {
+        if (all.length >= this.maxDevices || this.isStopped) {
           break;
         }
         const targets: { image: string | undefined; golden: Golden }[] = [{ image: undefined, golden: this.golden }];
@@ -345,12 +344,12 @@ export class Agent {
           await sim.boot(udid);
           await sim.describe(udid).catch(() => {});
           await sim.screenshot(udid, 'jpeg', 800).catch(() => {});
-          const stale = image !== undefined && this.images.get(image)?.golden !== g.udid;
-          if (this.stopped || stale) {
+          const isStale = image !== undefined && this.images.get(image)?.golden !== g.udid;
+          if (this.isStopped || isStale) {
             this.devices.delete(udid);
             await sim.shutdown(udid).catch(() => {});
             await sim.remove(udid).catch(() => {});
-            if (this.stopped) {
+            if (this.isStopped) {
               break;
             }
             continue;
@@ -366,7 +365,7 @@ export class Agent {
         this.publish();
       }
     } finally {
-      this.filling = false;
+      this.isFilling = false;
     }
   }
 
@@ -393,7 +392,7 @@ export class Agent {
     } else if (m.type === 'stream.stop') {
       this.stopStream(m.leaseId, m.codec);
     } else if (m.type === 'tunnel.start') {
-      if ([...this.devices.values()].some((x) => x.leaseId === m.leaseId)) {
+      if (this.held(m.leaseId)) {
         this.tunnels.start(m.id, m.leaseId, m.ports);
       } else {
         this.respondError(m.id, 'LEASE_NOT_HELD', 'This Mac holds no device for that lease.');
@@ -415,10 +414,14 @@ export class Agent {
     }
   }
 
+  private held(leaseId: string): Device | undefined {
+    return [...this.devices.values()].find((d) => d.leaseId === leaseId);
+  }
+
   private streamOf(leaseId: string): Stream {
     let st = this.streams.get(leaseId);
     if (!st) {
-      st = { jpeg: null, h264: null, wantH264: false };
+      st = { jpeg: null, h264: null, shouldStreamH264: false };
       this.streams.set(leaseId, st);
     }
     return st;
@@ -430,13 +433,13 @@ export class Agent {
       return;
     }
     if (codec === 'h264') {
-      st.wantH264 = false;
+      st.shouldStreamH264 = false;
       if (!this.recordings.has(leaseId)) {
         void st.h264?.then((h) => h.stop()).catch(() => {});
         st.h264 = null;
       }
     } else if (st.jpeg) {
-      st.jpeg.stop = true;
+      st.jpeg.shouldStop = true;
       st.jpeg = null;
     }
   }
@@ -446,27 +449,27 @@ export class Agent {
     const st = this.streams.get(leaseId);
     this.streams.delete(leaseId);
     if (st) {
-      st.wantH264 = false;
+      st.shouldStreamH264 = false;
       if (st.jpeg) {
-        st.jpeg.stop = true;
+        st.jpeg.shouldStop = true;
       }
       await st.h264?.then((h) => h.stop()).catch(() => {});
     }
   }
 
-  private helper(leaseId: string): Promise<sim.ScreenStream> {
+  private screenStream(leaseId: string): Promise<sim.ScreenStream> {
     const st = this.streamOf(leaseId);
     if (st.h264) {
       return st.h264;
     }
-    const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+    const d = this.held(leaseId);
     if (!d) {
       return Promise.reject(new OpError('LEASE_NOT_HELD', 'This Mac holds no device for that lease.'));
     }
     const started = sim.captureStream(
       d.deviceId,
       (data) => {
-        if (st.wantH264) {
+        if (st.shouldStreamH264) {
           this.opts.send({ type: 'stream.frame', leaseId, codec: 'h264', data });
         }
       },
@@ -478,7 +481,7 @@ export class Agent {
         void stream.exited.then((err) => {
           if (st.h264 === started) {
             st.h264 = null;
-            if (err && st.wantH264) {
+            if (err && st.shouldStreamH264) {
               this.h264Failed(leaseId, err);
             }
           }
@@ -494,20 +497,20 @@ export class Agent {
 
   private h264Failed(leaseId: string, message: string): void {
     this.log(`H.264 stream failed, falling back to JPEG: ${message}`);
-    this.streamOf(leaseId).wantH264 = false;
+    this.streamOf(leaseId).shouldStreamH264 = false;
     this.opts.send({ type: 'stream.failed', leaseId, codec: 'h264', message });
   }
 
   private async streamH264(leaseId: string): Promise<void> {
     const st = this.streamOf(leaseId);
-    if (st.wantH264) {
+    if (st.shouldStreamH264) {
       return;
     }
-    st.wantH264 = true;
+    st.shouldStreamH264 = true;
     try {
-      (await this.helper(leaseId)).keyframe();
+      (await this.screenStream(leaseId)).keyframe();
     } catch (err) {
-      this.h264Failed(leaseId, (err as Error).message);
+      this.h264Failed(leaseId, err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -515,13 +518,12 @@ export class Agent {
     if (this.recordings.has(leaseId)) {
       throw new OpError('ALREADY_RECORDING', 'This lease is already being recorded.');
     }
-    // The broker sends paths, which resolve against the address this Mac reached it at.
     for (const url of Object.values(uploads)) {
       if (!/^https?:\/\//.test(this.resolve(url))) {
         throw new OpError('BAD_UPLOAD_URL', 'Upload URLs must be http or https.');
       }
     }
-    const screen = await this.helper(leaseId);
+    const screen = await this.screenStream(leaseId);
     const dir = await mkdtemp(join(tmpdir(), 'devicepool-recording-'));
     screen.record(join(dir, 'video.mp4'));
     this.recordings.set(leaseId, { dir, uploads, log: sim.appLog(d.deviceId, join(dir, 'log.ndjson')), finished: null });
@@ -538,14 +540,14 @@ export class Agent {
 
   private async saveRecording(leaseId: string, rec: Recording): Promise<void> {
     try {
-      const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+      const d = this.held(leaseId);
       if (d) {
         await writeFile(join(rec.dir, 'screenshot.png'), await sim.screenshot(d.deviceId, 'png')).catch(() => {});
       }
       await rec.log.stop();
       const st = this.streams.get(leaseId);
       await (await st?.h264)?.stopRecording();
-      if (st && !st.wantH264) {
+      if (st && !st.shouldStreamH264) {
         await st.h264?.then((h) => h.stop()).catch(() => {});
         st.h264 = null;
       }
@@ -561,7 +563,7 @@ export class Agent {
     this.tunnels.stop(leaseId);
     this.tools.close(leaseId);
     await this.endStreams(leaseId);
-    const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+    const d = this.held(leaseId);
     if (d) {
       await this.wipe(d);
     }
@@ -572,16 +574,16 @@ export class Agent {
     if (st.jpeg) {
       return;
     }
-    const state = { stop: false };
+    const state = { shouldStop: false };
     st.jpeg = state;
-    while (!state.stop) {
-      const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+    while (!state.shouldStop) {
+      const d = this.held(leaseId);
       if (!d) {
         break;
       }
       try {
         const jpeg = await sim.screenshot(d.deviceId, 'jpeg', 800, 60);
-        if (!state.stop) {
+        if (!state.shouldStop) {
           this.opts.send({ type: 'stream.frame', leaseId, codec: 'jpeg', data: jpeg });
         }
       } catch {
@@ -591,7 +593,7 @@ export class Agent {
   }
 
   private async makeRoom(): Promise<void> {
-    if (this.filling || this.stopped) {
+    if (this.isFilling || this.isStopped) {
       return;
     }
     const spare = spareDevice([...this.devices.values()], this.wanted, this.maxDevices, (image) => image === undefined || Boolean(this.images.get(image)?.golden));
@@ -620,7 +622,7 @@ export class Agent {
   }
 
   private async op(id: number, leaseId: string, body: Op): Promise<void> {
-    const d = [...this.devices.values()].find((x) => x.leaseId === leaseId);
+    const d = this.held(leaseId);
     if (!d) {
       this.respondError(id, 'LEASE_NOT_HELD', 'This Mac holds no device for that lease.');
       return;
@@ -763,17 +765,10 @@ export class Agent {
     });
   }
 
-  private async screen(d: Device): Promise<Frame> {
-    if (!d.screen) {
-      d.screen = (await sim.describe(d.deviceId)).screen;
-    }
-    return d.screen;
-  }
-
   private async toPoints(d: Device, p: [number, number]): Promise<[number, number]> {
     onScreen(p);
-    const s = await this.screen(d);
-    return [Math.round(p[0] * s.width), Math.round(p[1] * s.height)];
+    d.screen ??= (await sim.describe(d.deviceId)).screen;
+    return [Math.round(p[0] * d.screen.width), Math.round(p[1] * d.screen.height)];
   }
 
   private async act(d: Device, a: Action): Promise<void> {
@@ -809,8 +804,8 @@ export class Agent {
       case 'waitFor': {
         const until = Date.now() + (a.timeoutMs ?? 5000);
         for (;;) {
-          const found = findAll((await sim.describe(udid)).nodes, a.element).length > 0;
-          if (found !== Boolean(a.gone)) {
+          const isFound = findAll((await sim.describe(udid)).nodes, a.element).length > 0;
+          if (isFound !== Boolean(a.gone)) {
             return;
           }
           if (Date.now() > until) {
@@ -896,7 +891,7 @@ export async function download(url: string, sha256: string, path: string): Promi
     Readable.fromWeb(res.body as WebReadableStream),
     async function* (source) {
       for await (const chunk of source) {
-        hash.update(chunk as Buffer);
+        hash.update(chunk);
         yield chunk;
       }
     },
@@ -907,7 +902,7 @@ export async function download(url: string, sha256: string, path: string): Promi
   }
 }
 
-export async function upload(part: 'video' | 'log' | 'screenshot', url: string, path: string): Promise<void> {
+async function upload(part: 'video' | 'log' | 'screenshot', url: string, path: string): Promise<void> {
   const size = await stat(path).then((s) => s.size, () => null);
   if (size === null) {
     if (part === 'video') {

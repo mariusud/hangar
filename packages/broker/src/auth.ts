@@ -1,9 +1,12 @@
 
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
 import type { Account, Db, TokenLimitRow, TokenRow } from './db.ts';
 
-const scryptAsync = promisify(scrypt);
+function scryptAsync(password: string, salt: Buffer, keyLength: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, keyLength, (err, key) => (err ? reject(err) : resolve(key)));
+  });
+}
 
 export type Principal = {
   accountId: string;
@@ -11,7 +14,6 @@ export type Principal = {
   role: Account['role'];
   scopes: string[];
   leaseId?: string;
-  // The bearer token, when there is one, and what it allows its leases.
   token?: { hash: string } & TokenLimitRow;
 };
 
@@ -52,7 +54,7 @@ export function lookupToken(db: Db, value: string, now: number): TokenRow | null
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = (await scryptAsync(password, salt, 32)) as Buffer;
+  const key = await scryptAsync(password, salt, 32);
   return `scrypt:${salt.toString('base64')}:${key.toString('base64')}`;
 }
 
@@ -62,7 +64,7 @@ export async function checkPassword(password: string, stored: string): Promise<b
     return false;
   }
   const expected = Buffer.from(key, 'base64');
-  const actual = (await scryptAsync(password, Buffer.from(salt, 'base64'), expected.length)) as Buffer;
+  const actual = await scryptAsync(password, Buffer.from(salt, 'base64'), expected.length);
   return timingSafeEqual(actual, expected);
 }
 
@@ -114,7 +116,6 @@ export function authenticate(
       return null;
     }
     const account = db.getAccount(token.accountId);
-    // A token acts as an operator only when it was made for that, so an agent's or CI's token stays a member's.
     const role = account?.role === 'operator' && token.scopes.includes('operator') ? 'operator' : 'member';
     const limits = db.tokenLimits(token.hash) ?? { agent: false, idleMs: null, maxMs: null, graceMs: null };
     if (!account) {
@@ -130,19 +131,16 @@ export function authenticate(
   if (session) {
     const accountId = db.sessionAccount(sha256(session), now);
     const account = accountId ? db.getAccount(accountId) : null;
-    // Uploading an app runs code on the host, so in the console only operators may do it.
     const scopes = account?.role === 'operator' ? ['install:upload'] : [];
     return account ? { accountId: account.id, name: account.name, role: account.role, scopes } : null;
   }
   return null;
 }
 
-// install:upload allows any build name; install:upload:<prefix> only names that start with the prefix.
 export function canUpload(p: Principal, name: string): boolean {
   return p.scopes.some((s) => s === 'install:upload' || (s.startsWith('install:upload:') && name.startsWith(s.slice('install:upload:'.length))));
 }
 
-// A lease token reaches only its own lease's routes, and cannot make more tokens.
 export function leaseTokenAllows(p: Principal, path: string): boolean {
   if (!p.leaseId) {
     return true;

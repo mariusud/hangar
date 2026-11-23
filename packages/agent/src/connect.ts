@@ -13,7 +13,7 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
   const log = opts.log ?? console.log;
   const base = opts.url.replace(/\/$/, '');
   let ws: WebSocket | null = null;
-  let stopped = false;
+  let isStopped = false;
   let pause = 1000;
 
   const agent = opts.make((m) => {
@@ -25,7 +25,7 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
   const connect = (): Promise<void> =>
     new Promise((resolve, reject) => {
       const retry = (): void => {
-        if (!stopped) {
+        if (!isStopped) {
           setTimeout(() => void connect().then(resolve, reject), pause);
           pause = Math.min(pause * 2, 30_000);
         }
@@ -63,7 +63,7 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
   return {
     agent,
     stop: async () => {
-      stopped = true;
+      isStopped = true;
       await agent.stop();
       ws?.close();
     },

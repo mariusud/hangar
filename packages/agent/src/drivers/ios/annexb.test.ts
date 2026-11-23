@@ -41,7 +41,6 @@ function escape(rbsp: Buffer): Buffer {
   return Buffer.from(out);
 }
 
-// 1180 x 2556 needs cropping from 1184 x 2560 macroblocks.
 function sps(profile: number): Buffer {
   const w = new BitWriter().u(8, profile).u(8, 0).u(8, 51).ue(0);
   if (profile === 100) {

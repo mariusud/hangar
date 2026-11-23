@@ -5,7 +5,6 @@ export const PROTOCOL_VERSION = 1;
 
 export type Platform = 'ios-simulator' | 'android-emulator' | 'android-device';
 
-/** True for Android emulators and Android phones. */
 export function isAndroid(platform: Platform | undefined): boolean {
   return platform === 'android-emulator' || platform === 'android-device';
 }
@@ -49,13 +48,10 @@ export type LeaseEndReason =
   | 'preempted'
   | 'window_closed';
 
-/** Who a lease limit applies to: a person by account role, or a token made for an agent. */
 export type LimitRole = 'member' | 'operator' | 'agent';
 
-/** How long a lease lasts: ended after `idleMs` without use, `maxMs` after it started, or `ttlMs` after the last renew. */
 export type LeaseLimits = { idleMs: number; maxMs: number; ttlMs: number; graceMs: number };
 
-/** What a token allows its leases; `graceMs` is how long a lease that lost its client is kept from going idle. */
 export type TokenLimits = { agent: boolean; idleMs: number; maxMs: number; graceMs: number };
 
 export type Point = [number, number];
@@ -171,11 +167,9 @@ export type AgentDevice = {
   state: 'ready' | 'busy' | 'wiping' | 'quarantined';
   platform?: Platform;
   image?: string;
-  /** Why the device is not usable, in words an operator can act on. Set on quarantined devices. */
   note?: string;
 };
 
-/** A device's state as the broker sees it: what its host reports, or `held` while a failed run flow keeps it. */
 export type DeviceState = AgentDevice['state'] | 'held';
 
 export type AgentMessage =
@@ -238,5 +232,4 @@ export * from './capture.ts';
 
 export type ImageBuildState = 'building' | 'ready' | 'failed';
 
-/** How a host's build of one image declaration went. `image` is the image name, `id` its declaration id. */
 export type ImagesStatus = { type: 'images.status'; image: string; id: string; state: ImageBuildState; message?: string };

@@ -1,4 +1,3 @@
-// Builds the npm package in dist/npm. See docs/decisions/0014-a-build-for-the-npm-package.md.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -9,7 +8,6 @@ const run = promisify(execFile);
 const ROOT = join(import.meta.dirname, '..');
 const OUT = join(ROOT, 'dist', 'npm');
 const SCOPE = '@devicepool/';
-/** The workspace packages whose code ships inside the one published package. */
 const BUNDLED = ['protocol', 'broker', 'agent'];
 const ASSETS = ['LICENSE', 'NOTICE', 'README.md', 'hosts/versions.json', 'packages/agent/native/screen.swift'];
 const CONSOLE = join('packages', 'console', 'src');
@@ -28,7 +26,6 @@ async function manifest(name: string): Promise<Manifest> {
   return parsed;
 }
 
-/** The entry file a workspace package exports, as the emitted .js path under dist/npm. */
 function entry(name: string, pkg: Manifest): string {
   if (typeof pkg.exports !== 'string') {
     throw new Error(`packages/${name}/package.json needs "exports" to be one file`);
@@ -36,7 +33,6 @@ function entry(name: string, pkg: Manifest): string {
   return join(OUT, 'packages', name, pkg.exports.replace(/\.ts$/, '.js'));
 }
 
-/** Registry dependencies of every bundled package. Workspace links are left out because their code is in the tarball. */
 function externalDependencies(pkgs: Manifest[]): Record<string, string> {
   const found = new Map<string, string>();
   for (const pkg of pkgs) {
@@ -62,11 +58,6 @@ async function emitted(dir: string): Promise<string[]> {
   return entries.filter((e) => e.isFile() && /\.(js|d\.ts)$/.test(e.name)).map((e) => join(e.parentPath, e.name));
 }
 
-/**
- * Node resolves `@devicepool/protocol` through the workspace's node_modules links, which an installed
- * package does not have. Point those imports at the emitted files instead. tsc rewrites `./x.ts` to
- * `./x.js` in the .js files but not in the .d.ts files, so that is done here too.
- */
 async function relinkImports(entries: Map<string, string>): Promise<void> {
   const workspace = /(\bfrom\s*|\bimport\s*\(?\s*)(['"])@devicepool\/([a-z-]+)\2/g;
   const relativeTs = /(\bfrom\s*|\bimport\s*\(?\s*)(['"])(\.\.?\/[^'"]+)\.ts\2/g;
@@ -97,7 +88,6 @@ async function copyAssets(): Promise<void> {
     await mkdir(dirname(join(OUT, file)), { recursive: true });
     await cp(join(ROOT, file), join(OUT, file));
   }
-  // The console is static files the broker serves as they are. Its tests and editor types stay behind.
   for (const name of await readdir(join(ROOT, CONSOLE))) {
     if (name.endsWith('.ts')) {
       continue;
@@ -136,7 +126,6 @@ async function main(): Promise<void> {
   await copyAssets();
   await chmod(join(OUT, bin), 0o755);
 
-  // The dev manifest is private, runs .ts and links the workspace. The published one runs the emitted .js.
   const { private: _private, bin: _bin, exports: _exports, dependencies: _dependencies, ...shared } = cli;
   const published = {
     ...shared,

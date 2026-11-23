@@ -11,10 +11,8 @@ import { baselinePath, deviceIdFor, saveBaseline, snapshot } from './drivers/and
 const A = '39051FDJH000AB';
 const B = 'R58M12ABCDE';
 
-// An agent whose adb is a set of fake phones. Nothing here starts adb.
 class Bench {
   phones = new Map<string, FakePhone>();
-  /** The device lines of `adb devices -l`. */
   attached: string[] = [];
   sent: AgentMessage[] = [];
   logs: string[] = [];
@@ -62,7 +60,6 @@ class Bench {
     }
   }
 
-  /** The devices in the last hello or inventory the agent sent. */
   devices(): AgentDevice[] {
     for (const m of this.sent.toReversed()) {
       if (m.type === 'hello' || m.type === 'inventory') {
@@ -102,7 +99,6 @@ class Bench {
     assert.equal(done(), true, `waited for ${what}`);
   }
 
-  /** Leases the phone and waits until the agent answered. */
   async lease(serial: string, leaseId: string, id: number): Promise<void> {
     this.agent.receive({ type: 'lease.prepare', id, leaseId, deviceId: deviceIdFor(serial), deadline: Date.now() + 60_000 });
     await this.until(`the answer to lease ${leaseId}`, () => this.response(id) !== undefined);
@@ -159,7 +155,6 @@ test('one phone seen over USB and over the network is one device, and each phone
     assert.equal(new Set(b.devices().map((d) => d.deviceId)).size, 3);
     assert.equal(b.logs.filter((l) => /Skipped 192\.168\.1\.20:5555: .*over USB only/.test(l)).length, 1);
     assert.equal(b.logs.filter((l) => l.includes(`Skipped adb-${A}-x7Kq2B._adb-tls-connect._tcp`)).length, 1);
-    // The reason is logged once, not on every scan.
     await b.scan(2);
     assert.equal(b.logs.filter((l) => l.includes('Skipped')).length, 2);
   }));
@@ -182,7 +177,6 @@ test('a phone that is locked when a lease starts is left untouched, and the leas
     assert.equal(b.device(A)?.state, 'ready');
     assert.deepEqual(await recordFiles(b), []);
 
-    // A listing that find could not finish is refused the same way.
     fake.ceAvailable = '';
     fake.findExit = 1;
     await b.lease(A, 'lease-2', 2);
@@ -191,7 +185,6 @@ test('a phone that is locked when a lease starts is left untouched, and the leas
     assert.deepEqual(fake.changes(), []);
     assert.deepEqual(await recordFiles(b), []);
 
-    // Once it is unlocked the same phone can be leased.
     fake.findExit = 0;
     await b.lease(A, 'lease-3', 3);
     assert.equal(b.response(3)?.ok, true);
@@ -210,7 +203,6 @@ test('a phone whose record on disk is damaged is quarantined with a note, never 
     assert.deepEqual(fake.changes(), []);
     b.agent.receive({ type: 'lease.prepare', id: 1, leaseId: 'lease-1', deviceId: deviceIdFor(A), deadline: 0 });
     assert.equal(b.response(1)?.ok, false);
-    // The damaged record stays for the operator to look at.
     assert.equal((await recordFiles(b)).length, 1);
   }));
 
@@ -261,7 +253,6 @@ test('a phone that comes back while its lease is open is not wiped until the lea
     await b.scan();
     await b.agent.idle();
 
-    // The broker has not ended the lease, so the phone is still the lease's and is named in hello.
     assert.equal(b.device(A)?.state, 'busy');
     assert.deepEqual(b.heldLeases(), ['lease-1']);
     assert.deepEqual(fake.changes(), []);
@@ -309,7 +300,6 @@ test('a lease that ends while the phone is being recorded waits, then wipes agai
 
     assert.equal(b.sent.some((m) => (m.type === 'inventory' || m.type === 'hello') && m.devices.some((d) => d.state === 'quarantined')), false);
     assert.equal(b.device(A)?.state, 'ready');
-    // Waking the phone set stay-awake, and the wipe that followed put it back.
     assert.equal(fake.calls.some((c) => c.join(' ') === 'shell svc power stayon usb'), true);
     assert.equal(fake.settings.get('global/stay_on_while_plugged_in'), '0');
     assert.deepEqual(await recordFiles(b), []);
@@ -371,7 +361,6 @@ test('an app is recorded as used by the lease, on disk, before it is launched', 
     assert.equal(b.response(2)?.ok, true);
     assert.deepEqual(JSON.parse(onDisk), ['com.android.chrome']);
 
-    // When the record cannot be written, the app is not launched.
     await rm(b.dir, { recursive: true });
     await writeFile(b.dir, 'not a folder');
     b.agent.receive({ type: 'op', id: 3, leaseId: 'lease-1', body: { op: 'launch', bundleId: 'com.example.kept' } });
@@ -390,7 +379,6 @@ test('the wipe waits for an operation of the lease that is still running', () =>
     b.onLaunch = () =>
       new Promise<void>((resolve) => {
         finish = (): void => {
-          // The app lands on the phone only now, as an install that was still running would.
           fake.packages.set('com.example.late', '/data/app/~~l==/com.example.late-m==/base.apk');
           resolve();
         };

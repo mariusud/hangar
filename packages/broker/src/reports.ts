@@ -37,8 +37,6 @@ export function openNight(db: Db, p: Principal, booking: string, now = Date.now(
   return night;
 }
 
-// Ends a night and keeps its members. The booking window's end calls this with the booking's own leases and
-// runs; without them the night holds every lease of its team that was active in the window.
 export function closeNight(db: Db, nightId: string, opts: { by?: string | null; leaseIds?: string[]; runIds?: string[]; now?: number } = {}): NightRow {
   const night = db.getNight(nightId);
   if (!night) {
@@ -56,9 +54,6 @@ export function closeNight(db: Db, nightId: string, opts: { by?: string | null; 
   return closed;
 }
 
-// Which leases and runs belong to a night. Leases given at close win; otherwise the team's leases that were
-// active at some point between the night's opening and its close (or `now`). Runs given at close win;
-// otherwise the runs that used one of those leases.
 export function nightMembers(night: NightRow, leases: Lease[], runs: Run[], now: number): { leaseIds: string[]; runIds: string[] } {
   const end = night.closedAt ?? now;
   const leaseIds =
@@ -249,8 +244,6 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-// A booking window ended: close the night someone opened for it, or record one for the window. Its members are
-// the leases made from that booking, and the runs that used them.
 export function closeWindowNight(db: Db, w: WindowClosed): NightRow | null {
   const booking = db.bookings().find((b) => b.id === w.bookingId);
   const open = db.nights({ booking: w.name, state: 'open', teamId: booking?.teamId }, 1)[0];

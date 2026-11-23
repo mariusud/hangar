@@ -12,15 +12,11 @@ import { OpError } from '../packages/agent/src/index.ts';
 import { xcuitest } from '../packages/agent/src/xcuitest.ts';
 
 const run = promisify(execFile);
-const real = Boolean(process.env.DEVICEPOOL_REAL);
+const isReal = Boolean(process.env.DEVICEPOOL_REAL);
 const root = new URL('..', import.meta.url).pathname;
 const fixture = join(root, 'e2e/fixtures/xcuitest');
-// The simulator this test makes and deletes. It is not named like the agent's own devices.
 const simName = process.env.DEVICEPOOL_E2E_SIMULATOR ?? 'xcuitest-e2e';
 
-// A host with one simulator that runs XCUITest ops with the agent's own xcuitest code. It does not record, and
-// it does not wipe the simulator between leases: it only reports it under a new id, as the broker leases a
-// device again only after a wipe.
 function xcuitestHost(broker: Broker, udid: string): void {
   let n = 1;
   let device: AgentDevice = { deviceId: `sim-${n}`, model: 'iPhone 17', os: '26.5', state: 'ready', platform: 'ios-simulator' };
@@ -61,7 +57,7 @@ async function devicepool(url: string, token: string, args: string[]): Promise<{
   );
 }
 
-test('devicepool run xcuitest runs a real UI test target on a simulator, with JUnit for a pass and a failure', { skip: !real && 'set DEVICEPOOL_REAL=1', timeout: 900_000 }, async () => {
+test('devicepool run xcuitest runs a real UI test target on a simulator, with JUnit for a pass and a failure', { skip: !isReal && 'set DEVICEPOOL_REAL=1', timeout: 900_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'devicepool-e2e-xcuitest-'));
   let udid: string | null = null;
   let broker: Broker | null = null;

@@ -5,8 +5,7 @@ import { bytesField } from './hid.ts';
 import type { ScreenStream } from './index.ts';
 import { Mp4Recorder } from './mp4.ts';
 
-// The last NAL unit of a frame is only known to be whole once the next one starts. idb writes a
-// frame in one burst, so a short quiet gap after data also ends it.
+// idb writes a frame in one burst, so a short quiet gap after data ends the last NAL unit.
 const FLUSH_MS = 8;
 
 function varint(n: number): number[] {
@@ -25,7 +24,6 @@ function grpcFrame(body: number[]): Buffer {
   return Buffer.concat([head, Buffer.from(body)]);
 }
 
-/** idb.VideoStreamRequest { start = 1 { fps = 2, format = 3 (H264 = 0), compression_quality = 4, scale_factor = 5 } }. */
 export function startRequest(fps: number, scale = 1): Buffer {
   const double = (n: number, v: number): number[] => {
     const b = Buffer.alloc(8);
@@ -36,10 +34,8 @@ export function startRequest(fps: number, scale = 1): Buffer {
   return grpcFrame([...varint((1 << 3) | 2), ...varint(start.length), ...start]);
 }
 
-/** idb.VideoStreamRequest { stop = 2 {} }. */
 export const STOP_REQUEST = grpcFrame([...varint((2 << 3) | 2), 0]);
 
-/** Splits gRPC length-prefixed messages out of HTTP/2 data chunks. */
 export class GrpcMessages {
   private pending: Buffer = Buffer.alloc(0);
   private onMessage: (m: Buffer) => void;
@@ -59,24 +55,17 @@ export class GrpcMessages {
   }
 }
 
-/** The video bytes in an idb.VideoStreamResponse { payload = 2 { data = 2 } }, empty for log lines. */
 export function videoBytes(message: Buffer): Buffer {
   return bytesField(bytesField(message, 2), 2);
 }
 
-/**
- * idb_companion's H.264 video stream over its gRPC socket, as frame records. idb cannot force a
- * keyframe, so `keyframe()` opens a new stream, which starts with one. `record()` writes the same
- * H.264 to an MP4 from the next keyframe on.
- */
 export async function idbVideoStream(socket: string, onFrame: (record: Buffer) => void, opts: { fps?: number } = {}): Promise<ScreenStream> {
   const session: ClientHttp2Session = connect('http://localhost', { createConnection: () => connectSocket(socket) });
   session.on('error', () => {});
   let stopping = false;
   let current: ClientHttp2Stream | null = null;
   let recorder: Mp4Recorder | null = null;
-  // A new stream starts with a keyframe. Until it sends one, opening yet another stream gains
-  // nothing, and stopping and starting streams in quick succession leaves idb sending no frames.
+  // Restarting idb streams in quick succession leaves it sending no frames.
   let awaitingFirst = true;
   const emit = (record: Buffer): void => {
     awaitingFirst = false;

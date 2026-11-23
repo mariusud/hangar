@@ -10,8 +10,6 @@ import { onWindowClosed } from '../schedule.ts';
 
 type Host = { ends: string[]; ops: { leaseId: string; op: string }[]; devices: () => AgentDevice[] };
 
-// A host whose devices come back with a new id after a wipe. Maestro fails flows named broken, and the first
-// run of a flow named slow waits until its lease ends.
 function fakeHost(broker: Broker, count: number): Host {
   let n = count;
   const waiting = new Map<string, number>();
@@ -246,7 +244,6 @@ test('a run shard on a preempted lease runs again on another device', async () =
     await broker.leases.tick();
     const told = broker.db.getLease(shardLease);
     assert.equal(told?.ending?.reason, 'preempted');
-    // Skip the two minutes.
     if (told) {
       broker.db.updateLease({ ...told, ending: { reason: 'preempted', at: Date.now() } });
     }

@@ -65,7 +65,6 @@ export class Oidc {
     return this.discovery;
   }
 
-  // `next` is a path on this console, never another site.
   async start(redirectUri: string, next: string): Promise<string> {
     const d = await this.discover();
     const state = b64url(randomBytes(24));
@@ -132,8 +131,8 @@ export class Oidc {
       throw new ApiError(401, 'OIDC_TOKEN', 'The provider has no key for this ID token.');
     }
     const key = createPublicKey({ key: jwk, format: 'jwk' });
-    const ok = verify(hash, Buffer.from(`${h}.${pl}`), header.alg === 'ES256' ? { key, dsaEncoding: 'ieee-p1363' } : key, Buffer.from(sig, 'base64url'));
-    if (!ok) {
+    const isValid = verify(hash, Buffer.from(`${h}.${pl}`), header.alg === 'ES256' ? { key, dsaEncoding: 'ieee-p1363' } : key, Buffer.from(sig, 'base64url'));
+    if (!isValid) {
       throw new ApiError(401, 'OIDC_TOKEN', 'The ID token signature does not verify.');
     }
     const claims: Claims = JSON.parse(Buffer.from(pl, 'base64url').toString());

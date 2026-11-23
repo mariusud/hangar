@@ -24,7 +24,6 @@ import { ApiError, type Leases } from './leases/service.ts';
 import { describeOp, type Recordings } from './recordings.ts';
 import type { Store } from './store.ts';
 
-// Reads the device tools for findings and recordings. As a non-holder it does not count as activity on the lease.
 export const RECORDER: Principal = { accountId: 'devicepool-recorder', name: 'Devicepool', role: 'operator', scopes: [] };
 
 export const FINDING_WINDOW_MS = 2 * 60_000;
@@ -59,7 +58,6 @@ export function isSeverity(v: unknown): v is FindingSeverity {
   return FINDING_SEVERITIES.some((s) => s === v);
 }
 
-// The part of a recording a finding points at: the last `windowMs` before `now`, or all of it when shorter.
 export function videoSpan(startedAt: number, now: number, windowMs = FINDING_WINDOW_MS): { fromMs: number; toMs: number } {
   const toMs = Math.max(0, now - startedAt);
   return { fromMs: Math.max(0, toMs - windowMs), toMs };
@@ -153,7 +151,6 @@ export class Findings {
     return row;
   }
 
-  // Leases a fresh device like the finding's for the caller, records it and replays the actions taken before the finding.
   async openAgain(p: Principal, id: string, publicUrl: string, opts: { waitMs?: number } = {}): Promise<OpenAgain> {
     const finding = this.get(p, id);
     const original = this.db.getLease(finding.leaseId);
@@ -390,7 +387,6 @@ function isRequest(v: unknown): v is NetworkEntry {
 
 export const ACTION_LIMIT = 1000;
 const OPEN_AGAIN_WAIT_MS = 5 * 60_000;
-// The longest pause kept between two replayed actions, so animations settle without replaying idle time.
 export const REPLAY_PAUSE_MS = 2000;
 const LOCATE_TRIES = 3;
 const LOCATE_DELAY_MS = 500;
@@ -409,7 +405,6 @@ const NOT_REPLAYED: Partial<Record<Op['op'], string>> = {
   espresso: 'Devicepool does not run tests again. Start a run for that.',
 };
 
-// One action a lease took, kept so a finding can replay it. `at` is when it started, in epoch milliseconds.
 export type RecordedAction = { at: number; failed: string | null } & (
   | { kind: 'action'; action: Action; target: ElementSelector | null }
   | { kind: 'op'; op: ReplayableOp }
@@ -425,7 +420,6 @@ function isReplayable(body: Op): body is ReplayableOp {
   return REPLAYABLE_OPS.some((op) => op === body.op);
 }
 
-// The actions one op took. `screen` is the screen the caller described just before, which names the element under a tapped point.
 export function recordOp(body: Op, at: number, result: unknown, screen: UiNode[] | null): RecordedAction[] {
   if (body.op === 'actions') {
     const results = Array.isArray(result) ? result : [];
@@ -448,7 +442,6 @@ export function recordOp(body: Op, at: number, result: unknown, screen: UiNode[]
   return reason ? [{ at, failed: null, kind: 'skip', what: describeOp(body) ?? body.op, reason }] : [];
 }
 
-// What a replay does with each recorded action, and how long it waits before it.
 export function planReplay(actions: RecordedAction[]): PlannedStep[] {
   return actions.map((action, i) => {
     const prev = actions[i - 1];
@@ -514,7 +507,6 @@ function contains(n: UiNode, p: Point): boolean {
   return p[0] >= f.x && p[0] <= f.x + f.width && p[1] >= f.y && p[1] <= f.y + f.height;
 }
 
-// The smallest named element under a point, as a selector, or null.
 export function targetAt(nodes: UiNode[], p: Point): ElementSelector | null {
   let best: UiNode | null = null;
   for (const n of nodes) {
@@ -538,7 +530,6 @@ export function targetAt(nodes: UiNode[], p: Point): ElementSelector | null {
   return s;
 }
 
-// The element a selector names: exact matches first, then labels that contain it unless `exact`. The one nearest `near` wins a tie.
 export function findNode(nodes: UiNode[], s: ElementSelector, near: Point | null): UiNode | null {
   const same = (a: string | null, b: string | undefined): boolean => b === undefined || a === b;
   const named = nodes.filter((n) => n.role !== 'application' && n.enabled !== false);
@@ -577,7 +568,6 @@ function actionFailure(result: unknown): string | null {
   return Array.isArray(result) ? (result.map(failureOf).find((f) => f !== null) ?? null) : null;
 }
 
-// The elements in a describe result. Anything else gives none.
 export function nodesOf(result: unknown): UiNode[] {
   const nodes = typeof result === 'object' && result !== null && 'nodes' in result && Array.isArray(result.nodes) ? result.nodes : [];
   return nodes.filter(isNode);
@@ -597,7 +587,6 @@ function isRecordedAction(v: unknown): v is RecordedAction {
   return typeof v === 'object' && v !== null && 'at' in v && typeof v.at === 'number' && 'kind' in v && KINDS.some((k) => k === v.kind);
 }
 
-// The actions a finding kept. Findings filed before Devicepool kept them have none.
 export function storedActions(d: FindingData): { actions: RecordedAction[]; truncated: boolean } {
   const actions = 'actions' in d && Array.isArray(d.actions) ? d.actions.filter(isRecordedAction) : [];
   return { actions, truncated: 'actionsTruncated' in d && d.actionsTruncated === true };

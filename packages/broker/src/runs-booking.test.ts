@@ -7,7 +7,6 @@ import { PROTOCOL_VERSION, type AgentDevice, type BrokerMessage } from '@devicep
 import * as auth from './auth.ts';
 import { startBroker, type Broker } from './index.ts';
 
-// A host whose devices come back with a new id after a wipe. Maestro passes every flow.
 function fakeHost(broker: Broker, count: number): void {
   let n = count;
   let devices: AgentDevice[] = Array.from({ length: count }, (_, i) => ({ deviceId: `dev-${i + 1}`, model: 'iPhone 17', os: '26.5', state: 'ready', platform: 'ios-simulator' }));

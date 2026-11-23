@@ -18,10 +18,8 @@ export type FlowResult = {
   seconds?: number;
   message?: string;
   recording?: string;
-  // The first attempt's failure, kept when a retry or a rerun passes.
   firstMessage?: string;
   firstRecording?: string;
-  // The device this flow failed on, kept as it was until `until` (a run started with a hold).
   held?: { until: number };
 };
 
@@ -39,9 +37,7 @@ export type Run = {
   error: string | null;
   createdAt: number;
   endedAt: number | null;
-  // How long a shard's device is held when one of its flows fails; none is wiped as usual.
   holdMs?: number;
-  // The booking whose devices the shards lease, ahead of the booking's agents. Reruns lease as usual.
   booking?: { id: string; name: string };
 };
 
@@ -142,7 +138,6 @@ export type FailureGroup = {
   recording?: string;
 };
 
-// Two failures with the same message apart from numbers, ids and timings are one group.
 export function normalizeMessage(message: string): string {
   return message
     .replace(/\u001b\[[0-9;]*m/g, '')
@@ -188,7 +183,6 @@ export function failureGroups(runs: Run[]): FailureGroup[] {
   return [...groups.values()].map((g) => ({ ...g, tests: g.tests.sort() })).sort((a, b) => b.count - a.count || b.lastAt - a.lastAt);
 }
 
-// Every attempt counts: a flow that passed once and failed once is flaky.
 export function combineStatus(before: FlowResult['status'], passed: boolean): 'passed' | 'failed' | 'flaky' {
   if (before === 'flaky' || (before === 'passed' && !passed) || (before === 'failed' && passed)) {
     return 'flaky';
@@ -246,9 +240,7 @@ export class Runs {
   private recordings: Recordings;
   private internalUrl: () => string;
   private publicUrl: () => string;
-  // Environment values stay in memory only; the database keeps their names.
   private envs = new Map<string, Record<string, string>>();
-  // Who holds each lease a run made, so a cancel can release a rerun started by someone else.
   private holders = new Map<string, auth.Principal>();
 
   constructor(db: Db, leases: Leases, recordings: Recordings, internalUrl: () => string, publicUrl: () => string) {
@@ -317,12 +309,10 @@ export class Runs {
     this.db.saveRunSuite(run.id, stored);
     this.envs.set(run.id, env);
     this.db.audit('run.start', p.accountId, null);
-    // It rejects only when the broker closes during the run; the next start marks the run failed.
     this.coordinate(p, run.id, { ...stored, env }).catch(() => {});
     return run;
   }
 
-  // Runs one flow of a finished run again on a fresh device, recorded, and folds the result into the run.
   rerun(p: auth.Principal, id: string, flow: string, req: RerunRequest = {}): Run {
     const run = this.get(id);
     if (run.state === 'running') {
@@ -359,7 +349,6 @@ export class Runs {
     return next;
   }
 
-  // A run inside a booking needs a caller on the booking's team and an open window.
   private bookingFor(p: auth.Principal, name: string): Booking {
     const booking = findBooking(this.db, name);
     if (this.db.teamOf(p.accountId) !== booking.teamId) {
@@ -428,7 +417,6 @@ export class Runs {
     const holds = this.leases.holds().filter((h) => h.runId === run.id);
     return {
       ...run,
-      // A hold shows only while the device is still held.
       flows: run.flows.map((f) => (f.held && !holds.some((h) => h.flow === f.flow) ? withoutHeld(f) : f)),
       owner: this.db.getAccount(run.accountId)?.name ?? 'unknown',
       counts: { passed: count('passed'), flaky: count('flaky'), failed: count('failed'), pending: count('queued') + count('running') },
@@ -449,7 +437,6 @@ export class Runs {
     return run;
   }
 
-  // The shards update the same run concurrently, so each change reads the latest copy first.
   private update(id: string, change: (run: Run) => Partial<Run>): Run {
     const run = this.db.getRun(id)!;
     return this.save({ ...run, ...change(run) });
@@ -475,7 +462,6 @@ export class Runs {
     this.db.audit('run.end', p.accountId, null);
   }
 
-  // Records what fn does on the lease. The recording is kept even when fn throws.
   private async recorded<T>(p: auth.Principal, leaseId: string, fn: () => Promise<T>): Promise<Recorded<T>> {
     const rec = await this.recordings.start(p, leaseId).catch(() => null);
     let out: { ok: true; value: T } | { ok: false; error: Error };
@@ -484,11 +470,17 @@ export class Runs {
     } catch (err) {
       out = { ok: false, error: errorOf(err) };
     }
-    const recording = rec ? await this.recordings.stop(p, leaseId).then((x) => ({ id: x.id, url: `${this.publicUrl()}/recordings/${x.id}` }), () => undefined) : undefined;
+    let recording: { id: string; url: string } | undefined;
+    if (rec) {
+      try {
+        const stopped = await this.recordings.stop(p, leaseId);
+        recording = { id: stopped.id, url: `${this.publicUrl()}/recordings/${stopped.id}` };
+      } catch {
+      }
+    }
     return recording ? { ...out, recording } : out;
   }
 
-  // A shard whose lease was preempted runs its unfinished flows again on another lease, up to three times.
   private async shard(p: auth.Principal, id: string, shard: number, flows: string[], suite: Suite): Promise<void> {
     let pending = flows;
     for (let attempt = 1; pending.length > 0; attempt++) {
@@ -520,7 +512,6 @@ export class Runs {
         this.setFlow(id, f, { status: 'failed', message });
       }
     };
-    // With a hold, the first flow that failed keeps the device.
     const keep = (): string | null => {
       const current = this.db.getRun(id);
       return current?.holdMs ? (flows.find((f) => current.flows.find((x) => x.flow === f)?.status === 'failed') ?? null) : null;
@@ -529,7 +520,6 @@ export class Runs {
       for (const f of flows) {
         this.setFlow(id, f, { status: 'running', attempts: 1 });
       }
-      // The first pass is one recording for the shard, kept only when a flow in it fails.
       const first = await this.recorded(p, leaseId, () => exec(flows));
       const firstRecording = first.recording?.url;
       if (!first.ok) {
@@ -543,11 +533,11 @@ export class Runs {
       }
       const failedFirst = first.value.failed;
       for (const f of flows) {
-        const failed = failedFirst.includes(f);
+        const hasFailed = failedFirst.includes(f);
         const seconds = first.value.seconds.get(f);
         this.setFlow(id, f, {
-          status: failed ? 'failed' : 'passed',
-          ...(failed ? { message: first.value.message, firstMessage: first.value.message, ...(firstRecording ? { firstRecording } : {}) } : {}),
+          status: hasFailed ? 'failed' : 'passed',
+          ...(hasFailed ? { message: first.value.message, firstMessage: first.value.message, ...(firstRecording ? { firstRecording } : {}) } : {}),
           ...(seconds !== undefined ? { seconds } : {}),
         });
       }
@@ -562,10 +552,10 @@ export class Runs {
           if (this.interrupted(leaseId)) {
             return;
           }
-          const ok = r.ok && r.value.failed.length === 0;
+          const isPassed = r.ok && r.value.failed.length === 0;
           const message = r.ok ? r.value.message : r.error.message;
-          this.setFlow(id, f, { status: ok ? 'flaky' : 'failed', message: ok ? undefined : message, ...(r.recording ? { recording: r.recording.url } : {}) });
-          if (ok) {
+          this.setFlow(id, f, { status: isPassed ? 'flaky' : 'failed', message: isPassed ? undefined : message, ...(r.recording ? { recording: r.recording.url } : {}) });
+          if (isPassed) {
             break;
           }
         }
@@ -587,7 +577,6 @@ export class Runs {
     } finally {
       const outcome = out.result;
       this.update(id, (r) => {
-        // A rerun that ends without a result, such as a cancelled one, leaves the flow as it was.
         const flows = r.flows.map((f) => (f.flow === flow ? (outcome ? rerunResult(before, outcome) : before) : f));
         return r.state === 'running' ? { flows, state: settledState(flows, previous), endedAt: Date.now() } : { flows };
       });
@@ -595,10 +584,8 @@ export class Runs {
     }
   }
 
-  // Runs fn on a fresh lease and returns the lease id. `keep` names a failed flow whose device stays held.
   private async withLease(p: auth.Principal, id: string, via: string, suite: Suite, fail: (message: string) => void, opts: { keep?: () => string | null; booked?: boolean }, fn: (leaseId: string, exec: Exec) => Promise<void>): Promise<string> {
     const run = this.db.getRun(id)!;
-    // Only a run's own shards lease inside its booking; a rerun later leases like any other request.
     const bookingId = opts.booked && run.booking ? run.booking.id : undefined;
     const lease = this.leases.create(p, run.class, { via, shard: true, ...(bookingId ? { bookingId } : {}) });
     this.holders.set(lease.id, p);
@@ -648,13 +635,11 @@ export class Runs {
     }
   }
 
-  /** Leases the device a failed flow left held, for a person on the run's team. */
   holdLease(p: auth.Principal, id: string, flow: string): ReturnType<Leases['leaseHeld']> {
     this.get(id);
     return this.leases.leaseHeld(p, id, flow);
   }
 
-  /** Lets the held device of a flow go: it is wiped and goes back to the pool. */
   releaseHold(p: auth.Principal, id: string, flow: string): Run {
     this.leases.releaseHold(p, id, flow);
     return this.update(id, (r) => ({ flows: r.flows.map((f) => (f.flow === flow ? withoutHeld(f) : f)) }));
@@ -668,7 +653,6 @@ export class Runs {
       await this.leases.op(p, leaseId, { op: 'install', artifactUrl: artifactUrl(), sha256 });
       return async (only) => {
         const r = (await this.leases.op(p, leaseId, { op: 'maestro', archive, flows: only, env })).result as MaestroResult;
-        // Without a report Maestro failed before running flows; count them all as failed.
         const failed = failedCases(r.junit);
         const times = caseSeconds(r.junit);
         const seconds = new Map(only.flatMap((f) => (times.has(flowName(f)) ? [[f, times.get(flowName(f)) ?? 0]] : [])));
@@ -716,7 +700,6 @@ export class Runs {
   }
 }
 
-// The flow after a rerun: every attempt counts toward its status, and the first failure is kept.
 export function rerunResult(before: FlowResult, outcome: { passed: boolean; message?: string; recording?: string }): FlowResult {
   const next: FlowResult = { ...before, status: combineStatus(before.status, outcome.passed), attempts: before.attempts + 1 };
   if (outcome.passed) {

@@ -10,8 +10,6 @@ import { decodeTimes, HEADER_SIZE, Mp4Recorder, parseRecord, sampleBytes, TIMESC
 
 const run = promisify(execFile);
 
-// 29 frames of idb_companion's video_stream (High profile, 300x654, one IDR then B slices),
-// captured from a Settings launch on an iOS 26.5 simulator at scale 0.25.
 const SAMPLE = new URL('./testdata/idb-300x654.h264', import.meta.url);
 
 type Box = { type: string; start: number; end: number; body: Buffer };
@@ -47,7 +45,6 @@ function find(data: Buffer, path: string[]): Box {
     if (i === path.length - 1) {
       break;
     }
-    // stsd holds its entries after a 4-byte version/flags and a 4-byte count.
     const skip = type === 'stsd' ? 8 : type === 'avc1' ? 78 : 0;
     list = boxes(found.body, skip);
   }

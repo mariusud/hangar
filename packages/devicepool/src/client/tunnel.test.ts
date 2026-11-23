@@ -11,7 +11,12 @@ import { Devicepool } from './index.ts';
 
 function echo(tag: string): Promise<{ server: Server; port: number }> {
   const server = createServer((s) => s.on('data', (d) => s.write(`${tag}:${d.toString()}`)));
-  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, port: (server.address() as { port: number }).port })));
+  return new Promise((r) =>
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      r({ server, port: typeof address === 'object' && address ? address.port : 0 });
+    }),
+  );
 }
 
 function ask(port: number, text: string): Promise<string> {

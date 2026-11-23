@@ -62,7 +62,6 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   hosts.onHello = (held, link) => {
     for (const leaseId of held) {
       const lease = db.getLease(leaseId);
-      // A held device sits on its run lease, which has ended; the hold decides when it is wiped.
       const isHeld = db.holds().some((h) => h.hostLeaseId === leaseId);
       if (!isHeld && (!lease || lease.state === 'ended')) {
         link.send({ type: 'lease.end', leaseId });

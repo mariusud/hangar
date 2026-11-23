@@ -18,8 +18,6 @@ route('GET', '/v1/images', (req, res, ctx) => {
   );
 });
 
-// A new build of the image's app. Hosts build a new golden device; leases on the old one keep
-// running, and new leases get the new build once it is ready.
 route('POST', '/v1/images/:name/refresh', async (req, res, ctx) => {
   const p = operator(req, ctx);
   const name = req.params.name ?? '';
@@ -123,7 +121,6 @@ route('DELETE', '/v1/images/:name', (req, res, ctx) => {
   res.writeHead(204).end();
 });
 
-// Values for the names a sign-in flow reads. Only names and times ever come back.
 route('GET', '/v1/image-secrets', (req, res, ctx) => {
   operator(req, ctx);
   json(res, 200, imageSecretList(ctx.db));

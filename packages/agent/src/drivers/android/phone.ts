@@ -3,15 +3,11 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { checkPackage, DriverError, parseScreenSize, shellQuote, type Adb } from './index.ts';
 
-// A phone cannot be deleted and cloned like an emulator, so its wipe undoes what a lease did
-// and then reads the phone back. Decision 0015 says what this covers and what it does not.
-
 export type Transport = 'usb' | 'tcp' | 'mdns';
 export type Sighting = { serial: string; state: string; model: string | null; transport: Transport; usb: string | null };
 
 const STATES = ['device', 'unauthorized', 'offline', 'no permissions', 'authorizing', 'connecting', 'recovery', 'sideload', 'bootloader', 'rescue', 'host'];
 
-/** How adb reaches a serial. A phone on Wi-Fi is listed as `host:port` or under its mDNS name, next to its USB serial. */
 export function transportOf(serial: string): Transport {
   if (serial.startsWith('adb-') || serial.includes('._adb')) {
     return 'mdns';
@@ -22,7 +18,6 @@ export function transportOf(serial: string): Transport {
   return 'usb';
 }
 
-/** The phones in `adb devices -l`: every serial that is not an emulator's. */
 export function parseDevices(out: string): Sighting[] {
   const seen: Sighting[] = [];
   for (const line of out.split('\n')) {
@@ -44,7 +39,6 @@ export function parseDevices(out: string): Sighting[] {
   return seen;
 }
 
-/** What to do about a phone adb lists but cannot use, or null while adb is still connecting to it. */
 export function unusableReason(state: string): string | null {
   if (state === 'authorizing' || state === 'connecting') {
     return null;
@@ -69,21 +63,13 @@ function skippedReason(s: Sighting): string {
 export type PhoneChanges = {
   arrived: string[];
   left: string[];
-  /** Phones on USB that cannot be used, with what to do. The key is the serial, or a name of its own for a phone whose serial adb cannot read. */
   unusable: Map<string, string>;
-  /** Serials that are not USB, with why they are not offered. */
   skipped: Map<string, string>;
-  /** How many scans in a row each known phone has been missing. Pass it to the next call. */
   misses: Map<string, number>;
 };
 
-// A cable that is nudged, or adb restarting, takes a phone out of `adb devices` for a scan or two.
 export const MISSES_BEFORE_LEFT = 3;
 
-/**
- * Compares the phones the agent knows with what adb lists now. Only USB serials count.
- * A known phone has left when it was missing, or not in state `device`, for three scans in a row.
- */
 export function phoneChanges(known: Iterable<string>, seen: Sighting[], misses: ReadonlyMap<string, number> = new Map()): PhoneChanges {
   const knownSet = new Set(known);
   const usable = new Set<string>();
@@ -98,7 +84,6 @@ export function phoneChanges(known: Iterable<string>, seen: Sighting[], misses: 
     if (s.transport !== 'usb') {
       skipped.set(s.serial, skippedReason(s));
     } else if (/^\?+$/.test(s.serial)) {
-      // adb prints question marks for every phone it may not open, so the serial does not tell them apart.
       unnamed += 1;
       unusable.set(`no-serial ${s.usb ?? unnamed}`, unusableReason(s.state) ?? unusableReason('no permissions') ?? '');
     } else if ((times.get(s.serial) ?? 0) > 1) {
@@ -128,7 +113,6 @@ export function phoneChanges(known: Iterable<string>, seen: Sighting[], misses: 
   return { arrived: [...usable].filter((s) => !knownSet.has(s)), left, unusable, skipped, misses: next };
 }
 
-/** A device id that stays the same when the agent restarts and does not show the serial. */
 export function deviceIdFor(serial: string): string {
   return `phone-${createHash('sha256').update(serial).digest('hex').slice(0, 12)}`;
 }
@@ -139,21 +123,14 @@ export async function identify(adb: Adb): Promise<{ model: string; os: string; s
 }
 
 export type PhoneState = {
-  /** Third-party package name to the path of its APK, which changes whenever the package is installed again. */
   packages: Record<string, string>;
-  /** Every package name on the phone, system apps included. The wipe never clears the data of one of these. */
   installed: string[];
-  /** Everything under shared storage and /data/local/tmp, apart from /sdcard/Android. */
   files: string[];
   settings: Record<string, string>;
-  /** `adb reverse` mappings, as "device-spec host-spec". */
   reverses: string[];
-  /** `adb forward` mappings of this phone, as "host-spec device-spec". */
   forwards: string[];
 };
 
-// Settings a lease can change through Devicepool: orientation, appearance, stay-awake at lease start,
-// and the animation scales that test runners turn off.
 const SETTINGS: [namespace: string, key: string][] = [
   ['global', 'window_animation_scale'],
   ['global', 'transition_animation_scale'],
@@ -164,7 +141,6 @@ const SETTINGS: [namespace: string, key: string][] = [
 ];
 const NIGHT = 'uimode/night';
 
-/** Keys in a record of a phone that this code does not manage. Their names never reach adb. */
 export function unknownSettings(state: PhoneState): string[] {
   return Object.keys(state.settings).filter((key) => key !== NIGHT && !SETTINGS.some(([namespace, name]) => `${namespace}/${name}` === key));
 }
@@ -174,7 +150,6 @@ const FILE_ROOTS = [SHARED, '/data/local/tmp/'];
 // App-private folders under /sdcard/Android go away with their package and cannot all be read by adb.
 const SKIPPED = '/sdcard/Android';
 const EXIT_MARK = 'devicepool-find-exit=';
-// Names end in NUL, because a file name may hold a newline or end in a space. find's own exit status is
 // printed last: without it, a listing cut short by a locked or unmounted storage looks like a phone with few files.
 // Some phones join a root that ends in a slash to a name with two slashes, so the skipped folder is matched both ways.
 export const FIND = `find ${FILE_ROOTS.join(' ')} \\( -path ${SKIPPED} -o -path /sdcard//Android \\) -prune -print0 -o -print0 2>/dev/null; printf '${EXIT_MARK}%s' "$?"`;
@@ -195,13 +170,11 @@ export function parsePackageNames(out: string): string[] {
   return out.split('\n').map((line) => line.trim().replace(/^package:/, '')).filter((name) => name !== '').sort();
 }
 
-// A name is never trimmed or cut. Only the slashes find adds between a root and a name are folded.
 function asPath(record: string): string {
   const path = record.replace(/\/{2,}/g, '/');
   return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
 }
 
-/** The paths the wipe looks after, from the records of a NUL-separated listing. */
 export function parseFiles(records: string[]): string[] {
   const files = new Set<string>();
   for (const record of records) {
@@ -213,7 +186,6 @@ export function parseFiles(records: string[]): string[] {
   return [...files].sort();
 }
 
-/** `exit` is find's exit status, or null when the listing ended before it was printed. `shared` counts the entries directly in /sdcard. */
 export type Listing = { files: string[]; exit: number | null; shared: number };
 
 export function parseListing(out: string): Listing {
@@ -226,11 +198,6 @@ export function parseListing(out: string): Listing {
 
 const UNLOCK = 'Unlock the phone once after a reboot, then lease it again.';
 
-/**
- * Why a listing may not be used as the record of a phone, or null when it may.
- * `ceAvailable` is the property `sys.user.0.ce_available`. Some phones do not set it, so an empty value is
- * accepted when the listing itself shows that shared storage is there.
- */
 export function storageProblem(ceAvailable: string, listing: Listing): string | null {
   if (ceAvailable.trim() === 'false') {
     return `The phone's storage is locked, so its files cannot be listed. ${UNLOCK}`;
@@ -251,7 +218,6 @@ function lines(out: string): string[][] {
   return out.split('\n').map((l) => l.trim().split(/\s+/)).filter((t) => t.length >= 3);
 }
 
-/** Reads the phone. Throws, and changes nothing, when the phone's files cannot be listed in full. */
 export async function snapshot(adb: Adb): Promise<PhoneState> {
   const ceAvailable = await adb.run('shell', 'getprop', 'sys.user.0.ce_available');
   const listing = parseListing(await adb.run('shell', FIND));
@@ -278,7 +244,6 @@ export async function snapshot(adb: Adb): Promise<PhoneState> {
   };
 }
 
-/** Wakes the phone for a lease and keeps its screen on while it is plugged in. The wipe puts the setting back. */
 export async function wake(adb: Adb): Promise<void> {
   await adb.run('shell', 'input', 'keyevent', '224');
   await adb.run('shell', 'svc', 'power', 'stayon', 'usb');
@@ -295,8 +260,6 @@ export type WipeStep =
   | { do: 'setting'; key: string; value: string }
   | { do: 'home' };
 
-// A control character, or the mark left where a name was not UTF-8, means the name on the phone may not be
-// the string held here. Such a name is never handed to rm.
 function isUnsafeName(path: string): boolean {
   return /[\u0000-\u001f\u007f\ufffd]/.test(path);
 }
@@ -310,7 +273,6 @@ function removable(path: string): boolean {
   );
 }
 
-/** The steps that take a phone from `current` back to `baseline`. `touched` are packages the lease installed or launched through Devicepool. */
 export function planWipe(baseline: PhoneState, current: PhoneState, touched: Iterable<string>): WipeStep[] {
   const steps: WipeStep[] = [];
   for (const spec of current.forwards.filter((f) => !baseline.forwards.includes(f))) {
@@ -323,8 +285,6 @@ export function planWipe(baseline: PhoneState, current: PhoneState, touched: Ite
   for (const pkg of added) {
     steps.push({ do: 'stop', pkg }, { do: 'uninstall', pkg });
   }
-  // The data of an app that was on the phone before the lease belongs to the phone's owner and is never cleared.
-  // What is left to clear is a package that is new, cannot be uninstalled above, and is still there.
   const owned = new Set([...Object.keys(baseline.packages), ...baseline.installed]);
   for (const pkg of new Set(touched)) {
     if (!owned.has(pkg) && !added.includes(pkg) && current.installed.includes(pkg)) {
@@ -387,7 +347,6 @@ async function apply(adb: Adb, step: WipeStep): Promise<void> {
         await adb.run('shell', 'cmd', 'uimode', 'night', step.value);
         return;
       }
-      // The namespace and key sent to the phone are this file's own constants, never text from the record on disk.
       const known = SETTINGS.find(([namespace, key]) => `${namespace}/${key}` === step.key);
       if (!known) {
         throw new DriverError('BAD_SETTING', `${JSON.stringify(step.key)} is not a setting Devicepool manages.`);
@@ -407,7 +366,6 @@ async function apply(adb: Adb, step: WipeStep): Promise<void> {
   }
 }
 
-/** What still differs from the baseline, as sentences for the operator. Empty means the phone matches. */
 export function differences(baseline: PhoneState, after: PhoneState): string[] {
   const found: string[] = [];
   for (const [pkg, path] of Object.entries(baseline.packages)) {
@@ -448,15 +406,9 @@ export function differences(baseline: PhoneState, after: PhoneState): string[] {
 
 export type WipeResult = { ok: boolean; problems: string[] };
 
-/**
- * Undoes a lease on a phone, then reads the phone back and compares it with the baseline.
- * A step that fails does not stop the wipe; the read-back decides. A failed `pm clear` counts on its own,
- * because app data cannot be read back without root.
- */
 export async function wipe(adb: Adb, baseline: PhoneState, touched: Iterable<string>): Promise<WipeResult> {
   const unknown = unknownSettings(baseline);
   if (unknown.length) {
-    // The record does not look like one this code wrote, so nothing in it is acted on.
     return { ok: false, problems: [`the record of the phone before the lease names settings Devicepool does not manage (${unknown.map((k) => JSON.stringify(k)).join(', ')}), so nothing was undone`] };
   }
   const problems: string[] = [];
@@ -493,11 +445,8 @@ function isPhoneState(v: unknown): v is PhoneState {
   );
 }
 
-// The baseline of an open lease is kept on disk, so a phone whose lease outlived the agent is
-// still wiped against it when the agent sees the phone again.
 export type Stored =
   | { status: 'none' }
-  /** A record is there and cannot be used. The phone may hold a lease's leftovers, so it must not become `ready`. */
   | { status: 'invalid'; reason: string }
   | { status: 'ok'; baseline: PhoneState; touched: string[] };
 
@@ -509,7 +458,6 @@ function touchedPath(dir: string, deviceId: string): string {
   return join(dir, `${deviceId}.touched.json`);
 }
 
-/** Replaces a file in one step, so a crash leaves the old content or the new, never half of either. */
 export async function writeAtomic(path: string, data: string): Promise<void> {
   const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
   try {

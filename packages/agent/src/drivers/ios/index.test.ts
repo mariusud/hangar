@@ -52,6 +52,5 @@ test('real simulator: golden, clone, boot, drive, delete', { skip: !process.env.
 });
 
 test('the companion socket path fits in a unix socket address', () => {
-  // 36 characters is a simulator UDID. macOS allows 103 bytes.
   assert.ok(Buffer.byteLength(`${sim.SOCKET_DIR}/${'0'.repeat(36)}.sock`) <= 103);
 });

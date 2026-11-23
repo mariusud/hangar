@@ -6,7 +6,6 @@ import * as auth from './auth.ts';
 import type { Db, ImageSpec } from './db.ts';
 import { ApiError } from './leases/service.ts';
 
-// follow: an upload of a build named like one of the image's apps refreshes the image.
 export type ImageSetupSpec = { grants?: PrivacyService[]; signIn?: { flow: string; env: string[] }; follow?: boolean };
 
 export const MAX_FLOW_BYTES = 64 * 1024;
@@ -20,7 +19,6 @@ function isPrivacyService(s: string): s is PrivacyService {
   return PRIVACY_SERVICES.some((p) => p === s);
 }
 
-// Images declared before setups existed keep their id, so hosts do not rebuild them.
 export function imageId(spec: ImageSpec, setup: ImageSetupSpec = {}): string {
   const parts: unknown[] = [spec.name.toLowerCase(), spec.apps, spec.locale ?? null, spec.appearance ?? null];
   if (setup.grants?.length || setup.signIn) {
@@ -36,7 +34,6 @@ export function isEnvName(name: string): boolean {
   return ENV_NAME.test(name);
 }
 
-// Checks a declaration from the API or the database. Grants and env names come back sorted and unique.
 export function parseImageSetup(input: { grants?: unknown; signIn?: unknown; follow?: unknown }): ImageSetupSpec {
   const setup: ImageSetupSpec = {};
   if (input.follow !== undefined && input.follow !== null && typeof input.follow !== 'boolean') {
@@ -101,7 +98,6 @@ export function saveImageSetup(db: Db, name: string, setup: ImageSetupSpec): voi
   db.saveImageSetup(name, setup.grants || setup.signIn || setup.follow ? JSON.stringify(setup) : null);
 }
 
-// What the API shows: the flow by its hash and the names it reads, never secret values.
 type ImageView = ImageSpec & { id: string; grants?: PrivacyService[]; signIn?: { sha256: string; env: string[] }; follow?: boolean };
 
 export function imageView(spec: ImageSpec, setup: ImageSetupSpec): ImageView {
@@ -118,7 +114,6 @@ export function imageView(spec: ImageSpec, setup: ImageSetupSpec): ImageView {
   return view;
 }
 
-// Each link is good for one download within an hour, enough for a host building every image after it connects.
 export function imagesMessage(db: Db, internalUrl: string): BrokerMessage {
   const images: DeviceImage[] = db.images().map((spec) => {
     const setup = loadImageSetup(db, spec.name);
@@ -152,8 +147,6 @@ export function imagesMessage(db: Db, internalUrl: string): BrokerMessage {
 
 type Build = { sha256: string; name: string };
 
-// Each new build takes the place of the image's app with the same build name. An image with one
-// app takes a single new build whatever its name.
 export function refreshApps(current: Build[], builds: Build[]): string[] {
   if (!builds.length) {
     throw new ApiError(400, 'NO_BUILD', 'Send the new build as {"apps": ["App.app"]}, by build name or sha256.', 'Upload it first with POST /v1/builds.');
@@ -179,8 +172,6 @@ export type ImageStatus = { state: ImageBuildState; message?: string };
 
 type HostView = { name: string; connected: boolean; offers: { model: string; os: string; platform?: Platform; image?: string }[]; images?: ReadonlyMap<string, ImageStatus> };
 
-// A host offers an image once the golden for its current declaration (id) is built. Until then it
-// is building, failed with the host's message, or pending while the host has not said.
 export function imageHosts(name: string, hosts: HostView[], id?: string): { state: 'ready' | 'pending' | 'failed' | 'no-hosts'; hosts: ImageHostState[] } {
   const ios = hosts.filter((h) => h.connected && h.offers.some((o) => (o.platform ?? 'ios-simulator') === 'ios-simulator'));
   const out: ImageHostState[] = ios.map((h) => {
@@ -202,7 +193,6 @@ export function imageHosts(name: string, hosts: HostView[], id?: string): { stat
   return { state: out.every((h) => h.state === 'failed') ? 'failed' : 'pending', hosts: out };
 }
 
-// A lease on an image that failed on every connected Mac would wait forever, so it is refused.
 export function imageFailure(db: Db, hosts: HostView[], name: string): ApiError | null {
   const spec = db.images().find((i) => i.name.toLowerCase() === name.toLowerCase());
   if (!spec) {
@@ -225,7 +215,6 @@ export function imageBuilds(db: Db, spec: ImageSpec): Build[] {
   return spec.apps.map((sha256) => ({ sha256, name: db.getBuild(sha256)?.name ?? sha256.slice(0, 12) }));
 }
 
-// An upload refreshes each image that follows its builds and has an app built under the same name.
 export function followUpload(db: Db, build: Build): string[] {
   const refreshed: string[] = [];
   for (const spec of db.images()) {
@@ -242,8 +231,6 @@ export function followUpload(db: Db, build: Build): string[] {
   return refreshed;
 }
 
-// Secret values are stored encrypted with AES-256-GCM. The key is a file next to the database,
-// made on first use and readable only by the broker's user. Each value is bound to its name.
 const SEALED = 'aes-256-gcm:';
 const secretKeys = new WeakMap<Db, Buffer>();
 
@@ -284,7 +271,6 @@ export function sealSecret(key: Buffer, name: string, value: string): string {
   return SEALED + Buffer.concat([iv, cipher.getAuthTag(), data]).toString('base64url');
 }
 
-// Null when the value was sealed with another key or for another name.
 export function openSecret(key: Buffer, name: string, sealed: string): string | null {
   if (!sealed.startsWith(SEALED)) {
     return null;
@@ -314,8 +300,6 @@ function sealPlaintext(db: Db, key: Buffer): void {
   }
 }
 
-// Makes the key if there is none and encrypts any value stored before encryption existed.
-// The broker calls it on start; every other secret read or write does it too.
 export function sealStoredSecrets(db: Db): void {
   secretKey(db);
 }
@@ -336,7 +320,6 @@ export function imageSecretValues(db: Db, names: string[]): Record<string, strin
   return values;
 }
 
-// Names and times only. unreadable marks a value the key cannot open, for example after the key file was lost.
 export function imageSecretList(db: Db): { name: string; updatedAt: number; unreadable?: true }[] {
   const secrets = db.imageSecrets();
   const readable = imageSecretValues(db, secrets.map((s) => s.name));

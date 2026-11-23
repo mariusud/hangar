@@ -68,7 +68,6 @@ export async function readVersions(file = versionsFile()): Promise<SmokeEntry[]>
   return parseVersions(text);
 }
 
-/** Puts a run in the list, replacing an earlier run on the same Xcode build and runtime. */
 export function mergeEntry(entries: SmokeEntry[], entry: SmokeEntry): SmokeEntry[] {
   const rest = entries.filter((e) => e.build !== entry.build || e.runtime !== entry.runtime);
   rest.push(entry);
@@ -81,7 +80,6 @@ export async function recordSmoke(entry: SmokeEntry, file = versionsFile()): Pro
   await writeFile(file, `${JSON.stringify({ entries } satisfies VersionsFile, null, 2)}\n`);
 }
 
-/** Whether this Mac may offer devices: required only when DEVICEPOOL_REQUIRE_SMOKE=1. */
 export function smokeGate(entries: SmokeEntry[], xcode: Xcode | null, required: boolean): Gate {
   if (!xcode) {
     return { ok: !required, detail: 'Xcode version unknown' };

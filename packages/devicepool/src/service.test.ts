@@ -12,7 +12,7 @@ test('the LaunchAgent plist is valid and keeps arguments with special characters
     const file = join(dir, 'dev.devicepool.up.plist');
     writeFileSync(file, servicePlist(['/usr/local/bin/node', 'main.ts', 'up', '--url', 'https://a.example?x=1&y=<2>'], { PATH: '/usr/bin:/bin' }, '/tmp/devicepool.log'));
     execFileSync('plutil', ['-lint', file]);
-    const args = JSON.parse(execFileSync('plutil', ['-extract', 'ProgramArguments', 'json', '-o', '-', file]).toString()) as string[];
+    const args: string[] = JSON.parse(execFileSync('plutil', ['-extract', 'ProgramArguments', 'json', '-o', '-', file]).toString());
     assert.equal(args.at(-1), 'https://a.example?x=1&y=<2>');
     assert.equal(execFileSync('plutil', ['-extract', 'KeepAlive', 'raw', '-o', '-', file]).toString().trim(), 'true');
   } finally {

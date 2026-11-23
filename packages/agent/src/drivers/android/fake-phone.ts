@@ -1,7 +1,5 @@
 import type { Adb } from './index.ts';
 
-// A phone that answers the adb calls the agent and the wipe make, and keeps its state in memory.
-// The phone tests and the agent tests share it.
 export class FakePhone {
   serial: string;
   model = 'Pixel 8a';
@@ -22,15 +20,10 @@ export class FakePhone {
   cleared: string[] = [];
   locked = new Set<string>();
   calls: string[][] = [];
-  /** What `getprop sys.user.0.ce_available` prints. */
   ceAvailable = 'true';
-  /** find's exit status. Non-zero is a phone whose storage is locked or half readable. */
   findExit = 0;
-  /** False is a phone whose shared storage is not mounted: find succeeds and /sdcard is empty. */
   mounted = true;
-  /** A phone without `cmd uimode night`, such as Android 9. */
   hasNightCommand = true;
-  /** A phone that does not answer at all. */
   dead = false;
   private gates: { prefix: string; wait: Promise<void> }[] = [];
 
@@ -52,7 +45,6 @@ export class FakePhone {
     };
   }
 
-  /** Makes every command that starts with `prefix` wait until the returned function is called. */
   hold(prefix: string): () => void {
     let release = (): void => {};
     const wait = new Promise<void>((resolve) => {
@@ -62,7 +54,6 @@ export class FakePhone {
     return release;
   }
 
-  /** The commands that changed the phone. */
   changes(): string[] {
     const reads = ['shell getprop', 'shell find', 'shell settings get', 'shell cmd uimode night', 'shell pm list', 'shell wm size', 'reverse --list', 'forward --list'];
     return this.calls.map((c) => c.join(' ')).filter((line) => line.startsWith('shell cmd uimode night ') || !reads.some((r) => line.startsWith(r)));
@@ -165,7 +156,6 @@ export class FakePhone {
     throw new Error(`The fake phone does not know: adb ${line}`);
   }
 
-  // What a lease typically leaves behind.
   useForALease(): void {
     this.packages.set('com.example.app', '/data/app/~~c==/com.example.app-d==/base.apk');
     this.packages.set('dev.mobile.maestro', '/data/app/~~e==/dev.mobile.maestro-f==/base.apk');

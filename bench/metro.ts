@@ -54,7 +54,7 @@ try {
   ws.binaryType = 'arraybuffer';
   ws.onmessage = (e) => {
     if (typeof e.data !== 'string') {
-      frames.push(Buffer.from(e.data as ArrayBuffer).readDoubleBE(2));
+      frames.push(Buffer.from(e.data).readDoubleBE(2));
     }
   };
   await sleep(3000);
@@ -64,12 +64,12 @@ try {
     const label = `Hello ${i + 1}`;
     const t0 = Date.now();
     writeFileSync(APP_FILE, original.replace('Hello from Devicepool', label));
-    let shown = false;
-    for (let k = 0; k < 60 && !shown; k++) {
-      shown = (await lease.ui()).nodes.some((n) => n.label === label);
+    let isShown = false;
+    for (let k = 0; k < 60 && !isShown; k++) {
+      isShown = (await lease.ui()).nodes.some((n) => n.label === label);
     }
     const first = frames.find((t) => t >= t0);
-    if (shown && first !== undefined) {
+    if (isShown && first !== undefined) {
       times.push(first - t0);
     }
     await sleep(1500);

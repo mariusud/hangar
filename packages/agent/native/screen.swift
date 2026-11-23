@@ -1,4 +1,3 @@
-// Frame record on stdout: u32 length, u8 flags (1 = keyframe), f64 capture ms since epoch, u16 width, u16 height, Annex B NALs.
 
 import AVFoundation
 import CoreImage
@@ -124,7 +123,6 @@ func jpeg(_ image: CGImage, maxSize: Int, quality: Double) -> Data {
   return CGImageDestinationFinalize(dest) ? data as Data : Data()
 }
 
-// Image request on stdin: u32 length, u8 kind (0 image, 1 UDID), u16 longest side, u8 JPEG quality. Reply: u32 length then JPEG, 0 on failure.
 func serveImages() -> Never {
   let input = FileHandle.standardInput
   let context = CIContext(options: [.useSoftwareRenderer: false])
@@ -291,7 +289,6 @@ final class Recorder {
       self.input = input
       dims = CMVideoFormatDescriptionGetDimensions(format)
     }
-    // A rotation changes the frame size, which one MP4 track cannot hold.
     let d = CMVideoFormatDescriptionGetDimensions(format)
     guard let input, d.width == dims?.width, d.height == dims?.height, input.isReadyForMoreMediaData else {
       return
@@ -333,7 +330,6 @@ func startRecording(_ path: String) {
 
 func stopRecording(then: @escaping () -> Void = {}) {
   out.async {
-    // The agent waits for this line, so a stop always prints one.
     guard let r = recorder, r.stopping == nil else {
       FileHandle.standardError.write("recorded none\n".data(using: .utf8)!)
       then()

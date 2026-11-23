@@ -60,7 +60,6 @@ test('a phone has left only after three scans in a row without it', () => {
   assert.deepEqual([first.left, [...first.misses]], [[], [['A', 1]]]);
   const second = phoneChanges(['A'], offline, first.misses);
   assert.deepEqual([second.left, [...second.misses]], [[], [['A', 2]]]);
-  // One scan with the phone back starts the count again.
   const returned = phoneChanges(['A'], back, second.misses);
   assert.deepEqual([returned.left, returned.arrived, returned.misses.size], [[], [], 0]);
   const third = phoneChanges(['A'], gone, second.misses);
@@ -118,7 +117,6 @@ test('a file listing is split on NUL, keeps every name as it is, and carries the
   const listing = parseListing('/sdcard/\0/sdcard/Android\0/sdcard/DCIM\0/sdcard/DCIM \0/sdcard/a\n/sdcard/DCIM\0/sdcard/ lead\0devicepool-find-exit=0');
   assert.deepEqual(listing, { files: ['/sdcard', '/sdcard/ lead', '/sdcard/DCIM', '/sdcard/DCIM ', '/sdcard/a\n/sdcard/DCIM'].sort(), exit: 0, shared: 4 });
   assert.equal(parseListing('/sdcard/\0devicepool-find-exit=1').exit, 1);
-  // A listing that stops before the status was printed has no status.
   assert.equal(parseListing('/sdcard/\0/sdcard/DCIM\0/sdcard/DC').exit, null);
   assert.equal(parseListing('').exit, null);
   assert.match(FIND, /-print0/);
@@ -128,7 +126,6 @@ test('a file listing is split on NUL, keeps every name as it is, and carries the
 test('a listing is refused as a record when storage is locked, the listing failed, or /sdcard is empty', () => {
   const good = parseListing('/sdcard/\0/sdcard/DCIM\0/data/local/tmp/\0devicepool-find-exit=0');
   assert.equal(storageProblem('true\n', good), null);
-  // A phone that does not set the property is accepted on the strength of the listing alone.
   assert.equal(storageProblem('\n', good), null);
   assert.match(storageProblem('false\n', good) ?? '', /locked.*Unlock the phone once after a reboot/);
   assert.match(storageProblem('true', { ...good, exit: 1 }) ?? '', /find exited with 1.*Unlock the phone once after a reboot/);
@@ -151,13 +148,11 @@ test('a wipe whose read of the phone fails does not delete what a full record li
   const fake = new FakePhone();
   const baseline = await snapshot(fake.adb());
   fake.useForALease();
-  // The phone restarted during the lease and is locked: find lists almost nothing.
   fake.findExit = 1;
   await assert.rejects(wipe(fake.adb(), baseline, []), /find exited with 1/);
   assert.equal(fake.files.has('/sdcard/DCIM/holiday.jpg'), true);
   assert.equal(fake.calls.some((c) => c.join(' ').startsWith('shell rm ')), false);
 
-  // The other way round: a record made from a partial listing would have marked the owner's photos as the lease's.
   const partial: PhoneState = { ...baseline, files: ['/data/local/tmp', '/sdcard'] };
   fake.findExit = 0;
   const steps = planWipe(partial, await snapshot(fake.adb()), []);
@@ -169,7 +164,6 @@ test('a name with a newline or a trailing space is removed as itself or not at a
   fake.files.add('/sdcard/Pictures');
   fake.files.add('/sdcard/Pictures/own.jpg');
   const baseline = await snapshot(fake.adb());
-  // The lease makes a folder whose name ends in a space, and a file whose name holds a newline followed by a path of the owner.
   fake.files.add('/sdcard/Pictures ');
   fake.files.add('/sdcard/Pictures /lease.jpg');
   fake.files.add('/sdcard/x\n');
@@ -185,7 +179,6 @@ test('a name with a newline or a trailing space is removed as itself or not at a
   assert.equal(fake.files.has('/sdcard/Pictures /lease.jpg'), false);
   assert.equal(fake.calls.some((c) => c.join(' ').includes(String.raw`'/sdcard/Pictures '`)), true);
   assert.equal(fake.calls.filter((c) => c.join(' ').startsWith('shell rm ')).some((c) => /'\/sdcard\/Pictures'/.test(c.join(' '))), false);
-  // The names that are not handed to rm stay, and the phone is not ready.
   assert.equal(result.ok, false);
   assert.equal(result.problems.length, 1);
   assert.match(result.problems[0] ?? '', /4 files have names with control characters or bytes that are not UTF-8.*delete them on the phone/);
@@ -202,7 +195,6 @@ test('a wipe takes a phone back to its baseline and the read-back agrees', async
   assert.deepEqual(await snapshot(fake.adb()), baseline);
   assert.deepEqual([...fake.packages.keys()], ['com.example.kept']);
   assert.equal(fake.files.has('/sdcard/DCIM/holiday.jpg'), true);
-  // Chrome and the kept app were on the phone before the lease, so their data is the owner's and stays.
   assert.deepEqual(fake.cleared, []);
   assert.equal(fake.calls.some((c) => c.join(' ').startsWith('shell pm clear')), false);
   assert.deepEqual(fake.forwards, []);
@@ -224,13 +216,11 @@ test('the wipe removes a folder once, quotes names, and never touches the baseli
 test('the data of an app from before the lease is never cleared, and an app the lease removed itself needs no clearing', async () => {
   const fake = new FakePhone();
   const baseline = await snapshot(fake.adb());
-  // The lease installed and launched its app, then uninstalled it again, and launched the system browser.
   const current = await snapshot(fake.adb());
   const touched = ['com.example.app', 'com.android.chrome', 'com.example.kept'];
   assert.deepEqual(planWipe(baseline, current, touched).filter((s) => s.do === 'clear' || s.do === 'stop'), []);
   assert.deepEqual(await wipe(fake.adb(), baseline, touched), { ok: true, problems: [] });
 
-  // A package that is new, is not third-party and so cannot be uninstalled, and is still there, is cleared.
   fake.system.push('com.vendor.preload');
   const steps = planWipe(baseline, await snapshot(fake.adb()), ['com.vendor.preload', 'com.android.chrome']);
   assert.deepEqual(steps.filter((s) => s.do === 'clear'), [{ do: 'clear', pkg: 'com.vendor.preload' }]);
@@ -267,10 +257,8 @@ test('a phone that does not match its baseline after the wipe says why', async (
   const baseline = await snapshot(fake.adb());
   fake.useForALease();
   fake.locked.add('dev.mobile.maestro');
-  // A package that appeared during the lease, cannot be uninstalled, and refuses to be cleared.
   fake.system.push('com.vendor.preload');
   fake.locked.add('com.vendor.preload');
-  // The lease installed over an app from the baseline, and removed another.
   fake.packages.set('com.example.kept', '/data/app/~~new==/com.example.kept-z==/base.apk');
 
   const result = await wipe(fake.adb(), baseline, ['com.vendor.preload']);
@@ -315,7 +303,6 @@ test('a record that is there but cannot be used is reported as invalid, not as n
       const stored = await loadBaseline(dir, 'phone-1');
       assert.equal(stored.status, 'invalid', `for ${JSON.stringify(damaged)}`);
     }
-    // The list of touched apps is part of the record.
     await saveBaseline(dir, 'phone-1', baseline);
     await writeFile(join(dir, 'phone-1.touched.json'), '["com.exa');
     assert.equal((await loadBaseline(dir, 'phone-1')).status, 'invalid');
@@ -334,7 +321,6 @@ test('the record is replaced by a rename, so a crash never leaves half a file', 
     const before = await stat(join(dir, 'phone-1.touched.json'));
     await saveTouched(dir, 'phone-1', ['com.example.app']);
     const after = await stat(join(dir, 'phone-1.touched.json'));
-    // Writing in place keeps the inode; a new file renamed over the old one does not.
     assert.notEqual(after.ino, before.ino);
     assert.deepEqual((await readdir(dir)).sort(), ['phone-1.baseline.json', 'phone-1.touched.json']);
   } finally {

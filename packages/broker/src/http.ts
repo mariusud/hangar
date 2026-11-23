@@ -48,9 +48,13 @@ const TYPES: Record<string, string> = {
 async function serveConsole(pathname: string, res: ServerResponse, ctx: Ctx): Promise<void> {
   const rel = normalize(pathname).replace(/^(\.\.[/\\])+/, '');
   let file = join(ctx.consoleDir, rel);
-  const isFile = await stat(file).then((s) => s.isFile(), () => false);
+  let isFile = false;
+  try {
+    isFile = (await stat(file)).isFile();
+  } catch {
+    isFile = false;
+  }
   if (!isFile || !file.startsWith(ctx.consoleDir)) {
-    // Routes like /invite/... and /leases/... are handled by the single page.
     file = join(ctx.consoleDir, 'index.html');
   }
   res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });

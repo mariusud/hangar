@@ -115,7 +115,7 @@ route(
   '/v1/uploads/recordings/:id/:part',
   async (req, res, ctx) => {
     const part = req.params.part ?? '';
-    if (!(RECORDING_PARTS as readonly string[]).includes(part)) {
+    if (!RECORDING_PARTS.some((known) => known === part)) {
       throw new ApiError(404, 'NOT_FOUND', 'No such part.');
     }
     await ctx.recordings.upload(req, req.params.id ?? '', part, query(req).get('t') ?? '');

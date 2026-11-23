@@ -93,7 +93,6 @@ test('the Markdown report tells how to open a finding again', () => {
   assert.match(reportMarkdown(report), /- Open again: `POST http:\/\/h\/v1\/findings\/f\/open-again`/);
 });
 
-// Two Macs' worth of screens: the Login button sits lower on the second device, and only the first has Help.
 const SCREENS: Record<string, UiNode[]> = {
   'dev-1': [node('Login', 0.4, 0.45), node('Help', 0, 0.85)],
   'dev-2': [node('Login', 0.4, 0.75)],
@@ -217,7 +216,6 @@ test('open again leases a fresh device for the team, records it and replays by l
     );
     assert.match(again.steps[2]?.note ?? '', /No element "Help"/);
 
-    // The new lease belongs to the teammate who opened it again, on the other device.
     const lease = await teammate('GET', `/v1/leases/${again.leaseId}`);
     assert.equal(lease.json.state, 'active');
     assert.equal(lease.json.owner, 'teammate');
@@ -231,7 +229,6 @@ test('open again leases a fresh device for the team, records it and replays by l
     assert.ok(ops.some((o) => o.device === 'dev-2' && o.op === 'recordStart'));
     assert.ok(!ops.some((o) => o.device === 'dev-2' && o.op === 'uninstall'));
 
-    // Through MCP, with no device free: the request is withdrawn and says so.
     await client.connect(new StreamableHTTPClientTransport(new URL(`${broker.url}/mcp`), { requestInit: { headers: { authorization: `Bearer ${mateToken}` } } }));
     const r = await client.callTool({ name: 'open_again', arguments: { findingId, waitSeconds: 1 } });
     assert.ok(r.isError);

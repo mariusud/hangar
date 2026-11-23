@@ -78,16 +78,18 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
     wss.handleUpgrade(req, socket, head, (ws) => {
       clients.get(hostId)?.close(4001, 'replaced by a newer tunnel');
       clients.set(hostId, ws);
-      hosts
-        .request(deviceId, (id) => ({ type: 'tunnel.start', id, leaseId: hostId, ports }), 10_000)
-        .then((res) => {
+      void (async () => {
+        try {
+          const res = await hosts.request(deviceId, (id) => ({ type: 'tunnel.start', id, leaseId: hostId, ports }), 10_000);
           if (!res.ok) {
             ws.close(4002, res.error.message.slice(0, 120));
             return;
           }
           ws.send(JSON.stringify({ type: 'ready', ...(res.result as { port: number; ports?: Record<string, number> }) }));
-        })
-        .catch((err: Error) => ws.close(4002, err.message.slice(0, 120)));
+        } catch (err) {
+          ws.close(4002, (err instanceof Error ? err.message : String(err)).slice(0, 120));
+        }
+      })();
 
       ws.on('message', (data: Buffer, isBinary) => {
         if (!isBinary || data.length < 5) {

@@ -1,10 +1,3 @@
-// Checks that this Mac's Xcode works with Devicepool, and writes the result to hosts/versions.json
-// (or DEVICEPOOL_VERSIONS). It boots and clones real simulators. Run it on each new Xcode:
-//   pnpm bench:smoke
-// Set DEVICEPOOL_SMOKE_APP to a built examples/hello .app to also run its two Maestro flows.
-// It names its simulators devicepool-smoke-* (or DEVICEPOOL_SIM_PREFIX), makes its own golden, and deletes
-// them all at the end, so it leaves the simulators of a running Devicepool alone. DEVICEPOOL_SMOKE_LOG=1
-// prints the agent's log.
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -32,10 +25,10 @@ if (!xcode) {
 }
 
 const steps: SmokeStep[] = [];
-let failed = false;
+let hasFailed = false;
 
 async function step<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
-  if (failed) {
+  if (hasFailed) {
     steps.push({ name, status: 'skipped', ms: 0, detail: 'an earlier step failed' });
     return null;
   }
@@ -46,7 +39,7 @@ async function step<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
     console.error(`[smoke] ${name}: passed`);
     return value;
   } catch (err) {
-    failed = true;
+    hasFailed = true;
     const detail = err instanceof Error ? err.message : String(err);
     steps.push({ name, status: 'failed', ms: Math.round(performance.now() - t0), detail });
     console.error(`[smoke] ${name}: failed: ${detail}`);
@@ -54,8 +47,8 @@ async function step<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-function check(ok: boolean, message: string): void {
-  if (!ok) {
+function check(isOk: boolean, message: string): void {
+  if (!isOk) {
     throw new Error(message);
   }
 }
@@ -104,7 +97,6 @@ try {
         const labels = (nodes: { label: string | null }[]): string => nodes.map((n) => n.label ?? '').join('\n');
         check(labels(after.nodes) !== labels(before.nodes), `tapping "${target?.label}" did not change the screen`);
       });
-      // Records a few seconds of Settings opening, and checks the MP4 has a video track.
       const recorded = async (): Promise<void> => {
         const started = await lease.record();
         await sleep(1000);
@@ -139,10 +131,10 @@ try {
       });
     }
 
-    const maestro = await run('maestro', ['--version']).then(() => true, () => false);
+    const hasMaestro = await run('maestro', ['--version']).then(() => true, () => false);
     const app = process.env.DEVICEPOOL_SMOKE_APP;
-    if (!maestro || !app) {
-      steps.push({ name: 'maestro', status: 'skipped', ms: 0, detail: maestro ? 'set DEVICEPOOL_SMOKE_APP to a built examples/hello .app' : 'maestro is not installed' });
+    if (!hasMaestro || !app) {
+      steps.push({ name: 'maestro', status: 'skipped', ms: 0, detail: hasMaestro ? 'set DEVICEPOOL_SMOKE_APP to a built examples/hello .app' : 'maestro is not installed' });
     } else {
       await step('maestro', async () => {
         const result = await runMaestro(devicepool, { app, flowsDir, retries: 0 });
@@ -187,11 +179,11 @@ const entry: SmokeEntry = {
   xcode: xcode.version,
   build: xcode.build,
   runtime,
-  passed: !failed,
+  passed: !hasFailed,
   date: new Date().toISOString().slice(0, 10),
   steps,
 };
 await recordSmoke(entry);
 console.log(JSON.stringify(entry, null, 2));
-console.error(`[smoke] Xcode ${xcode.version} (${xcode.build}) on ${runtime}: ${failed ? 'FAILED' : 'passed'}. Written to ${versionsFile()}`);
-process.exitCode = failed ? 1 : 0;
+console.error(`[smoke] Xcode ${xcode.version} (${xcode.build}) on ${runtime}: ${hasFailed ? 'FAILED' : 'passed'}. Written to ${versionsFile()}`);
+process.exitCode = hasFailed ? 1 : 0;

@@ -12,7 +12,6 @@ export type DeviceToolOp =
   | { op: 'orientation'; orientation: Orientation }
   | { op: 'gesture'; gesture: 'pinch' | 'rotate'; center: Point; scale?: number; degrees?: number; durationMs?: number };
 
-// `next` is the cursor for the following call's `since`. `dropped` is true when lines after `since` fell out of the buffer.
 export type Page<T> = { items: (T & { seq: number })[]; next: number; dropped: boolean };
 
 export type LogLine = { time: number; level: string; message: string; tag?: string };

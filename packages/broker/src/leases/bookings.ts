@@ -12,7 +12,6 @@ export type BookingView = Booking & { team: string; timeZone: string; open: Book
 
 export type FloorView = { host: string; floor: number; devices: number; connected: boolean };
 
-/** What each connected Mac has for bookings: its devices, less quarantined ones, and its CI floor. */
 export function hostCapacity(db: Db, hosts: Hosts): HostCapacity[] {
   const floors = db.ciFloors();
   return [...hosts.hosts.values()]

@@ -24,12 +24,6 @@ export class Tunnels {
     const sockets = new Map<number, Socket>();
     const servers: Server[] = [];
     let next = 1;
-    const fail = (err: Error): void => {
-      for (const s of servers) {
-        s.close();
-      }
-      this.send({ type: 'response', id, ok: false, error: { code: 'TUNNEL_FAILED', message: err.message } });
-    };
     const listen = (target: number | undefined, wanted: number): Promise<number> =>
       new Promise((resolve, reject) => {
         const server = createServer((socket) => {
@@ -67,7 +61,12 @@ export class Tunnels {
       await (onOpen?.(port, extra) ?? Promise.resolve());
       this.tunnels.set(leaseId, { servers, port, ports: extra, sockets });
       this.send({ type: 'response', id, ok: true, result: { port, ports: extra } });
-    })().catch(fail);
+    })().catch((err: Error) => {
+      for (const server of servers) {
+        server.close();
+      }
+      this.send({ type: 'response', id, ok: false, error: { code: 'TUNNEL_FAILED', message: err.message } });
+    });
   }
 
   data(leaseId: string, conn: number, data: Uint8Array): void {

@@ -7,6 +7,15 @@ const TRIALS = Number(process.env.TRIALS ?? 15);
 const BASELINE = new URL('./stream.baseline.json', import.meta.url);
 
 type Frame = { at: number; capture: number | null; bytes: number };
+type Percentiles = { p50: number; p95: number };
+type StreamResult = {
+  trials: number;
+  inputToFrame: Percentiles;
+  inputToCapture: Percentiles | null;
+  captureToClient: Percentiles | null;
+  motionFps: number;
+  motionKBps: number;
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -29,7 +38,7 @@ async function viewer(url: string, leaseId: string, token: string, codec: 'h264'
     if (typeof e.data === 'string') {
       return;
     }
-    const b = Buffer.from(e.data as ArrayBuffer);
+    const b = Buffer.from(e.data);
     frames.push({ at: Date.now(), capture: b[0] === 2 ? b.readDoubleBE(2) : null, bytes: b.length });
   };
   await new Promise((resolve, reject) => {
@@ -53,7 +62,7 @@ async function quiet(frames: Frame[], ms: number, codec: 'h264' | 'jpeg'): Promi
   }
 }
 
-async function measure(url: string, lease: Lease, token: string, codec: 'h264' | 'jpeg') {
+async function measure(url: string, lease: Lease, token: string, codec: 'h264' | 'jpeg'): Promise<StreamResult> {
   const leaseId = lease.id;
   const v = await viewer(url, leaseId, token, codec);
   const input: number[] = [];
@@ -81,7 +90,6 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
     if (first.capture !== null) {
       toCapture.push(first.capture - t0);
     }
-    // Motion lasts about half a second, hence the doubling below.
     await sleep(600);
     const motion = v.frames.filter((f) => f.at >= first.at && f.at < first.at + 500);
     fps.push(motion.length * 2);
@@ -112,7 +120,6 @@ async function settingsHome(lease: Lease): Promise<[number, number]> {
   return [n.normalized.x + n.normalized.width / 2, n.normalized.y + n.normalized.height / 2];
 }
 
-// The capture path the leased device's H.264 stream used, as the broker reports it.
 async function capture(url: string, token: string): Promise<string | null> {
   const res = await fetch(`${url}/v1/devices`, { headers: { authorization: `Bearer ${token}` } });
   const devices: { state: string; capture?: string | null }[] = await res.json();
@@ -140,7 +147,7 @@ try {
     writeFileSync(BASELINE, `${JSON.stringify(results, null, 2)}\n`);
   }
   if (process.argv.includes('--check')) {
-    const base = JSON.parse(readFileSync(BASELINE, 'utf8')) as typeof results;
+    const base: typeof results = JSON.parse(readFileSync(BASELINE, 'utf8'));
     const worse: string[] = [];
     for (const [name, now, then] of [
       ['h264 input to frame', results.h264.inputToFrame.p95, base.h264.inputToFrame.p95],

@@ -18,8 +18,9 @@ export class DriverError extends Error {
 }
 
 function stderrOf(err: unknown): string {
-  const e = err as { stderr?: Buffer | string; message?: string };
-  return String(e.stderr || e.message || err).trim().split('\n').slice(-3).join(' ');
+  const stderr = err instanceof Error && 'stderr' in err ? err.stderr : undefined;
+  const message = err instanceof Error ? err.message : undefined;
+  return String(stderr || message || err).trim().split('\n').slice(-3).join(' ');
 }
 
 export function sdkRoot(): string | null {
@@ -51,14 +52,12 @@ async function adbBuffer(serial: string, ...args: string[]): Promise<Buffer> {
   }
 }
 
-/** Runs adb against one device. The wipe takes this so tests can pass a fake phone. */
 export type Adb = { serial: string; run: (...args: string[]) => Promise<string> };
 
 export function adbFor(serial: string): Adb {
   return { serial, run: (...args) => adb(serial, ...args) };
 }
 
-/** The output of `adb devices -l`, for finding phones. */
 export async function deviceList(): Promise<string> {
   try {
     return (await run(tool('platform-tools', 'adb'), ['devices', '-l'], { maxBuffer: MAX_BUFFER })).stdout;
@@ -126,7 +125,6 @@ export async function info(serial: string): Promise<{ model: string; os: string 
 }
 
 export function parseScreenSize(out: string): { width: number; height: number } {
-  // "Override size" wins over "Physical size" when both are printed.
   const all = [...out.matchAll(/(\d+)x(\d+)/g)];
   const m = all[all.length - 1];
   if (!m) {
@@ -234,7 +232,6 @@ export async function install(serial: string, apk: string): Promise<string> {
   if (added.length === 1) {
     return added[0]!;
   }
-  // A reinstall adds nothing new; ask the package manager for the newest update instead.
   const recent = (await adb(serial, 'shell', 'dumpsys', 'package', 'packages')).match(/Package \[([^\]]+)\]/g)?.map((s) => s.slice(9, -1)) ?? [];
   const found = recent.find((p) => before.has(p) && apk.includes(p));
   if (!found) {
@@ -267,7 +264,6 @@ export async function appearance(serial: string, mode: 'light' | 'dark'): Promis
 }
 
 export async function location(serial: string, lat: number, lon: number): Promise<void> {
-  // The emulator console takes longitude first.
   await adb(serial, 'emu', 'geo', 'fix', String(lon), String(lat));
 }
 
@@ -408,15 +404,18 @@ export function parseInstrumentation(out: string, target: string): { cases: Test
 
 export async function instrument(serial: string, instrumentation: string, tests: string[]): Promise<string> {
   checkTestNames(tests);
-  const args = ['shell', 'am', 'instrument', '-w', '-r', ...(tests.length ? ['-e', 'class', tests.join(',')] : []), instrumentation];
+  const args = ['shell', 'am', 'instrument', '-w', '-r'];
+  if (tests.length) {
+    args.push('-e', 'class', tests.join(','));
+  }
+  args.push(instrumentation);
   try {
     return (await run(tool('platform-tools', 'adb'), ['-s', serial, ...args], { maxBuffer: MAX_BUFFER, timeout: 60 * 60_000 })).stdout;
   } catch (err) {
-    return String((err as { stdout?: string }).stdout ?? '');
+    return err instanceof Error && 'stdout' in err ? String(err.stdout ?? '') : '';
   }
 }
 
-// Follows the app's current process; a new pid after a relaunch starts a new stream.
 export async function appLogSource(serial: string, pkg: string): Promise<LogSource | null> {
   checkPackage(pkg);
   const pid = (await adb(serial, 'shell', 'pidof', pkg).catch(() => '')).trim().split(/\s+/)[0] ?? '';

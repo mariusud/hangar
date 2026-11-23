@@ -132,7 +132,6 @@ route('PUT', '/v1/lease-limits/:role', async (req, res, ctx) => {
     throw new ApiError(404, 'NO_SUCH_ROLE', `No role ${role}.`, `Roles: ${LIMIT_ROLES.join(', ')}.`);
   }
   const b = await body<{ idleSeconds?: number | null; maxSeconds?: number | null; graceSeconds?: number | null }>(req);
-  // Fields left out keep their value; null goes back to the built-in cap.
   const was = ctx.db.leaseLimitCaps().find((r) => r.role === role) ?? { role, idleMs: null, maxMs: null, graceMs: null };
   const row = {
     role,
@@ -165,7 +164,7 @@ route('GET', '/v1/leases/:id/ui', async (req, res, ctx) => {
   const { result } = await op(req, ctx, { op: 'describe' });
   if (query(req).get('screenshot') === '1') {
     const { binary } = await op(req, ctx, { op: 'screenshot', format: 'jpeg', maxSize: 1000 });
-    json(res, 200, { ...(result as object), screenshot: binary?.toString('base64') });
+    json(res, 200, { ...(typeof result === 'object' ? result : {}), screenshot: binary?.toString('base64') });
     return;
   }
   json(res, 200, result);

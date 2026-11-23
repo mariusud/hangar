@@ -5,32 +5,25 @@ import { companionSocket, DriverError, screenStream, type ScreenStream } from '.
 export type { CapturePath };
 export type VideoPath = Exclude<CapturePath, 'jpeg'>;
 
-/** H.264 capture paths, best first. After the last one, viewers get JPEG screenshots. */
 export const VIDEO_PATHS: readonly VideoPath[] = ['iosurface', 'idb'];
 
 export type PathHealth = Record<VideoPath, { failures: number; skipUntil: number }>;
 
-/** Failures in a row before new streams skip a path for a while. */
 export const MAX_FAILURES = 2;
 export const SKIP_MS = 10 * 60_000;
-/** How long a requested keyframe may take before the path counts as stalled. */
 export const STALL_MS = 3000;
-/** The first frame of a path may take longer: a helper that was just built loads SimulatorKit cold. */
 export const FIRST_FRAME_MS = 10_000;
 
-// The helper cannot work on this Mac at all, so one failure is enough to skip it.
 const PERMANENT = new Set(['SIMULATORKIT_MISSING', 'SIMULATORKIT_CHANGED', 'SCREEN_BUILD_FAILED']);
 
 export function freshHealth(): PathHealth {
   return { iosurface: { failures: 0, skipUntil: 0 }, idb: { failures: 0, skipUntil: 0 } };
 }
 
-/** The error code at the start of a helper's last stderr line, such as SIMULATORKIT_CHANGED. */
 export function failureCode(message: string): string {
   return /^([A-Z][A-Z0-9_]+):/.exec(message)?.[1] ?? '';
 }
 
-/** The path to try after `after` (or first, when `after` is null). `forced` limits the choice to that one path. */
 export function nextPath(health: PathHealth, now: number, after: VideoPath | null, forced: CapturePath | null = null): CapturePath {
   if (forced) {
     return after === null ? forced : 'jpeg';
@@ -48,7 +41,6 @@ export function recordSuccess(health: PathHealth, path: VideoPath): PathHealth {
   return health[path].failures === 0 && health[path].skipUntil === 0 ? health : { ...health, [path]: { failures: 0, skipUntil: 0 } };
 }
 
-/** A path is stalled when a keyframe was asked for `timeoutMs` ago and no frame came since. */
 export function isStalled(askedAt: number | null, now: number, timeoutMs = STALL_MS): boolean {
   return askedAt !== null && now - askedAt >= timeoutMs;
 }
@@ -88,7 +80,6 @@ const defaultDeps = (): CaptureDeps => ({
 let health = freshHealth();
 const paths = new Map<string, CapturePath>();
 
-/** The capture path the device's last H.264 stream used, or null if it has had none. */
 export function capturePath(udid: string): CapturePath | null {
   return paths.get(udid) ?? null;
 }
@@ -101,11 +92,6 @@ export function resetCaptureHealth(): void {
   health = freshHealth();
 }
 
-/**
- * A screen stream that starts on the best capture path and moves to the next one when a path
- * fails to start, exits, or sends no frame within `stallMs` of a keyframe request. When no H.264
- * path is left, `exited` resolves with the reasons, and the agent moves viewers to JPEG.
- */
 export async function captureStream(
   udid: string,
   onFrame: (record: Buffer) => void,
@@ -115,7 +101,6 @@ export async function captureStream(
   const reasons: string[] = [];
   let stopping = false;
   let current: { path: VideoPath; stream: ScreenStream } | null = null;
-  // A recording moves to the next path with the stream. That path rewrites the file from its first keyframe.
   let recording: string | null = null;
   let askedAt: number | null = null;
   let healthy = false;

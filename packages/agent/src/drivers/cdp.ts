@@ -27,7 +27,6 @@ function cut(s: string, max = MAX_TEXT): string {
 
 export type Target = { id: string; title: string; appId?: string; deviceName: string; device: string; webSocketDebuggerUrl: string };
 
-// Picks the page of the leased device from Metro's /json/list. Metro also lists the developer's own devices.
 export function pickTarget(raw: unknown, bundleId: string | undefined, isDevice: (name: string) => boolean): Target {
   const all: Target[] = (Array.isArray(raw) ? raw : []).flatMap((x): Target[] => {
     const t = obj(x);
@@ -58,7 +57,6 @@ export function pickTarget(raw: unknown, bundleId: string | undefined, isDevice:
   return target;
 }
 
-// Points a debugger URL from /json/list at the agent's end of the Metro tunnel.
 export function throughTunnel(url: string, port: number): string {
   const u = new URL(url);
   u.hostname = '127.0.0.1';
@@ -151,7 +149,6 @@ export class Cdp {
   }
 }
 
-// Records XHR (and so fetch, which React Native builds on XHR) in the app when the runtime has no CDP Network domain.
 export const XHR_PATCH = `(function () {
   if (globalThis.__devicepoolNet) { return true; }
   var X = globalThis.XMLHttpRequest;
@@ -181,7 +178,6 @@ export const XHR_PATCH = `(function () {
 
 export type JsOptions = {
   port: () => number | undefined;
-  // Says whether a deviceName from Metro's list is the leased device.
   matchDevice: () => Promise<(name: string) => boolean>;
   fetchJson?: (url: string) => Promise<unknown>;
 };
@@ -194,7 +190,6 @@ const defaultFetchJson = async (url: string): Promise<unknown> => {
   return res.json();
 };
 
-// One app's JavaScript runtime on one lease, reached through Metro's inspector. Buffers are kept across reconnects.
 export class JsTools {
   readonly console = new Ring<ConsoleMessage>(500);
   readonly network = new Ring<NetworkEntry>(300);
@@ -305,7 +300,6 @@ export class JsTools {
     });
     const value = obj(res.result).value;
     if (typeof value !== 'string') {
-      // The app reloaded and lost the patch.
       this.patchCursor = 0;
       const installed = await cdp.call('Runtime.evaluate', { expression: XHR_PATCH, returnByValue: true });
       if (obj(installed.result).value !== true) {

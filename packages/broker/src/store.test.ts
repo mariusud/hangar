@@ -32,7 +32,7 @@ test('with a bucket, a finished file moves there and is read back, ranges includ
     const key = req.url ?? '';
     if (req.method === 'PUT') {
       const chunks: Buffer[] = [];
-      for await (const c of req) chunks.push(c as Buffer);
+      for await (const c of req) chunks.push(c);
       objects.set(key, Buffer.concat(chunks));
       res.end();
       return;
@@ -66,7 +66,7 @@ test('with a bucket, a finished file moves there and is read back, ranges includ
     assert.equal(await store.size('recordings/r1/video.mp4'), 10);
     const slice = await store.open('recordings/r1/video.mp4', { start: 2, end: 4 });
     const chunks: Buffer[] = [];
-    for await (const c of slice!.stream) chunks.push(c as Buffer);
+    for await (const c of slice!.stream) chunks.push(c);
     assert.equal(Buffer.concat(chunks).toString(), '234');
 
     await store.remove(['recordings/r1/video.mp4']);

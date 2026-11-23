@@ -37,9 +37,8 @@ export async function simctl(...args: string[]): Promise<string> {
 
 // idb's own auto-spawned companions go stale across reboots and return an empty accessibility tree.
 const companions = new Map<string, { proc: ChildProcess; socket: string }>();
-/** Devicepool owns the simulators whose names start with this. DEVICEPOOL_SIM_PREFIX gives the smoke test its own set. */
 export const NAME_PREFIX = process.env.DEVICEPOOL_SIM_PREFIX || 'devicepool-';
-// Socket paths are capped at 104 bytes, so another prefix gets a short directory of its own.
+// A unix socket path is limited to 103 bytes on macOS, so the directory name stays short.
 export const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'devicepool-' ? 'dp-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
 
 export async function startCompanion(udid: string): Promise<void> {
@@ -130,9 +129,9 @@ export async function remove(udid: string): Promise<void> {
 }
 
 export async function listOwned(): Promise<{ udid: string; name: string; state: string }[]> {
-  const json = JSON.parse(await simctl('list', 'devices', '-j')) as {
+  const json: {
     devices: Record<string, { udid: string; name: string; state: string }[]>;
-  };
+  } = JSON.parse(await simctl('list', 'devices', '-j'));
   return Object.values(json.devices)
     .flat()
     .filter((d) => d.name.startsWith(NAME_PREFIX))
@@ -291,7 +290,7 @@ async function sendHid(udid: string, events: hid.HidEvent[]): Promise<void> {
   try {
     await hid.send(companion.socket, events);
   } catch (err) {
-    throw new DriverError('INPUT_FAILED', `Input to ${udid} failed: ${(err as Error).message}`);
+    throw new DriverError('INPUT_FAILED', `Input to ${udid} failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -578,7 +577,6 @@ export async function deviceName(udid: string): Promise<string> {
   return owned.find((d) => d.udid === udid)?.name ?? '';
 }
 
-// Lines the app's own process logs, found by the path of its installed bundle.
 export async function appLogSource(udid: string, bundleId: string): Promise<LogSource> {
   checkBundleId(bundleId);
   const container = (

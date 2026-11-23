@@ -20,14 +20,12 @@ route('GET', '/v1/bookings/:name', (req, res, ctx) => {
   json(res, 200, bookingView(ctx.db, findBooking(ctx.db, req.params.name ?? ''), ctx.leases.timeZone, Date.now()));
 });
 
-// Leases from the booking end at the next tick, with reason window_closed.
 route('DELETE', '/v1/bookings/:name', (req, res, ctx) => {
   const booking = removeBooking(ctx.db, me(req, ctx), req.params.name ?? '');
   void ctx.leases.tick();
   json(res, 200, { removed: booking.name });
 });
 
-// A token that leases only from this booking, only while its window is open.
 route('POST', '/v1/bookings/:name/tokens', async (req, res, ctx) => {
   const p = me(req, ctx);
   const booking = findBooking(ctx.db, req.params.name ?? '');

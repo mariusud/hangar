@@ -89,11 +89,11 @@ export async function body<T>(req: IncomingMessage, limit = 1_000_000): Promise<
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
-    size += (chunk as Buffer).length;
+    size += chunk.length;
     if (size > limit) {
       throw new ApiError(413, 'BODY_TOO_LARGE', `Request body is over ${limit} bytes.`);
     }
-    chunks.push(chunk as Buffer);
+    chunks.push(chunk);
   }
   if (size === 0) {
     return {} as T;

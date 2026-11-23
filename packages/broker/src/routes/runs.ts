@@ -58,7 +58,6 @@ route('POST', '/v1/runs/:id/flows/:flow/rerun', async (req, res, ctx) => {
   json(res, 202, ctx.runs.view(ctx.runs.rerun(me(req, ctx), run.id, req.params.flow ?? '', b)));
 });
 
-// The device a failed flow was left on, for a person on the run's team (runs started with a hold).
 route('POST', '/v1/runs/:id/flows/:flow/hold-lease', (req, res, ctx) => {
   const run = teamRun(req, ctx);
   json(res, 201, ctx.leases.view(ctx.runs.holdLease(me(req, ctx), run.id, req.params.flow ?? '')));

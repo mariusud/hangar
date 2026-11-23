@@ -24,18 +24,12 @@ export type Lease = {
   queueTimeoutMs: number;
   prepareTimeoutMs: number;
   attempts: number;
-  // Fields below came with bookings and priority; leases stored before them have none.
   priority?: Priority;
   bookingId?: string | null;
-  // A lease a run made for one of its shards, which goes before agent leases inside a booking.
   shard?: boolean;
-  // Set when the lease was told it ends early: preempted, or its booking's window closes.
   ending?: LeaseEnding | null;
-  // A booked lease ends here at the latest, when its booking's window closes.
   windowEndsAt?: number | null;
-  // The lease id the host knows the device by, when that is an earlier lease's (a held device).
   hostLeaseId?: string | null;
-  // When this queued request last made another lease end early, so it waits for that device.
   preemptedAt?: number | null;
 };
 
@@ -99,7 +93,6 @@ export function deadline(lease: Lease): { at: number; reason: LeaseEndReason } |
   }
   const renewed = lease.lastRenewAt ?? lease.activatedAt;
   const used = lease.lastActivityAt ?? lease.activatedAt;
-  // A lease that lost its client is not idle until the grace period after the disconnect runs out.
   const detachedAt = lease.detachedAt ?? null;
   const graceEnd = detachedAt === null ? -Infinity : detachedAt + (lease.graceMs ?? DEFAULTS.graceMs);
   const candidates: { at: number; reason: LeaseEndReason }[] = [
@@ -120,7 +113,6 @@ export function matches(cls: DeviceClass, device: PoolDevice): boolean {
   if (cls.platform && cls.platform !== (device.platform ?? 'ios-simulator')) {
     return false;
   }
-  // A phone is leased only by asking for one: there are few, and its wipe covers less than deleting an emulator.
   if (!cls.platform && device.platform === 'android-device') {
     return false;
   }
@@ -133,7 +125,6 @@ export function matches(cls: DeviceClass, device: PoolDevice): boolean {
   if (cls.build && cls.build !== device.build) {
     return false;
   }
-  // A plain request never gets a device with someone's image on it, and the reverse.
   if ((cls.image?.toLowerCase() ?? null) !== (device.image?.toLowerCase() ?? null)) {
     return false;
   }
@@ -183,7 +174,6 @@ export function touch(lease: Lease, now: number): Lease {
   return { ...lease, lastActivityAt: now };
 }
 
-// Activity that doesn't touch the device: renews the lease and marks its client present.
 export function keepalive(lease: Lease, now: number): Lease {
   if (lease.state !== 'active') {
     throw new LeaseError('LEASE_NOT_ACTIVE', `Lease ${lease.id} is ${lease.state}. Only active leases can be kept alive.`);
@@ -191,7 +181,6 @@ export function keepalive(lease: Lease, now: number): Lease {
   return { ...lease, lastRenewAt: now, lastActivityAt: now, detachedAt: null };
 }
 
-// Tells an active lease it ends early. An earlier notice stands.
 export function warn(lease: Lease, ending: LeaseEnding): Lease {
   if (lease.state !== 'active' || (lease.ending && lease.ending.at <= ending.at)) {
     return lease;
@@ -206,7 +195,6 @@ export function detach(lease: Lease, now: number): Lease {
   return { ...lease, detachedAt: now };
 }
 
-// A client that comes back to its lease. A lease still waiting for a device carries on waiting.
 export function reattach(lease: Lease, now: number): Lease {
   if (lease.state === 'ended') {
     throw new LeaseError('LEASE_ENDED', `Lease ${lease.id} ended (${lease.reason ?? 'unknown'}).`);

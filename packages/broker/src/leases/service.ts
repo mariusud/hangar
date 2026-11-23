@@ -43,7 +43,6 @@ export type LeaseView = {
   detachedAt: number | null;
   priority: Priority;
   booking: string | null;
-  // Set once the lease is told it ends early (preempted, or its booking's window closes).
   ending: LeaseEnding | null;
 };
 
@@ -102,7 +101,6 @@ export class Leases {
   }
 
   create(p: Principal, asked: DeviceClass, opts: { ttlSeconds?: number | null; maxSeconds?: number; idleSeconds?: number; via?: string; shard?: boolean; bookingId?: string } = {}): m.Lease {
-    // A run started with --booking leases its shards inside that booking; the run checked the team.
     const own: TokenPriorityRow = opts.bookingId ? { priority: 'booked', bookingId: opts.bookingId } : priorityOf(this.db, p);
     const { priority, bookingId } = own;
     const booking = bookingId ? this.db.bookings().find((b) => b.id === bookingId) : undefined;
@@ -173,7 +171,6 @@ export class Leases {
 
   get(p: Principal, id: string): m.Lease {
     const lease = this.db.getLease(id);
-    // Someone else's lease looks the same as a missing one, so ids do not leak.
     if (!lease || (lease.principalId !== p.accountId && p.role !== 'operator')) {
       throw new ApiError(404, 'LEASE_NOT_FOUND', `No lease ${id}.`);
     }
@@ -203,19 +200,16 @@ export class Leases {
     };
   }
 
-  // A booked request that comes early waits for its window, and then as long as any other request.
   private queueTimeout(booking: Booking | undefined): number {
     const now = this.now();
     const next = booking ? nextWindow(booking, now, this.timeZone) : null;
     return next ? Math.max(m.DEFAULTS.queueTimeoutMs, next.from - now + m.DEFAULTS.queueTimeoutMs) : m.DEFAULTS.queueTimeoutMs;
   }
 
-  /** The lease id the host knows a lease's device by. A lease on a held device uses the run lease's id. */
   hostLeaseId(lease: m.Lease): string {
     return lease.hostLeaseId ?? lease.id;
   }
 
-  /** The device's state as the broker sees it: `held` while a failed run flow keeps it. */
   deviceState(deviceId: string, reported: DeviceState): DeviceState {
     return this.db.holds().some((h) => h.deviceId === deviceId) ? 'held' : reported;
   }
@@ -224,7 +218,6 @@ export class Leases {
     return this.db.holds();
   }
 
-  /** Ends a run's lease into a hold: the device keeps its state for `ms`, for people on the lease's team. */
   hold(p: Principal, id: string, info: { runId: string; flow: string; ms: number }): Hold {
     const lease = this.holder(p, id);
     if (lease.state !== 'active' || !lease.deviceId) {
@@ -248,7 +241,6 @@ export class Leases {
     return hold;
   }
 
-  /** Leases the device a run flow left held, for a person on the run's team. */
   leaseHeld(p: Principal, runId: string, flow: string): m.Lease {
     const hold = this.db.holds().find((h) => h.runId === runId && h.flow === flow);
     if (!hold) {
@@ -300,7 +292,6 @@ export class Leases {
     return lease;
   }
 
-  /** Lets a held device go now: it is wiped and goes back to the pool. */
   releaseHold(p: Principal, runId: string, flow: string): void {
     const hold = this.db.holds().find((h) => h.runId === runId && h.flow === flow);
     if (!hold) {
@@ -338,7 +329,6 @@ export class Leases {
     return next;
   }
 
-  // The same token that made the lease picks it up again after its client restarted or lost the connection.
   reattach(p: Principal, id: string): m.Lease {
     const lease = this.holder(p, id);
     if (lease.tokenHash && lease.tokenHash !== p.token?.hash && p.leaseId !== lease.id) {
@@ -353,8 +343,6 @@ export class Leases {
     return next;
   }
 
-  // A client of the lease holder that stays connected, such as an event stream. When the last one goes, the
-  // lease's grace period starts. Returns the function to call on disconnect.
   connected(p: Principal, id: string): () => void {
     const lease = this.db.getLease(id);
     if (!lease || lease.principalId !== p.accountId) {
@@ -567,7 +555,6 @@ export class Leases {
     }
   }
 
-  // Wipes holds whose time is up, and forgets holds whose device its Mac no longer has.
   private sweepHolds(now: number): void {
     for (const hold of holdsDue(this.db.holds(), now)) {
       this.wipeHold(hold, 'expired', null);

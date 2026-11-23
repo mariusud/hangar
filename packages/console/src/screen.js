@@ -66,7 +66,9 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
     down = { p: norm(e), t: performance.now() };
   });
   screen.addEventListener('pointerup', (e) => {
-    if (!down) return;
+    if (!down) {
+      return;
+    }
     const p = norm(e);
     if (Math.hypot(p[0] - down.p[0], p[1] - down.p[1]) < 0.02) send({ type: 'tap', point: p });
     else send({ type: 'swipe', from: down.p, to: p, durationMs: Math.max(100, Math.round(performance.now() - down.t)) });
@@ -79,7 +81,9 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
     typed = '';
   };
   screen.addEventListener('keydown', (e) => {
-    if (e.metaKey || e.ctrlKey) return;
+    if (e.metaKey || e.ctrlKey) {
+      return;
+    }
     if (KEYS[e.key]) {
       e.preventDefault();
       flush();
@@ -136,7 +140,9 @@ export function h264View(canvas, askKeyframe) {
           config = next;
         }
       }
-      if (!decoder || decoder.state !== 'configured') return;
+      if (!decoder || decoder.state !== 'configured') {
+        return;
+      }
       received.set(timestamp, receivedAt);
       decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp, data }));
     },

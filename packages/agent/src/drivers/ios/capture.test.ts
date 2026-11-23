@@ -67,7 +67,6 @@ test('helpers', () => {
 
 type Fake = { stream: ScreenStream; emit: () => void; exit: (err: string | null) => void; keyframes: number; stopped: boolean; recorded: string[]; finished: number };
 
-// A stream that answers keyframe requests with a frame when `answers` is true.
 function fake(answers: boolean, onFrame: (r: Buffer) => void): Fake {
   let exit: (err: string | null) => void = () => {};
   const exited = new Promise<string | null>((resolve) => {

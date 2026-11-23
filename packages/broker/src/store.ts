@@ -73,7 +73,7 @@ export class Store {
   }
 
   async size(key: string): Promise<number | null> {
-    const local = await stat(this.local(key)).then((s) => s.size, () => null);
+    const local = await fileSize(this.local(key));
     if (local !== null || !this.s3) {
       return local;
     }
@@ -83,7 +83,7 @@ export class Store {
 
   async open(key: string, range?: { start?: number; end?: number }): Promise<Opened | null> {
     const path = this.local(key);
-    const size = await stat(path).then((s) => s.size, () => null);
+    const size = await fileSize(path);
     if (size !== null) {
       const { start, end } = clamp(range, size);
       return { stream: createReadStream(path, { start, end }), size, start, end };
@@ -124,6 +124,14 @@ export class Store {
       init.duplex = 'half';
     }
     return fetch(url, init);
+  }
+}
+
+async function fileSize(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return null;
   }
 }
 

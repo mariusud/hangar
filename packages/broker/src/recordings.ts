@@ -27,7 +27,6 @@ const SAVE_TIMEOUT_MS = 30 * 60_000;
 
 export type TimelineEvent = { at: number; what: string; failed?: string };
 
-// Files the broker writes for a recording itself, next to the ones the Mac uploads.
 export const BROKER_PARTS = ['timeline', 'applog', 'network'] as const;
 export type BrokerPart = (typeof BROKER_PARTS)[number];
 const BROKER_FILES: Record<BrokerPart, string> = { timeline: 'timeline.json', applog: 'applog.json', network: 'network.json' };
@@ -50,9 +49,18 @@ export type Timeline = {
   timer: NodeJS.Timeout | null;
 };
 
+const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+const deviceOf = (result: unknown): string | null => {
+  if (typeof result === 'object' && result !== null && 'device' in result && typeof result.device === 'string') {
+    return result.device;
+  }
+  return null;
+};
+
 type ActionLog = { actions: RecordedAction[]; truncated: boolean; screen: UiNode[] | null };
 
-export type CollectedLog ={ lines: LogLine[]; dropped: boolean; error: string | null };
+export type CollectedLog = { lines: LogLine[]; dropped: boolean; error: string | null };
 export type CollectedNetwork = { requests: NetworkEntry[]; dropped: boolean; error: string | null };
 
 export class Recordings {
@@ -117,7 +125,7 @@ export class Recordings {
       await this.leases.op(p, leaseId, { op: 'recordStop' });
     } catch (err) {
       if (this.db.getLease(leaseId)?.state !== 'ended') {
-        this.db.updateRecording(rec.id, { state: 'failed', error: (err as Error).message });
+        this.db.updateRecording(rec.id, { state: 'failed', error: messageOf(err) });
       }
       throw err;
     }
@@ -140,19 +148,16 @@ export class Recordings {
     return this.store.local(this.key(id, part));
   }
 
-  // The recording a lease is making now and when its video started, or null.
   current(leaseId: string): { recordingId: string; startedAt: number } | null {
     const t = this.timelines.get(leaseId);
     return t ? { recordingId: t.recordingId, startedAt: t.startedAt } : null;
   }
 
-  // The actions the lease's holder took up to `until`, recorded or not, for a finding to replay.
   actionsOf(leaseId: string, until: number): { actions: RecordedAction[]; truncated: boolean } {
     const log = this.taken.get(leaseId);
     return { actions: (log?.actions ?? []).filter((a) => a.at <= until), truncated: log?.truncated ?? false };
   }
 
-  // A describe names the elements under the taps that follow it, until the next action changes the screen.
   private keep(leaseId: string, body: Op, at: number, result: unknown): void {
     if (this.db.getLease(leaseId)?.state !== 'active') {
       return;
@@ -175,7 +180,6 @@ export class Recordings {
     }
   }
 
-  // Steps taken from `fromMs` into the recording on.
   stepsFrom(leaseId: string, fromMs: number): TimelineEvent[] {
     return (this.timelines.get(leaseId)?.events ?? []).filter((e) => e.at >= fromMs);
   }
@@ -190,7 +194,6 @@ export class Recordings {
     return { requests: [...(t?.network.values() ?? [])], dropped: t?.sources.network.dropped ?? false, error: t?.sources.network.error ?? null };
   }
 
-  // Reads the app log and network requests the Mac buffered since the last read. One read runs at a time.
   collect(leaseId: string): Promise<void> {
     const t = this.timelines.get(leaseId);
     if (!t) {
@@ -257,21 +260,22 @@ export class Recordings {
 
   async upload(req: IncomingMessage, id: string, part: string, token: string): Promise<void> {
     const row = auth.lookupToken(this.db, token, Date.now());
-    if (!row || row.kind !== 'upload' || row.label !== `${id}:${part}` || !this.db.useToken(row.hash, Date.now())) {
+    const recordingPart = RECORDING_PARTS.find((p) => p === part);
+    if (!row || !recordingPart || row.kind !== 'upload' || row.label !== `${id}:${part}` || !this.db.useToken(row.hash, Date.now())) {
       throw new ApiError(403, 'FORBIDDEN', 'This upload link is not valid.');
     }
-    const spec = PART_FILES[part as RecordingPart];
+    const spec = PART_FILES[recordingPart];
     if (this.db.getRecording(id)?.state !== 'saving') {
       throw new ApiError(409, 'NOT_SAVING', 'This recording is not waiting for files.');
     }
     await mkdir(join(this.dir, id), { recursive: true });
-    const path = this.path(id, part as RecordingPart);
+    const path = this.path(id, recordingPart);
     let size = 0;
     await pipeline(
       req,
       async function* (source) {
         for await (const chunk of source) {
-          size += (chunk as Buffer).length;
+          size += chunk.length;
           if (size > spec.limit) {
             throw new ApiError(413, 'BODY_TOO_LARGE', `A recording's ${part} is limited to ${spec.limit} bytes.`);
           }
@@ -283,10 +287,9 @@ export class Recordings {
       await rm(path, { force: true });
       throw err;
     });
-    await this.store.saved(this.key(id, part as RecordingPart));
+    await this.store.saved(this.key(id, recordingPart));
     const rec = this.get(id);
     this.db.updateRecording(id, { bytes: rec.bytes + size });
-    // The host sends the video last, so the recording is complete once it lands.
     if (part === 'video' && rec.state === 'saving') {
       this.db.updateRecording(id, { state: 'ready' });
     }
@@ -314,13 +317,11 @@ export class Recordings {
     }
     const account = this.db.getAccount(lease.principalId);
     const holder: Principal = p ?? { accountId: lease.principalId, name: account?.name ?? 'unknown', role: account?.role ?? 'member', scopes: [] };
-    const uploads = Object.fromEntries(
-      RECORDING_PARTS.map((part) => {
-        // Valid until well after the lease's longest possible life.
-        const code = auth.mintToken(this.db, 'upload', { label: `${rec.id}:${part}`, expiresAt: lease.createdAt + lease.maxMs + 3600_000 });
-        return [part, `${this.internalUrl()}/v1/uploads/recordings/${rec.id}/${part}?t=${code}`];
-      }),
-    ) as Record<RecordingPart, string>;
+    const uploadUrl = (part: RecordingPart): string => {
+      const code = auth.mintToken(this.db, 'upload', { label: `${rec.id}:${part}`, expiresAt: lease.createdAt + lease.maxMs + 3600_000 });
+      return `${this.internalUrl()}/v1/uploads/recordings/${rec.id}/${part}?t=${code}`;
+    };
+    const uploads = { video: uploadUrl('video'), log: uploadUrl('log'), screenshot: uploadUrl('screenshot') };
     const startedAt = Date.now();
     this.db.updateRecording(rec.id, { state: 'recording', startedAt });
     const t: Timeline = {
@@ -336,7 +337,7 @@ export class Recordings {
     this.timelines.set(leaseId, t);
     try {
       const { result } = await this.leases.op(holder, leaseId, { op: 'recordStart', uploads });
-      this.db.updateRecording(rec.id, { device: (result as { device?: string } | undefined)?.device ?? null });
+      this.db.updateRecording(rec.id, { device: deviceOf(result) });
       if (this.collectEveryMs > 0 && this.timelines.get(leaseId) === t) {
         t.timer = setInterval(() => void this.collect(leaseId), this.collectEveryMs);
         t.timer.unref();
@@ -344,7 +345,7 @@ export class Recordings {
       }
     } catch (err) {
       this.timelines.delete(leaseId);
-      this.db.updateRecording(rec.id, { state: 'failed', error: (err as Error).message });
+      this.db.updateRecording(rec.id, { state: 'failed', error: messageOf(err) });
       throw err;
     }
     return this.get(rec.id);
@@ -369,7 +370,7 @@ export class Recordings {
     if (!t || !what) {
       return;
     }
-    const failed = body.op === 'actions' && Array.isArray(result) ? (result as { ok: boolean; error?: { message: string } }[]).find((r) => !r.ok) : undefined;
+    const failed = body.op === 'actions' && Array.isArray(result) ? result.find((r): boolean => !r.ok) : undefined;
     t.events.push({ at: Math.max(0, at - t.startedAt), what, ...(failed ? { failed: failed.error?.message ?? 'failed' } : {}) });
   }
 
@@ -381,7 +382,6 @@ export class Recordings {
     if (t.timer) {
       clearInterval(t.timer);
     }
-    // A read that is under way when the lease ends still lands in the files.
     await t.collecting?.catch(() => {});
     this.timelines.delete(leaseId);
     await mkdir(join(this.dir, t.recordingId), { recursive: true });

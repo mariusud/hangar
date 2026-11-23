@@ -7,13 +7,12 @@ export const NIGHT_HELP = `Nights
   devicepool night close <booking | night-id>  end it
   devicepool night list [--booking NAME]       recent nights
   devicepool night report <booking | night-id> [--format md|json] [--slack-webhook URL]
-                                           print the night's report; --slack-webhook posts it
-                                           from this machine (Devicepool itself never does)`;
+                                               print the night's report; --slack-webhook posts it
+                                               from this machine (Devicepool itself never does)`;
 
 const SLACK_LIMIT = 39_000;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// A night id as is, or the newest night of the booking with that name.
 export async function resolveNight(client: Devicepool, ref: string, state?: 'open'): Promise<Night> {
   if (ID.test(ref)) {
     return client.json<Night>('GET', `/v1/nights/${ref}`);
@@ -26,7 +25,6 @@ export async function resolveNight(client: Devicepool, ref: string, state?: 'ope
   return night;
 }
 
-// Slack's message format: bold instead of headings, and a length it accepts.
 export function slackText(markdown: string, reportUrl: string): string {
   const text = markdown
     .split('\n')

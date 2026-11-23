@@ -5,12 +5,13 @@ import { promisify } from 'node:util';
 import { start } from './harness.ts';
 
 const run = promisify(execFile);
-const real = Boolean(process.env.DEVICEPOOL_REAL);
+const isReal = Boolean(process.env.DEVICEPOOL_REAL);
 const app = process.env.DEVICEPOOL_E2E_APP;
 
 async function hasApp(udidPrefix: string, bundleId: string): Promise<boolean> {
   const { stdout } = await run('xcrun', ['simctl', 'list', 'devices', '-j']);
-  const devices = Object.values((JSON.parse(stdout) as { devices: Record<string, { udid: string; name: string; state: string }[]> }).devices).flat();
+  const listing: { devices: Record<string, { udid: string; name: string; state: string }[]> } = JSON.parse(stdout);
+  const devices = Object.values(listing.devices).flat();
   for (const d of devices.filter((x) => x.name.startsWith(udidPrefix) && x.state === 'Booted' && !x.name.includes('golden'))) {
     const found = await run('xcrun', ['simctl', 'get_app_container', d.udid, bundleId]).then(() => true, () => false);
     if (found) {
@@ -20,7 +21,7 @@ async function hasApp(udidPrefix: string, bundleId: string): Promise<boolean> {
   return false;
 }
 
-test('lease, screenshot, tree, tap by label; a second client queues; release wipes', { skip: !real && 'set DEVICEPOOL_REAL=1', timeout: 600_000 }, async () => {
+test('lease, screenshot, tree, tap by label; a second client queues; release wipes', { skip: !isReal && 'set DEVICEPOOL_REAL=1', timeout: 600_000 }, async () => {
   const h = await start(1);
   try {
     const alice = h.client('alice').devicepool;

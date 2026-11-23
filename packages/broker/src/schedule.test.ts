@@ -23,7 +23,6 @@ import {
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-// Monday 2026-11-09 00:00 UTC.
 const MONDAY = Date.UTC(2026, 10, 9);
 
 function booking(fields: Partial<Booking> = {}): Booking {
@@ -186,8 +185,6 @@ function active(l: Lease, deviceId: string, at: number): Lease {
   return activate(assign(l, deviceId, at), at);
 }
 
-// ---- Property tests: a small fleet, simulated a second at a time ----
-
 type Sim = {
   now: number;
   devices: PlanDevice[];
@@ -207,7 +204,6 @@ function rng(seed: number): (n: number) => number {
   };
 }
 
-// One scheduler tick, as the broker runs it: end what is due, then plan and apply.
 function tick(sim: Sim, bookings: Booking[], floors: Map<string, number>, check: (out: ReturnType<typeof plan>, sim: Sim) => void): void {
   for (const d of due(sim.leases, sim.now)) {
     const i = sim.leases.findIndex((l) => l.id === d.id);
@@ -222,7 +218,6 @@ function tick(sim: Sim, bookings: Booking[], floors: Map<string, number>, check:
     }
   }
   for (const w of sim.wiping.filter((x) => x.readyAt <= sim.now)) {
-    // A wiped device comes back with a new id, as simulators do.
     sim.devices = sim.devices.filter((d) => d.deviceId !== w.device.deviceId).concat({ ...w.device, deviceId: `d${sim.next++}` });
   }
   sim.wiping = sim.wiping.filter((x) => x.readyAt > sim.now);
@@ -361,7 +356,6 @@ test('property: a ci request that arrives while booked agents hold every device 
     sim.now += rand(3600) * 1000;
     ask(sim, 'ci', 'ci');
     const arrived = sim.now;
-    // Agents keep asking for devices while the ci request waits.
     let n = 0;
     while (sim.leases.find((l) => l.id === 'ci')?.state === 'queued') {
       if (rand(4) === 0) {
@@ -393,7 +387,6 @@ test('property: a held device is wiped before anyone outside its run’s team le
         if (l?.deviceId) {
           sim.leases = sim.leases.map((x) => (x.id === l.id ? end(x, 'released', sim.now) : x));
           if (rand(2) === 0) {
-            // The run asked for a hold: the device keeps its state for its team.
             const hold: Hold = { deviceId: l.deviceId, hostLeaseId: l.id, runId: 'run', flow: `f${n}`, teamId: l.teamId, until: sim.now + rand(600) * 1000, leaseId: null };
             sim.holds.push(hold);
             sim.heldEver.set(l.deviceId, l.teamId);
@@ -414,7 +407,6 @@ test('property: a held device is wiped before anyone outside its run’s team le
           hold.leaseId = id;
         }
       }
-      // A hold ends at its time, or when the lease on it ends; then the device is wiped.
       for (const hold of [...sim.holds]) {
         const lease = hold.leaseId ? sim.leases.find((l) => l.id === hold.leaseId) : undefined;
         const over = holdsDue([hold], sim.now).length > 0 || lease?.state === 'ended';
@@ -437,4 +429,3 @@ test('property: a held device is wiped before anyone outside its run’s team le
     }
   }
 });
-

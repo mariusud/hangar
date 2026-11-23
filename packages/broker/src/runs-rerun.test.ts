@@ -10,12 +10,10 @@ import { startBroker, type Broker } from './index.ts';
 
 type Fails = (flow: string, attempt: number, batch: string[]) => boolean;
 
-// An agent with one simulator at a time. `fails` decides each flow's result from how often it has run.
 function fakeAgent(broker: Broker, fails: Fails): { maestro: { flows: string[]; env: Record<string, string> }[]; leases: string[] } {
   const maestro: { flows: string[]; env: Record<string, string> }[] = [];
   const leases: string[] = [];
   const attempts = new Map<string, number>();
-  // Fresh ids per agent: a broker that restarts does not hand out a device it saw leased before.
   const prefix = randomUUID().slice(0, 8);
   let n = 1;
   let devices: AgentDevice[] = [{ deviceId: `${prefix}-1`, model: 'iPhone 17', os: '26.5', state: 'ready', platform: 'ios-simulator' }];

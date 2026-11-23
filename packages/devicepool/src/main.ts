@@ -17,22 +17,22 @@ Server
                                                  run Devicepool on this Mac; --android adds
                                                  emulators from that Android virtual device;
                                                  --phones adds the Android phones on USB
-  devicepool up --install [same options]             run it as a service that starts at login
+  devicepool up --install [same options]         run it as a service that starts at login
   sudo devicepool up --install --system --user <name> [same options]
                                                  start it at boot as that user, with
                                                  nobody logged in (a LaunchDaemon)
-  devicepool up --uninstall [--system]               remove the service
-  devicepool doctor                                  check this Mac
-  devicepool --version                               print the version
+  devicepool up --uninstall [--system]           remove the service
+  devicepool doctor                              check this Mac
+  devicepool --version                           print the version
 
 More Macs
   devicepool broker [--port 7420] [--url https://...] [--host 0.0.0.0]
                                                  run only the broker, as in a container
-  devicepool join-token                              print a token for another Mac, on the broker
+  devicepool join-token                          print a token for another Mac, on the broker
   devicepool join <broker-url> --token <token> [--warm 1] [--max N] [--android <avd>] [--phones]
                                                  offer this Mac's simulators through that broker
-  devicepool export <file.tar>                       copy accounts, tokens, history, builds, recordings
-  devicepool import <file.tar>                       start a new broker from an export
+  devicepool export <file.tar>                   copy accounts, tokens, history, builds, recordings
+  devicepool import <file.tar>                   start a new broker from an export
 
 React Native
 ${RUN_HELP}

@@ -71,7 +71,6 @@ test('plaintext secrets are encrypted when the broker starts, and hosts still ge
     assert.ok(images?.type === 'images');
     assert.deepEqual(images.images[0]?.setup?.signIn?.values, { USER_EMAIL: 'qa@example.com', USER_PASSWORD: 'hunter2' });
 
-    // A value sealed under a lost key is listed as unreadable and not sent to hosts.
     broker.db.saveImageSecret('USER_PASSWORD', sealSecret(randomBytes(32), 'USER_PASSWORD', 'other'), 2000);
     const after = await call(op, 'GET', '/v1/image-secrets');
     assert.deepEqual(after.json, [
@@ -186,7 +185,6 @@ test('a failed golden build is shown as failed and new leases on it get IMAGE_FA
     assert.match(String(field(error, 'message')), /fake-mac: App\.app is not built for the simulator\./);
     assert.match(String(field(error, 'hint')), /devicepool image set/);
 
-    // The status survives a reconnect hello, and a new build attempt clears it.
     send({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [plain], devices: [], leases: [] });
     assert.equal(field(await row(), 'state'), 'failed');
     send({ type: 'images.status', image: 'nightly', id, state: 'building' });

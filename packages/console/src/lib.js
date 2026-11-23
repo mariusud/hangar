@@ -1,9 +1,9 @@
-// Pure helpers for app.js, kept apart so node can test them without a browser.
-
 export function deviceRows(devices, image) {
   const rows = new Map();
   for (const d of devices) {
-    if ((d.image ?? null) !== (image ?? null)) continue;
+    if ((d.image ?? null) !== (image ?? null)) {
+      continue;
+    }
     const key = `${d.platform}|${d.model}|${d.os}`;
     const row = rows.get(key) ?? { platform: d.platform, model: d.model, os: d.os, host: d.host, free: 0, total: 0 };
     row.total += 1;
@@ -25,7 +25,9 @@ export function leaseClass(row, image) {
 }
 
 export function withView(path, view) {
-  if (!view) return path;
+  if (!view) {
+    return path;
+  }
   return `${path}${path.includes('?') ? '&' : '?'}view=${encodeURIComponent(view)}`;
 }
 
@@ -53,13 +55,14 @@ export function isLanguageTag(tag) {
   return /^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$/.test(tag);
 }
 
-// "5 minutes", "2 hours", "1 hour 30 minutes".
 export function duration(ms) {
   const minutes = Math.max(1, Math.round(ms / 60_000));
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   const unit = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-  if (hours === 0) return unit(rest, 'minute');
+  if (hours === 0) {
+    return unit(rest, 'minute');
+  }
   return rest ? `${unit(hours, 'hour')} ${unit(rest, 'minute')}` : unit(hours, 'hour');
 }
 
@@ -67,7 +70,6 @@ export function limitsText(limits) {
   return `Yours until you release it, leave it idle for ${duration(limits.idleMs)}, or have held it for ${duration(limits.maxMs)}. It is wiped when it ends.`;
 }
 
-// The recordings a flow kept: the first failed attempt's, and the latest attempt's when that is another one.
 export function flowRecordings(flow) {
   const links = [];
   if (flow.firstRecording) links.push({ label: 'First failure', href: pathOf(flow.firstRecording) });
@@ -89,14 +91,17 @@ export function canRerun(run, flow) {
   return run.state !== 'running' && (flow.status === 'failed' || flow.status === 'flaky');
 }
 
-// KEY=value lines, as a rerun's `env`. Blank lines and lines starting with # are skipped.
 export function parseEnv(text) {
   const env = {};
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
     const at = line.indexOf('=');
-    if (at <= 0) throw new Error(`"${line}" is not KEY=value.`);
+    if (at <= 0) {
+      throw new Error(`"${line}" is not KEY=value.`);
+    }
     env[line.slice(0, at).trim()] = line.slice(at + 1);
   }
   return env;
@@ -117,12 +122,15 @@ export const LIMIT_FIELDS = [
   { key: 'grace', label: 'Reconnect grace', unit: 'minutes', ms: 60_000 },
 ];
 
-// A form value in the field's unit, as the seconds PUT /v1/lease-limits/:role takes. Empty goes back to the built-in cap.
 export function capSeconds(value, field) {
   const text = String(value).trim();
-  if (text === '') return null;
+  if (text === '') {
+    return null;
+  }
   const n = Number(text);
-  if (!Number.isFinite(n) || n <= 0) throw new Error(`${field.label} must be a positive number of ${field.unit}.`);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`${field.label} must be a positive number of ${field.unit}.`);
+  }
   return Math.round((n * field.ms) / 1000);
 }
 
@@ -133,16 +141,23 @@ export function capValue(ms, field) {
 const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
 export function daysText(days) {
-  if (days.length === 7) return 'every day';
+  if (days.length === 7) {
+    return 'every day';
+  }
   const sorted = WEEK.filter((d) => days.includes(d));
-  if (sorted.join(',') === 'mon,tue,wed,thu,fri') return 'weekdays';
-  if (sorted.join(',') === 'sat,sun') return 'weekends';
+  if (sorted.join(',') === 'mon,tue,wed,thu,fri') {
+    return 'weekdays';
+  }
+  if (sorted.join(',') === 'sat,sun') {
+    return 'weekends';
+  }
   return sorted.join(', ');
 }
 
-// Whether a booking's window is open now, and when it closes or next opens.
 export function windowStatus(booking, now) {
-  if (booking.open) return { open: true, text: `Open, closes in ${duration(booking.open.to - now)}` };
+  if (booking.open) {
+    return { open: true, text: `Open, closes in ${duration(booking.open.to - now)}` };
+  }
   if (booking.next) {
     const ms = booking.next.from - now;
     const days = Math.round(ms / 86_400_000);
@@ -151,7 +166,6 @@ export function windowStatus(booking, now) {
   return { open: false, text: 'No window ahead' };
 }
 
-// The Schedule form's fields as the body POST /v1/bookings takes. The broker checks days and times.
 export function bookingBody(fields) {
   const body = {};
   for (const key of ['name', 'days', 'from', 'to', 'image', 'platform', 'model', 'os']) {
@@ -159,12 +173,13 @@ export function bookingBody(fields) {
     if (value) body[key] = value;
   }
   const devices = Number(String(fields.devices ?? '').trim() || 'x');
-  if (!Number.isInteger(devices) || devices < 1) throw new Error('Devices must be a whole number from 1.');
+  if (!Number.isInteger(devices) || devices < 1) {
+    throw new Error('Devices must be a whole number from 1.');
+  }
   body.devices = devices;
   return body;
 }
 
-// MCP settings for a token, the same as `devicepool connect <booking>` prints.
 export function mcpSettings(mcpUrl, token) {
   return {
     json: JSON.stringify({ mcpServers: { devicepool: { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
@@ -177,7 +192,6 @@ export function countdown(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// The banner for a lease that was told it ends early.
 export function endingText(ending, now) {
   const left = countdown(ending.at - now);
   if (ending.reason === 'preempted') {
@@ -187,7 +201,9 @@ export function endingText(ending, now) {
 }
 
 export function heldText(until, now) {
-  if (until <= now) return 'The hold has ended. Devicepool wipes the device.';
+  if (until <= now) {
+    return 'The hold has ended. Devicepool wipes the device.';
+  }
   return `Kept as the flow left it for ${duration(until - now)} more.`;
 }
 
@@ -195,12 +211,19 @@ export function logTail(lines, count = 20) {
   return lines.slice(-count);
 }
 
-// Where to go after POST /v1/findings/:id/open-again: the new lease's page, or the link it returns.
 export function openAgainTarget(result) {
-  if (result?.lease?.id) return `/leases/${result.lease.id}`;
-  if (result?.leaseId) return `/leases/${result.leaseId}`;
-  if (result?.id && result?.state) return `/leases/${result.id}`;
-  if (typeof result?.url === 'string') return pathOf(result.url);
+  if (result?.lease?.id) {
+    return `/leases/${result.lease.id}`;
+  }
+  if (result?.leaseId) {
+    return `/leases/${result.leaseId}`;
+  }
+  if (result?.id && result?.state) {
+    return `/leases/${result.id}`;
+  }
+  if (typeof result?.url === 'string') {
+    return pathOf(result.url);
+  }
   return null;
 }
 
@@ -211,7 +234,6 @@ export function openAgainError(err) {
   return err.message;
 }
 
-// A link the broker gives as a full URL, as a path on this console. It keeps the query and a video's #t= span.
 export function linkPath(url) {
   try {
     const u = new URL(url);

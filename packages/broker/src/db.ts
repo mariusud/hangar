@@ -206,12 +206,10 @@ export class Db {
     this.sql = new DatabaseSync(path);
     this.sql.exec('pragma journal_mode = wal; pragma busy_timeout = 5000;');
     this.sql.exec(SCHEMA);
-    // Tokens once took their account's role. The operator's own CLI tokens keep it; every other token becomes a member's.
     this.sql.exec(`update tokens set scopes = trim(scopes || ' operator install:upload')
       where kind = 'member' and (label like 'devicepool up on %' or label like 'CLI on %') and ' ' || scopes || ' ' not like '% operator %'
       and account_id in (select id from accounts where role = 'operator')`);
   }
-
 
   insertLease(lease: Lease): void {
     this.sql
@@ -242,7 +240,6 @@ export class Db {
       .map(parseLease);
   }
 
-  // Replaced devices get a new id, so an id a lease ever held is never handed out again.
   usedDeviceIds(): Set<string> {
     const rows = this.sql.prepare('select distinct device_id from leases where device_id is not null').all();
     return new Set(rows.map((r) => String(r.device_id)));
@@ -251,7 +248,6 @@ export class Db {
   recentLeases(limit = 100): Lease[] {
     return this.sql.prepare('select data from leases order by rowid desc limit ?').all(limit).map(parseLease);
   }
-
 
   insertAccount(a: Account): void {
     this.sql
@@ -290,7 +286,6 @@ export class Db {
     this.sql.prepare('update accounts set password_hash = ? where id = ?').run(hash, id);
   }
 
-
   insertToken(t: TokenRow): void {
     this.sql
       .prepare(
@@ -316,7 +311,6 @@ export class Db {
     };
   }
 
-  // Returns false if the token was already used, so racing requests cannot both spend it.
   useToken(hash: string, now: number): boolean {
     const r = this.sql.prepare('update tokens set used_at = ? where hash = ? and used_at is null').run(now, hash);
     return r.changes === 1;
@@ -347,7 +341,6 @@ export class Db {
     this.sql.prepare('delete from sessions where hash = ?').run(hash);
   }
 
-
   insertBuild(sha256: string, name: string, path: string, size: number): void {
     this.sql
       .prepare('insert or ignore into builds (sha256, name, path, size, created_at) values (?, ?, ?, ?, ?)')
@@ -367,7 +360,6 @@ export class Db {
       .all()
       .map((r) => ({ sha256: String(r.sha256), name: String(r.name), size: Number(r.size) }));
   }
-
 
   insertRecording(r: RecordingRow): void {
     this.sql
@@ -413,7 +405,6 @@ export class Db {
     return this.sql.prepare("select * from recordings where created_at < ? and state != 'deleted'").all(before).map(toRecording);
   }
 
-
   teams(): Team[] {
     const rows = this.sql.prepare('select id, name, quota from teams order by name').all().map(toTeam);
     return rows.some((t) => t.id === DEFAULT_TEAM) ? rows : [{ id: DEFAULT_TEAM, name: 'Default', quota: null }, ...rows];
@@ -431,7 +422,6 @@ export class Db {
   setTeam(accountId: string, teamId: string): void {
     this.sql.prepare('insert into memberships (account_id, team_id) values (?, ?) on conflict(account_id) do update set team_id = excluded.team_id').run(accountId, teamId);
   }
-
 
   images(): ImageSpec[] {
     return this.sql.prepare('select data from images order by name').all().map((r) => JSON.parse(String(r.data)));
@@ -654,7 +644,6 @@ export class Db {
     return this.sql.prepare(`select * from nights ${clause} order by opened_at desc, rowid desc limit ?`).all(...args, limit).map(toNight);
   }
 
-  // Leases of a team that were active at some point in [from, to].
   teamLeasesActiveBetween(teamId: string, from: number, to: number): Lease[] {
     return this.sql
       .prepare(

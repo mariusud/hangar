@@ -17,7 +17,6 @@ export type Host = {
   connected: boolean;
   lostAt: number | null;
   link: HostLink;
-  // The host's last word on each image declaration it builds, by image id.
   images: Map<string, { state: ImageBuildState; message?: string }>;
 };
 
