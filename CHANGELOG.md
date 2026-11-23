@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- The project is now called Devicepool. Commands, variables (`DEVICEPOOL_*`), the data folder
+  (`~/.devicepool`) and the `<devicepool-screen>` element follow. New tokens start with `dp_`; old
+  ones stay valid.
+- `pnpm build:npm` builds the npm package in `dist/npm`.
+- Android phones over USB with `devicepool up --phones`. Experimental: tested with a fake phone
+  only. A phone is wiped by undoing the lease and reading it back, and quarantined on a mismatch.
+- The GitHub Action runs with no server on a macOS runner when `url` is empty. Not yet run on a
+  real runner. A `build-name` input and `--build-name` let prefix-limited CI tokens upload.
+- A broker restart no longer ends active leases: a lease whose host has not reconnected is kept
+  for 60 seconds after the broker starts. A host that has lost the broker ends and wipes leases 60
+  seconds past their deadline.
+- A malformed agent message is logged and dropped, the lease scheduler keeps running past a
+  failing lease, and `up`, `broker` and `join` log unhandled rejections instead of dying.
+- One account may hold at most 50 queued or running leases and a run at most 50 shards
+  (`DEVICEPOOL_MAX_LEASES_PER_ACCOUNT`, `DEVICEPOOL_MAX_SHARDS`).
+- Sign-in attempts are limited: five failures in 10 minutes block that name or address for 60
+  seconds. At most four password hashes run at once.
+- Single sign-on: optional `DEVICEPOOL_OIDC_DOMAINS`, a warning when neither it nor
+  `DEVICEPOOL_OIDC_GROUPS` is set, and the sign-in is tied to the browser that started it.
+- Requests that use the session cookie from another origin are refused. The console is served
+  with nosniff, frame and Content-Security-Policy headers.
+- A second lease asking for a tunnel port another iOS lease holds gets `TUNNEL_PORT_BUSY` instead
+  of a silent random port. Ports below 1024 are refused.
+- A second Devicepool or `join` on a Mac that already runs one refuses to start instead of
+  deleting the first one's simulators.
+- Usage mistakes print one line and exit 2 instead of a stack trace, and numeric options are
+  range-checked. `DEVICEPOOL_DEBUG=1` shows the stack of other errors.
+- `devicepool join` says when the broker cannot be reached. `up --install` reports why the service
+  did not start. `devicepool lease` prints the queue position every 30 seconds.
+- A refused token says so, mistyped app paths say "No such file", and device builds are refused
+  with the `-sdk iphonesimulator` hint.
+- `devicepool export` writes its tar readable only by the owner.
+- Fixed: after the rename no simulator became ready, because the idb companion's socket path was
+  longer than macOS allows.
+
 - `POST /v1/leases/:id/tokens` makes a token that drives only that lease and ends with it.
 - `devicepool run ios --build NAME` and `run android --build NAME` install a build Devicepool already
   has, so they run without Xcode or Gradle, for example on Linux. `--lease` (or `DEVICEPOOL_LEASE`)

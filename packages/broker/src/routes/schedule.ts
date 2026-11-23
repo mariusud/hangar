@@ -33,7 +33,7 @@ route('POST', '/v1/bookings/:name/tokens', async (req, res, ctx) => {
     throw new ApiError(403, 'FORBIDDEN', 'Only people on the booking’s team can make tokens for it.');
   }
   const b = await body<TokenRequest>(req);
-  const { token, limits, priority } = mintMemberToken(ctx.db, p, { ...b, priority: undefined, label: typeof b.label === 'string' ? b.label : `booking ${booking.name}` }, booking.id);
+  const { token, limits, priority } = ctx.db.tx(() => mintMemberToken(ctx.db, p, { ...b, priority: undefined, label: typeof b.label === 'string' ? b.label : `booking ${booking.name}` }, booking.id));
   ctx.db.audit(`booking.token ${booking.name}`, p.accountId, null);
   json(res, 201, { token, limits, priority, booking: bookingView(ctx.db, booking, ctx.leases.timeZone, Date.now()), mcp: `${ctx.publicUrl()}/mcp` });
 });

@@ -1,14 +1,26 @@
 import { createServer, type Server, type Socket } from 'node:net';
 import type { AgentMessage } from '@devicepool/protocol';
 
+class TunnelError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 type Tunnel = { servers: Server[]; port: number; ports: Record<string, number>; sockets: Map<number, Socket> };
 
 export class Tunnels {
   private tunnels = new Map<string, Tunnel>();
   private send: (m: AgentMessage) => void;
 
-  constructor(send: (m: AgentMessage) => void) {
+  private shouldFallBack: boolean;
+
+  constructor(send: (m: AgentMessage) => void, options: { shouldFallBack?: boolean } = {}) {
     this.send = send;
+    this.shouldFallBack = options.shouldFallBack ?? false;
   }
 
   port(leaseId: string): number | undefined {
@@ -45,7 +57,11 @@ export class Tunnels {
         };
         server.once('error', (err: NodeJS.ErrnoException) => {
           if (err.code === 'EADDRINUSE' && wanted !== 0) {
-            server.listen(0, '127.0.0.1', bound);
+            if (this.shouldFallBack) {
+              server.listen(0, '127.0.0.1', bound);
+              return;
+            }
+            reject(new TunnelError('TUNNEL_PORT_BUSY', `Port ${wanted} is held by another lease or program on this Mac. Use another port with --port, or wait.`));
             return;
           }
           reject(err);
@@ -65,7 +81,7 @@ export class Tunnels {
       for (const server of servers) {
         server.close();
       }
-      this.send({ type: 'response', id, ok: false, error: { code: 'TUNNEL_FAILED', message: err.message } });
+      this.send({ type: 'response', id, ok: false, error: { code: err instanceof TunnelError ? err.code : 'TUNNEL_FAILED', message: err.message } });
     });
   }
 

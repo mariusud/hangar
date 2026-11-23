@@ -17,8 +17,8 @@ when is the service still the better choice.
 
 ## What is true on every page
 
-- Devicepool runs iOS simulators and Android emulators. It does not run physical phones.
-  Physical phones are on the roadmap.
+- Devicepool runs iOS simulators and Android emulators. It does not run iPhones. Android phones
+  over USB are experimental and have never run on real hardware.
 - Devicepool needs a Mac that someone on your team looks after: macOS and Xcode updates, disk
   space, and a network your developers, CI and agents can reach.
 - Devicepool is early. It is not on npm yet, and you install it from a clone of the repository.

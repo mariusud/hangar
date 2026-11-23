@@ -10,6 +10,7 @@ import { download, findAll, findOne, maestro, onScreen, OpError } from './index.
 import { cursor, LeaseTools, pageLimit } from './drivers/devtools.ts';
 import type { JsTools } from './drivers/cdp.ts';
 import { ToolError } from './drivers/tool-error.ts';
+import { overdue } from './connect.ts';
 import { Tunnels } from './tunnels.ts';
 
 const run = promisify(execFile);
@@ -75,7 +76,7 @@ export class AndroidAgent {
     this.opts = opts;
     this.maxDevices = opts.maxDevices ?? 2;
     this.warm = Math.min(opts.warm ?? 1, this.maxDevices);
-    this.tunnels = new Tunnels(opts.send);
+    this.tunnels = new Tunnels(opts.send, { shouldFallBack: true });
     this.adb = opts.adb ?? { list: android.deviceList, open: android.adbFor };
     this.driver = opts.driver ?? android;
     this.stateDir = opts.stateDir ?? join(process.env.DEVICEPOOL_HOME ?? join(homedir(), '.devicepool'), 'phones');
@@ -83,6 +84,19 @@ export class AndroidAgent {
 
   private log(line: string): void {
     (this.opts.log ?? console.log)(`android: ${line}`);
+  }
+
+  private deadlines = new Map<string, number>();
+
+  endOverdue(now: number, graceMs: number): void {
+    for (const leaseId of overdue(this.deadlines, now, graceMs)) {
+      this.log(`Lease ${leaseId} is past its deadline and the broker is unreachable. Ending and wiping it.`);
+      this.background(`Ending lease ${leaseId}`, this.endLease(leaseId));
+    }
+  }
+
+  private background(what: string, work: Promise<unknown>): void {
+    work.catch((err: unknown) => this.log(`${what} failed: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   async start(): Promise<void> {
@@ -96,9 +110,9 @@ export class AndroidAgent {
     await this.hello();
     if (this.opts.phones) {
       await this.scanPhones();
-      this.scanTimer = setInterval(() => void this.scanPhones(), PHONE_SCAN_MS);
+      this.scanTimer = setInterval(() => this.background('Scanning for phones', this.scanPhones()), PHONE_SCAN_MS);
     }
-    void this.fill();
+    this.background('Filling the pool', this.fill());
   }
 
   async hello(): Promise<void> {
@@ -221,6 +235,7 @@ export class AndroidAgent {
         return;
       }
       d.leaseId = m.leaseId;
+      this.deadlines.set(m.leaseId, m.deadline);
       d.state = 'busy';
       this.publish();
       if (d.kind === 'phone') {
@@ -228,21 +243,21 @@ export class AndroidAgent {
         return;
       }
       this.opts.send({ type: 'response', id: m.id, ok: true });
-      void this.fill();
+      this.background('Filling the pool', this.fill());
     } else if (m.type === 'lease.end') {
-      void this.endLease(m.leaseId);
+      this.background(`Ending lease ${m.leaseId}`, this.endLease(m.leaseId));
     } else if (m.type === 'op') {
-      void this.op(m.id, m.leaseId, m.body);
+      this.background(`Running an operation for lease ${m.leaseId}`, this.op(m.id, m.leaseId, m.body));
     } else if (m.type === 'stream.start') {
       if (m.codec === 'h264') {
-        void this.startStream(m.leaseId);
+        this.background(`Starting the stream for lease ${m.leaseId}`, this.startStream(m.leaseId));
       } else {
         this.opts.send({ type: 'stream.failed', leaseId: m.leaseId, codec: m.codec, message: 'Android streams are H.264 only; open the console over HTTPS or on localhost.' });
       }
     } else if (m.type === 'stream.stop') {
-      void this.stopStream(m.leaseId);
+      this.background(`Stopping the stream for lease ${m.leaseId}`, this.stopStream(m.leaseId));
     } else if (m.type === 'stream.keyframe') {
-      void this.streams.get(m.leaseId)?.then((s) => s.keyframe());
+      this.background(`Asking for a keyframe for lease ${m.leaseId}`, Promise.resolve(this.streams.get(m.leaseId)?.then((s) => s.keyframe())));
     } else if (m.type === 'tunnel.start') {
       const d = this.held(m.leaseId);
       if (!d) {
@@ -284,6 +299,7 @@ export class AndroidAgent {
   }
 
   private async endLease(leaseId: string): Promise<void> {
+    this.deadlines.delete(leaseId);
     this.tunnels.stop(leaseId);
     this.tools.close(leaseId);
     for (const [deviceId, lostLease] of this.lost) {
@@ -301,7 +317,7 @@ export class AndroidAgent {
       });
       return;
     }
-    await this.stopStream(leaseId);
+    await this.stopStream(leaseId).catch((err: unknown) => this.log(`Could not stop the stream of lease ${leaseId}: ${err instanceof Error ? err.message : String(err)}`));
     if (!d) {
       return;
     }
@@ -311,7 +327,7 @@ export class AndroidAgent {
     await android.kill(d.emulator);
     this.devices.delete(d.deviceId);
     this.publish();
-    void this.fill();
+    this.background('Filling the pool', this.fill());
   }
 
   private enqueue(deviceId: string, job: () => Promise<void>): Promise<void> {
@@ -439,7 +455,7 @@ export class AndroidAgent {
       this.lost.set(d.deviceId, d.leaseId);
       this.tunnels.stop(d.leaseId);
       this.tools.close(d.leaseId);
-      void this.stopStream(d.leaseId);
+      this.background(`Stopping the stream for lease ${d.leaseId}`, this.stopStream(d.leaseId));
     }
     this.log(`${d.model} was unplugged${d.baseline ? '; its lease is wiped when it is plugged in again' : ''}`);
   }

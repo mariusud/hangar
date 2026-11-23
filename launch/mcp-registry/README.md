@@ -1,5 +1,8 @@
 # MCP registry and Claude Code plugin listing
 
+The `server.json` entry cannot be submitted until the `devicepool` package is on npm. Today it is
+not published.
+
 Read on 2026-11-22 from modelcontextprotocol.io/registry (quickstart, remote servers, package types), the registry's `server.json` schema dated 2025-12-11, and code.claude.com/docs (create a marketplace, publish a plugin). The MCP Registry is marked as a preview, so recheck before publishing.
 
 ## Short answer
@@ -60,13 +63,14 @@ claude plugin marketplace add mariusud/devicepool
 claude plugin install devicepool@devicepool
 ```
 
-or, inside a session, on Claude Code v2.1.275 or later:
+or, inside a session:
 
 ```
-/plugin install devicepool --marketplace mariusud/devicepool
+/plugin marketplace add mariusud/devicepool
+/plugin install devicepool@devicepool
 ```
 
-with `DEVICEPOOL_URL` and `DEVICEPOOL_TOKEN` set in the environment. The README and docs/guides/agents.md use the second form, so they need the version note or the two-command form for older clients.
+with `DEVICEPOOL_URL` and `DEVICEPOOL_TOKEN` set in the environment. The README and docs/guides/agents.md use the in-session form.
 
 I ran the validator on 2026-11-22:
 

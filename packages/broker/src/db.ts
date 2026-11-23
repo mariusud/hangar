@@ -211,6 +211,36 @@ export class Db {
       and account_id in (select id from accounts where role = 'operator')`);
   }
 
+  private txDepth = 0;
+
+  tx<T>(fn: () => T): T {
+    if (this.txDepth > 0) {
+      return fn();
+    }
+    this.sql.exec('begin immediate');
+    this.txDepth = 1;
+    try {
+      const result = fn();
+      this.sql.exec('commit');
+      return result;
+    } catch (err) {
+      this.sql.exec('rollback');
+      throw err;
+    } finally {
+      this.txDepth = 0;
+    }
+  }
+
+  purgeExpired(now: number): { sessions: number; tokens: number } {
+    return this.tx(() => {
+      this.sql.prepare('delete from token_limits where hash in (select hash from tokens where expires_at is not null and expires_at <= ?)').run(now);
+      this.sql.prepare('delete from token_priorities where hash in (select hash from tokens where expires_at is not null and expires_at <= ?)').run(now);
+      const tokens = this.sql.prepare('delete from tokens where expires_at is not null and expires_at <= ?').run(now);
+      const sessions = this.sql.prepare('delete from sessions where expires_at <= ?').run(now);
+      return { sessions: Number(sessions.changes), tokens: Number(tokens.changes) };
+    });
+  }
+
   insertLease(lease: Lease): void {
     this.sql
       .prepare('insert into leases (id, state, device_id, principal_id, data) values (?, ?, ?, ?, ?)')
@@ -746,4 +776,18 @@ function toAccount(row: Record<string, unknown>): Account {
     role: String(row.role) as Account['role'],
     passwordHash: row.password_hash === null ? null : String(row.password_hash),
   };
+}
+
+export function startCleanup(db: Db, everyMs = 60 * 60_000, now: () => number = Date.now): () => void {
+  const purge = (): void => {
+    try {
+      db.purgeExpired(now());
+    } catch (err) {
+      console.error('Clearing expired sessions and tokens failed.', err);
+    }
+  };
+  purge();
+  const timer = setInterval(purge, everyMs);
+  timer.unref();
+  return () => clearInterval(timer);
 }

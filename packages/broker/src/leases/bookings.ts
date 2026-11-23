@@ -30,6 +30,9 @@ export function createBooking(db: Db, hosts: Hosts, p: Principal, req: BookingRe
   if (!/^[A-Za-z0-9][\w.-]{0,39}$/.test(name)) {
     throw new ApiError(400, 'BAD_NAME', 'Give the booking a `name` of letters, digits, dots, dashes or underscores, such as nightly-qa.');
   }
+  if (['claude', 'cursor', 'codex', 'ci'].includes(name.toLowerCase())) {
+    throw new ApiError(400, 'BAD_NAME', `${name} is a name \`devicepool connect\` uses for its own targets.`, 'Pick another name, such as nightly-qa.');
+  }
   if (db.bookings().some((b) => b.name.toLowerCase() === name.toLowerCase())) {
     throw new ApiError(409, 'BOOKING_EXISTS', `There is already a booking called ${name}.`, 'Pick another name, or remove that one first.');
   }

@@ -45,14 +45,24 @@ docker logs devicepool
 docker exec devicepool devicepool join-token
 ```
 
-The image keeps everything (SQLite, builds, recordings) in `/data`. On Kubernetes, the chart in
-`deploy/helm/devicepool` runs one replica with a volume, and an optional ingress whose annotations
-keep WebSockets open:
+The image keeps everything (SQLite, builds, recordings) in `/data`. Inside the container,
+`DEVICEPOOL_URL` is the address the broker gives out in links and tokens. The CLI reads the same
+variable name as a client, to find the server it talks to.
+
+No image is published. On Kubernetes, build the image from the Dockerfile, push it to your own
+registry, and set `image.repository` and `image.tag`. The chart in `deploy/helm/devicepool` runs
+one replica with a volume, and an optional ingress whose annotations keep WebSockets open:
 
 ```bash
-helm install devicepool deploy/helm/devicepool --set url=https://devicepool.example.com \
+docker build -t registry.example.com/devicepool:0.1.0 .
+docker push registry.example.com/devicepool:0.1.0
+helm install devicepool deploy/helm/devicepool \
+  --set image.repository=registry.example.com/devicepool --set image.tag=0.1.0 \
+  --set url=https://devicepool.example.com \
   --set ingress.enabled=true --set ingress.host=devicepool.example.com
 ```
+
+With the defaults the image name is empty and `helm install` stops with a message that says to set both values.
 
 Run only one broker per database. Two would hand the same device to two people.
 

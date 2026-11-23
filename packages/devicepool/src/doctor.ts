@@ -70,6 +70,34 @@ async function output(cmd: string, args: string[]): Promise<string | null> {
   }
 }
 
+export function xcodeProblem(text: string): { detail: string; fix: string } {
+  if (/license/i.test(text)) {
+    return { detail: 'the license is not accepted', fix: 'Run `sudo xcodebuild -license accept`.' };
+  }
+  if (/requires Xcode|command line tools instance|CommandLineTools/i.test(text)) {
+    return { detail: 'the active developer folder is the Command Line Tools, not Xcode', fix: 'Run `sudo xcode-select -s /Applications/Xcode.app`. If that folder does not exist, install Xcode from the App Store and open it once first.' };
+  }
+  const line = text.split('\n').map((l) => l.trim()).find((l) => l && !/ENOENT/.test(l));
+  return {
+    detail: /ENOENT|not found|no developer tools/i.test(text) || !line ? 'not found' : `does not run: ${line}`,
+    fix: 'Install Xcode from the App Store, open it once, then run `sudo xcode-select -s /Applications/Xcode.app`.',
+  };
+}
+
+export function withBrew(fix: string, hasBrew: boolean): string {
+  return /\bbrew\b/.test(fix) && !hasBrew ? `Install Homebrew first (https://brew.sh), then: ${fix}` : fix;
+}
+
+async function failure(cmd: string, args: string[]): Promise<string> {
+  try {
+    await run(cmd, args);
+    return '';
+  } catch (err) {
+    const stderr = err instanceof Error && 'stderr' in err && typeof err.stderr === 'string' ? err.stderr : '';
+    return `${stderr}\n${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 async function cltVersion(): Promise<string | null> {
   const info = await output('pkgutil', ['--pkg-info=com.apple.pkg.CLTools_Executables']);
   return info ? (/^version:\s*(\S+)/m.exec(info)?.[1] ?? null) : null;
@@ -118,11 +146,12 @@ export async function smokeCheck(): Promise<Check> {
 export async function doctor(opts: { smoke?: boolean } = {}): Promise<Check[]> {
   const checks: Check[] = [];
   const xcode = await output('xcodebuild', ['-version']);
-  checks.push(
-    xcode
-      ? { name: 'Xcode', ok: true, detail: xcode.split('\n')[0] ?? '' }
-      : { name: 'Xcode', ok: false, detail: 'not found', fix: 'Install Xcode from the App Store, open it once, then run `sudo xcode-select -s /Applications/Xcode.app`.' },
-  );
+  const hasBrew = (await output('brew', ['--version'])) !== null;
+  if (xcode) {
+    checks.push({ name: 'Xcode', ok: true, detail: xcode.split('\n')[0] ?? '' });
+  } else {
+    checks.push({ name: 'Xcode', ok: false, ...xcodeProblem(await failure('xcodebuild', ['-version'])) });
+  }
   const runtimes = await output('xcrun', ['simctl', 'list', 'runtimes', '-j']);
   const ios = runtimes ? iosRuntimes(JSON.parse(runtimes)) : [];
   checks.push(
@@ -137,13 +166,13 @@ export async function doctor(opts: { smoke?: boolean } = {}): Promise<Check[]> {
     const xcodeVersion = xcode ? (/^Xcode (\S+)/.exec(xcode)?.[1] ?? null) : null;
     const clt = await cltVersion();
     const fix = companionFix(clt, xcodeVersion, isOlder(clt ?? '', xcodeVersion ?? '') ? await tappedFormula() : null);
-    checks.push({ name: 'idb companion', ok: false, detail: 'not found', fix: fix ?? 'brew tap facebook/fb && brew install idb-companion' });
+    checks.push({ name: 'idb companion', ok: false, detail: 'not found', fix: withBrew(fix ?? 'brew tap facebook/fb && brew install idb-companion', hasBrew) });
   }
   const client = await output('idb', ['--help']);
   checks.push(
     client
       ? { name: 'idb client', ok: true, detail: 'installed' }
-      : { name: 'idb client', ok: false, detail: 'not found', fix: 'pipx install fb-idb   (or: pip3 install --user fb-idb)' },
+      : { name: 'idb client', ok: false, detail: 'not found', fix: `${withBrew((await output('pipx', ['--version'])) === null ? 'brew install pipx && pipx install fb-idb' : 'pipx install fb-idb', hasBrew)}   (pipx puts idb in ~/.local/bin, which doctor searches along with /opt/homebrew/bin and /usr/local/bin; pip3 install --user puts it in ~/Library/Python, which doctor does not search)` },
   );
   const user = userInfo().username;
   checks.push({

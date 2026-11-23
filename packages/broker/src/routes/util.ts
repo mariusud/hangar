@@ -85,7 +85,9 @@ export function operator(req: IncomingMessage, ctx: Ctx): auth.Principal {
   return p;
 }
 
-export async function body<T>(req: IncomingMessage, limit = 1_000_000): Promise<T> {
+export async function body(req: IncomingMessage, limit?: number): Promise<unknown>;
+export async function body<T>(req: IncomingMessage, limit?: number): Promise<T>;
+export async function body(req: IncomingMessage, limit = 1_000_000): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -96,13 +98,21 @@ export async function body<T>(req: IncomingMessage, limit = 1_000_000): Promise<
     chunks.push(chunk);
   }
   if (size === 0) {
-    return {} as T;
+    return {};
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new ApiError(400, 'BAD_JSON', 'The request body is not valid JSON.');
+    throw new ApiError(400, 'BAD_JSON', 'The request body is not valid JSON.', 'Send a JSON object with a content-type of application/json.');
   }
+}
+
+export async function bodyObject(req: IncomingMessage, limit?: number): Promise<Record<string, unknown>> {
+  const b = await body(req, limit);
+  if (typeof b !== 'object' || b === null || Array.isArray(b)) {
+    throw new ApiError(400, 'BAD_JSON', 'The request body must be a JSON object.');
+  }
+  return Object.fromEntries(Object.entries(b));
 }
 
 export function query(req: Req): URLSearchParams {

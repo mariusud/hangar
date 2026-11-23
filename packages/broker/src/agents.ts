@@ -25,10 +25,11 @@ export function attachAgents(db: Db, hosts: Hosts): Upgrades {
     wss.handleUpgrade(req, socket, head, (ws) => {
       const handlers = hosts.attach({ send: (m) => ws.send(encodeMessage(m)), close: () => ws.close() });
       ws.on('message', (raw: Buffer, isBinary) => {
-        let m: AgentMessage;
+        let m: unknown;
         try {
           m = decodeMessage<AgentMessage>(raw, isBinary);
-        } catch {
+        } catch (err) {
+          handlers.rejected(`it is not valid JSON or a valid binary frame (${err instanceof Error ? err.message : String(err)})`);
           return;
         }
         handlers.message(m);

@@ -12,8 +12,8 @@ Everything Devicepool does today, with links to the guides.
   A released device is deleted and replaced with a fresh clone, so nothing survives a lease.
 - A REST API: screenshot, accessibility tree, batched actions (tap by element or point, swipe,
   type, key, button, wait for an element), install a `.app`, launch, terminate, open URL.
-- A console: invite links and passwords, the device list, a live screen in H.264 at 60 frames
-  per second (JPEG on plain-HTTP pages) with touch and keyboard, install and open URL. Leasing
+- A console: invite links and passwords, the device list, a live screen in H.264 (52 frames
+  per second measured over HTTPS or localhost; JPEG at 38 on plain-HTTP pages) with touch and keyboard, install and open URL. Leasing
   from the console can pick a device image, and a device page has light and dark buttons and,
   on iOS, sets one app's language and restarts it.
 - The Fleet page, for operators: every device at once with a live picture, who holds it, how

@@ -258,7 +258,7 @@ async function devicesView() {
             picker,
             h('p', { class: 'muted' }, `No device has the image ${chosenImage} yet. Each Mac builds its image devices after an operator sets the image, which takes a few minutes. You can wait in the queue for one.`),
             waitButton)
-        : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `npx devicepool up` on a Mac with Xcode.'),
+        : h('p', { class: 'card muted' }, 'No Mac is connected yet. Run `devicepool up` on a Mac with Xcode.'),
     err,
   );
   const t = setInterval(() => !isWaiting && render(), 10_000);
@@ -547,7 +547,7 @@ async function connectView() {
           h('h2', {}, 'Add Devicepool to Claude Code'),
           h('code', { class: 'code' }, t.mcp),
           h('h2', {}, 'Use it from a script'),
-          h('code', { class: 'code' }, `export DEVICEPOOL_URL=${location.origin}\nexport DEVICEPOOL_TOKEN=${t.token}\nnpx devicepool lease`),
+          h('code', { class: 'code' }, `export DEVICEPOOL_URL=${location.origin}\nexport DEVICEPOOL_TOKEN=${t.token}\ndevicepool lease`),
         );
       } }, 'Make a token')),
       result,

@@ -3,7 +3,7 @@ import * as auth from '../auth.ts';
 import { ApiError } from '../leases/service.ts';
 import { mintMemberToken, type TokenRequest } from '../leases/tokens.ts';
 import { accountFor } from '../oidc.ts';
-import { body, json, me, operator, principal, query, route, type Ctx } from './util.ts';
+import { bodyObject, json, me, operator, principal, query, route, type Ctx } from './util.ts';
 
 route(
   'GET',
@@ -16,7 +16,7 @@ route(
       return;
     }
     const session = auth.startSession(ctx.db, token.accountId, Date.now());
-    res.writeHead(302, { 'set-cookie': auth.sessionCookie(session, ctx.publicUrl().startsWith('https')), location: '/?welcome=1' });
+    res.writeHead(302, { 'set-cookie': auth.sessionCookie(session, auth.isSecureRequest(req, ctx.publicUrl())), location: '/?welcome=1' });
     res.end();
   },
   { auth: false },
@@ -26,25 +26,36 @@ route(
   'POST',
   '/v1/invites/:code/accept',
   async (req, res, ctx) => {
-    const { name, password } = await body<{ name?: string; password?: string }>(req);
-    if (!name?.trim() || !password || password.length < 8) {
+    const limiter = auth.limitersFor(ctx.db).login;
+    const keys = [`ip:${auth.clientAddress(req)}`];
+    limiter.assertOpen(keys);
+    const b = await bodyObject(req);
+    const name = typeof b.name === 'string' ? b.name.trim() : '';
+    const password = typeof b.password === 'string' ? b.password : '';
+    if (!name || password.length < 8) {
       throw new ApiError(400, 'BAD_REQUEST', 'Pick a name and a password of at least 8 characters.');
     }
     const token = auth.lookupToken(ctx.db, req.params.code ?? '', Date.now());
     if (!token || token.kind !== 'invite') {
+      limiter.fail(keys);
       throw new ApiError(404, 'INVITE_INVALID', 'This invite link has expired or was already used.', 'Ask whoever invited you for a new link.');
     }
-    if (ctx.db.accountByName(name.trim())) {
-      throw new ApiError(409, 'NAME_TAKEN', `Someone is already called ${name.trim()}.`, 'Pick another name.');
+    if (ctx.db.accountByName(name)) {
+      throw new ApiError(409, 'NAME_TAKEN', `Someone is already called ${name}.`, 'Pick another name.');
     }
-    if (!ctx.db.useToken(token.hash, Date.now())) {
-      throw new ApiError(404, 'INVITE_INVALID', 'This invite link was already used.');
-    }
+    const passwordHash = await auth.hashPassword(password);
     const role = token.scopes.includes('role:operator') ? 'operator' : 'member';
-    const account = auth.createAccount(ctx.db, name.trim(), role);
-    ctx.db.setPassword(account.id, await auth.hashPassword(password));
+    const account = ctx.db.tx(() => {
+      if (!ctx.db.useToken(token.hash, Date.now())) {
+        throw new ApiError(404, 'INVITE_INVALID', 'This invite link was already used.');
+      }
+      if (ctx.db.accountByName(name)) {
+        throw new ApiError(409, 'NAME_TAKEN', `Someone is already called ${name}.`, 'Pick another name.');
+      }
+      return auth.createAccount(ctx.db, name, role, passwordHash);
+    });
     const session = auth.startSession(ctx.db, account.id, Date.now());
-    res.writeHead(200, { 'set-cookie': auth.sessionCookie(session, ctx.publicUrl().startsWith('https')), 'content-type': 'application/json' });
+    res.writeHead(200, { 'set-cookie': auth.sessionCookie(session, auth.isSecureRequest(req, ctx.publicUrl())), 'content-type': 'application/json' });
     res.end(JSON.stringify({ name: account.name, role }));
   },
   { auth: false },
@@ -61,7 +72,12 @@ route(
     if (!ctx.oidc) {
       throw new ApiError(404, 'NO_SSO', 'Single sign-on is not set up. An operator sets DEVICEPOOL_OIDC_ISSUER and DEVICEPOOL_OIDC_CLIENT_ID.');
     }
-    res.writeHead(302, { location: await ctx.oidc.start(oidcRedirect(ctx), query(req).get('next') ?? '/') });
+    const limiter = auth.limitersFor(ctx.db).oidc;
+    const keys = [`ip:${auth.clientAddress(req)}`];
+    limiter.assertOpen(keys);
+    limiter.fail(keys);
+    const { url, state } = await ctx.oidc.start(oidcRedirect(ctx), query(req).get('next') ?? '/');
+    res.writeHead(302, { location: url, 'set-cookie': auth.stateCookie(state, auth.isSecureRequest(req, ctx.publicUrl())) });
     res.end();
   },
   { auth: false },
@@ -80,11 +96,16 @@ route(
       res.end();
       return;
     }
-    const { claims, next } = await ctx.oidc.finish(oidcRedirect(ctx), q.get('code') ?? '', q.get('state') ?? '');
+    const state = q.get('state') ?? '';
+    const bound = auth.readCookie(req.headers.cookie, auth.STATE_COOKIE);
+    if (!bound || bound !== state) {
+      throw new ApiError(400, 'OIDC_STATE', 'This sign-in did not start in this browser.', 'Start it again from the sign-in page.');
+    }
+    const { claims, next } = await ctx.oidc.finish(oidcRedirect(ctx), q.get('code') ?? '', state);
     const accountId = accountFor(ctx.db, ctx.oidc.config, claims);
     ctx.db.audit('login.oidc', accountId, null);
     const session = auth.startSession(ctx.db, accountId, Date.now());
-    res.writeHead(302, { 'set-cookie': auth.sessionCookie(session, ctx.publicUrl().startsWith('https')), location: next });
+    res.writeHead(302, { 'set-cookie': [auth.sessionCookie(session, auth.isSecureRequest(req, ctx.publicUrl())), auth.stateCookie('', false, 0)], location: next });
     res.end();
   },
   { auth: false },
@@ -97,13 +118,22 @@ route(
     if (ctx.oidc?.config.disablePasswords) {
       throw new ApiError(403, 'PASSWORDS_OFF', 'Sign in with your company account; passwords are turned off here.');
     }
-    const { name, password } = await body<{ name?: string; password?: string }>(req);
+    const limiter = auth.limitersFor(ctx.db).login;
+    const b = await bodyObject(req);
+    const name = typeof b.name === 'string' ? b.name : '';
+    const password = typeof b.password === 'string' ? b.password : '';
+    const nameKey = `name:${name.toLowerCase().slice(0, 200)}`;
+    const keys = [`ip:${auth.clientAddress(req)}`, nameKey];
+    limiter.assertOpen(keys);
     const account = name ? ctx.db.accountByName(name) : null;
-    if (!account?.passwordHash || !password || !(await auth.checkPassword(password, account.passwordHash))) {
+    const isMatch = await auth.checkPassword(password, account?.passwordHash ?? auth.DUMMY_HASH);
+    if (!account?.passwordHash || !password || !isMatch) {
+      limiter.fail(keys);
       throw new ApiError(401, 'BAD_CREDENTIALS', 'That name and password do not match.', 'An operator can send you a new invite link if you forgot it.');
     }
+    limiter.clear([nameKey]);
     const session = auth.startSession(ctx.db, account.id, Date.now());
-    res.writeHead(200, { 'set-cookie': auth.sessionCookie(session, ctx.publicUrl().startsWith('https')), 'content-type': 'application/json' });
+    res.writeHead(200, { 'set-cookie': auth.sessionCookie(session, auth.isSecureRequest(req, ctx.publicUrl())), 'content-type': 'application/json' });
     res.end(JSON.stringify({ name: account.name, role: account.role }));
   },
   { auth: false },
@@ -130,9 +160,9 @@ route(
 
 route('POST', '/v1/invites', async (req, res, ctx) => {
   operator(req, ctx);
-  const { role } = await body<{ role?: 'member' | 'operator' }>(req);
+  const b = await bodyObject(req);
   const code = auth.mintToken(ctx.db, 'invite', {
-    scopes: role === 'operator' ? ['role:operator'] : [],
+    scopes: b.role === 'operator' ? ['role:operator'] : [],
     expiresAt: Date.now() + 7 * 24 * 60 * 60_000,
   });
   json(res, 201, { url: `${ctx.publicUrl()}/invite/${code}`, expiresInDays: 7 });
@@ -171,7 +201,7 @@ function quotaOf(value: unknown): number | null {
 
 route('POST', '/v1/teams', async (req, res, ctx) => {
   const p = operator(req, ctx);
-  const b = await body<{ name?: string; quota?: number | null }>(req);
+  const b = await bodyObject(req);
   const name = String(b.name ?? '').trim();
   if (!name || name.length > 60) {
     throw new ApiError(400, 'BAD_NAME', 'Give the team a name of up to 60 characters.');
@@ -191,7 +221,7 @@ route('PATCH', '/v1/teams/:id', async (req, res, ctx) => {
   if (!team) {
     throw new ApiError(404, 'TEAM_NOT_FOUND', `No team ${req.params.id}.`);
   }
-  const b = await body<{ name?: string; quota?: number | null }>(req);
+  const b = await bodyObject(req);
   const next = { ...team, ...(b.name ? { name: String(b.name).trim() } : {}), ...('quota' in b ? { quota: quotaOf(b.quota) } : {}) };
   ctx.db.saveTeam(next);
   ctx.db.audit(`team.update ${next.name} quota=${next.quota ?? 'none'}`, p.accountId, null);
@@ -202,7 +232,7 @@ route('PATCH', '/v1/teams/:id', async (req, res, ctx) => {
 route('PUT', '/v1/people/:name/team', async (req, res, ctx) => {
   const p = operator(req, ctx);
   const account = ctx.db.accountByName(req.params.name ?? '');
-  const { team: ref } = await body<{ team?: string }>(req);
+  const ref = (await bodyObject(req)).team;
   const team = ctx.db.teams().find((t) => t.id === ref || t.name.toLowerCase() === String(ref ?? '').toLowerCase());
   if (!account || !team) {
     throw new ApiError(404, 'NOT_FOUND', !account ? `No person called ${req.params.name}.` : `No team ${ref}.`);
@@ -213,6 +243,8 @@ route('PUT', '/v1/people/:name/team', async (req, res, ctx) => {
 });
 
 route('POST', '/v1/tokens', async (req, res, ctx) => {
-  const { token, limits } = mintMemberToken(ctx.db, me(req, ctx), await body<TokenRequest>(req));
+  const p = me(req, ctx);
+  const request: TokenRequest = await bodyObject(req);
+  const { token, limits } = ctx.db.tx(() => mintMemberToken(ctx.db, p, request));
   json(res, 201, { token, limits, mcp: `claude mcp add --transport http devicepool ${ctx.publicUrl()}/mcp --header "Authorization: Bearer ${token}"` });
 });

@@ -4,61 +4,59 @@ import { createServer } from 'node:http';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
+import { clip, intOption, seconds } from './args.ts';
+import { helpSection } from './help.ts';
+import { ATTACH_OPTIONS, BOOK_OPTIONS, IMAGE_REFRESH_OPTIONS, IMAGE_SET_OPTIONS, INSTALL_OPTIONS, LEASE_FLAG, LEASE_OPTIONS, SCREENSHOT_OPTIONS, TAP_OPTIONS, UI_OPTIONS } from './options.ts';
 import { buildRef, CONFIG_FILE, Devicepool, DevicepoolError, openInBrowser, type BookingInfo, type Lease } from './client/index.ts';
 import { isAndroid, WEEKDAYS, type ElementSelector, type Point, type PrivacyService, type TokenLimits } from '@devicepool/protocol';
 
-export const CLIENT_HELP = `Client
-  devicepool login <url>                       sign in from this computer (opens the browser)
-  devicepool connect claude | cursor | codex | ci
-                                               give an agent or a CI job its own token, ready to use
-  devicepool connect ci <prefix>               a CI token that uploads only builds whose name starts with <prefix>
-  devicepool book <name> --devices N --from HH:MM --to HH:MM --days mon-thu [--image X] [--team T]
-                                               hold devices for your team on those days and hours,
-                                               in the broker's time zone
-  devicepool bookings                          bookings and whether their window is open
-  devicepool book rm <name>                    remove a booking; its leases end
-  devicepool connect <booking>                 a token that leases only from that booking, with
-                                               MCP settings and a GitHub Actions example
-  devicepool held <run-id> <flow>              lease the device a failed flow was left on
-                                               (runs started with --hold)
-  devicepool devices                           list devices
-  devicepool lease [--android | --phone] [--model M] [--os V] [--image NAME] [--hold] [--record] [--purpose TEXT]
-               [--idle SECONDS] [--max SECONDS]
-                                               lease a device; --hold keeps it until Ctrl-C;
-                                               --phone asks for an Android phone on USB;
-                                               --purpose shows on the Fleet page
-  devicepool attach <lease-id> [--hold]        pick up a lease again after a restart, with the same token
-  devicepool keepalive                         count as activity without touching the device
-  devicepool tests                             each test's passes, flaky passes and failures
-  devicepool images                            device images every Mac keeps ready
-  devicepool image set <name> [--app A]... [--locale nb_NO] [--appearance dark]
-  devicepool image refresh <name> --app A...
-                 [--grant photos,location] [--sign-in flow.yaml [--env NAME]...]
-                                               declare an image (operators); --app is a path or build;
-                                               the sign-in flow runs once per Mac, reading each --env
-                                               name from the broker's secrets or the Mac's environment
-  devicepool image capture <name> <lease-id>   save a leased device, set up by hand, as an image
-  devicepool image secret <NAME> [--rm]        store a value for a sign-in flow, read from stdin
-  devicepool image rm <name>
-  devicepool screenshot [-o file.png]
-  devicepool ui                                elements on screen
-  devicepool tap --label L | --id I | --point x,y
-  devicepool type <text>
-  devicepool install <App.app | archive | build-name>
-  devicepool launch <bundle-id>
-  devicepool open-url <url>
-  devicepool push <bundle-id> <payload.json | '{"aps":...}'>
-  devicepool permission <grant|revoke|reset> <service> <bundle-id>
-  devicepool location <lat,lon | clear>
-  devicepool appearance <light|dark>
-  devicepool language <bundle-id> <nb-NO>
-  devicepool dev-menu | devicepool reload      React Native debug builds
-  devicepool record [stop]                     record the screen, app log and actions; stop prints the bug link
-  devicepool recordings                        your recordings
-  devicepool watch                             open the live screen in the browser
-  devicepool release
-
-Device commands use --lease <id>, DEVICEPOOL_LEASE, or your only active lease.`;
+export const CLIENT_HELP = helpSection('Client', [
+  { usage: 'devicepool login <url>', about: ['sign in from this computer (opens the browser)'] },
+  { usage: 'devicepool connect claude | cursor | codex | ci', about: ['give an agent or a CI job its own token, ready to use'] },
+  { usage: 'devicepool connect ci <prefix>', about: ['a CI token that uploads only builds whose name', 'starts with <prefix>; run with --build-name'] },
+  { usage: 'devicepool connect <booking>', about: ['a token that leases only from that booking, with', 'MCP settings and a GitHub Actions example'] },
+  {
+    usage: ['devicepool book <name> --devices N --from HH:MM --to HH:MM [--days mon-thu]', '[--image X] [--android] [--model M] [--os V] [--team T]'],
+    about: ['hold devices for your team on those days and hours,', 'in the broker\'s time zone'],
+  },
+  { usage: 'devicepool book rm <name>', about: ['remove a booking; its leases end'] },
+  { usage: 'devicepool bookings', about: ['bookings and whether their window is open'] },
+  { usage: 'devicepool held <run-id> <flow>', about: ['lease the device a failed flow was left on', '(runs started with --hold)'] },
+  { usage: 'devicepool devices', about: ['list devices'] },
+  {
+    usage: ['devicepool lease [--android | --phone] [--model M] [--os V] [--image NAME]', '[--hold] [--record] [--purpose TEXT] [--ttl SECONDS]', '[--idle SECONDS] [--max SECONDS]'],
+    about: ['lease a device; --hold keeps it until Ctrl-C;', '--phone asks for an Android phone on USB;', '--purpose shows on the Fleet page; --ttl, --idle and', '--max are how long it lasts, unused, and in all'],
+  },
+  { usage: 'devicepool attach <lease-id> [--hold]', about: ['pick up a lease again after a restart'] },
+  { usage: 'devicepool keepalive', about: ['count as activity without touching the device'] },
+  { usage: 'devicepool tests', about: ['each test\'s passes, flaky passes and failures'] },
+  { usage: 'devicepool images', about: ['device images every Mac keeps ready'] },
+  {
+    usage: ['devicepool image set <name> [--app A]... [--follow] [--locale nb_NO]', '[--appearance dark] [--grant photos,location]', '[--sign-in flow.yaml [--env NAME]...]'],
+    about: ['declare an image (operators); --app is a path or build;', '--follow refreshes it on a new upload of an --app;', 'the sign-in flow runs once per Mac, reading each --env', 'name from the broker\'s secrets or the Mac\'s environment'],
+  },
+  { usage: 'devicepool image refresh <name> --app A...', about: ['build the image again from new builds of its apps'] },
+  { usage: 'devicepool image capture <name> <lease-id>', about: ['save a leased device, set up by hand, as an image'] },
+  { usage: 'devicepool image secret <NAME> [--rm]', about: ['store a value for a sign-in flow, read from stdin'] },
+  { usage: 'devicepool image rm <name>', about: ['remove an image; each Mac deletes its copy'] },
+  { usage: 'devicepool screenshot [-o file.png]', about: ['save the screen as a PNG or JPEG'] },
+  { usage: 'devicepool ui [--json]', about: ['elements on screen'] },
+  { usage: 'devicepool tap --label L | --id I | --role R | --point x,y', about: ['tap an element or a point'] },
+  { usage: 'devicepool type <text>', about: ['type into the focused field'] },
+  { usage: 'devicepool install <App.app | archive | build-name> [--launch] [--build-name N]', about: ['install an app; --build-name names the upload'] },
+  { usage: 'devicepool launch <bundle-id>', about: ['open an installed app'] },
+  { usage: 'devicepool open-url <url>', about: ['open a link or deep link'] },
+  { usage: 'devicepool push <bundle-id> <payload.json | \'{"aps":...}\'>', about: ['send a push notification'] },
+  { usage: 'devicepool permission <grant|revoke|reset> <service> <bundle-id>', about: ['change a privacy permission'] },
+  { usage: 'devicepool location <lat,lon | clear>', about: ['set or clear the device location'] },
+  { usage: 'devicepool appearance <light|dark>', about: ['switch light and dark mode'] },
+  { usage: 'devicepool language <bundle-id> <nb-NO>', about: ['set the app language'] },
+  { usage: 'devicepool dev-menu | devicepool reload', about: ['React Native debug builds'] },
+  { usage: 'devicepool record [stop]', about: ['record the screen, app log and actions;', 'stop prints the bug link'] },
+  { usage: 'devicepool recordings', about: ['your recordings'] },
+  { usage: 'devicepool watch', about: ['open the live screen in the browser'] },
+  { usage: 'devicepool release', about: ['give the device back; it is wiped'] },
+]) + '\n\nDevice commands use --lease <id>, DEVICEPOOL_LEASE, or your only active lease.';
 
 export async function login(url: string | undefined): Promise<void> {
   if (!url) {
@@ -111,13 +109,14 @@ async function currentLease(client: Devicepool, explicit: string | undefined): P
   );
 }
 
+export const CONNECT_TARGETS = ['claude', 'cursor', 'codex', 'ci'];
+
 export async function connect(target: string | undefined, prefix?: string): Promise<void> {
-  const targets = ['claude', 'cursor', 'codex', 'ci'];
   if (!target) {
-    throw new DevicepoolError(0, 'USAGE', `Usage: devicepool connect ${targets.join(' | ')} | <booking>`);
+    throw new DevicepoolError(0, 'USAGE', `Usage: devicepool connect ${CONNECT_TARGETS.join(' | ')} | <booking>`);
   }
   const client = await Devicepool.fromEnv();
-  if (!targets.includes(target)) {
+  if (!CONNECT_TARGETS.includes(target)) {
     await connectBooking(client, target);
     return;
   }
@@ -239,28 +238,29 @@ export function cronFor(b: Pick<BookingInfo, 'days' | 'from' | 'timeZone' | 'nex
 }
 
 async function book(args: string[]): Promise<void> {
-  const client = await Devicepool.fromEnv();
   if (args[0] === 'rm') {
     const name = args[1];
     if (!name) {
       throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool book rm <name>');
     }
+    const client = await Devicepool.fromEnv();
     await client.json('DELETE', `/v1/bookings/${encodeURIComponent(name)}`);
     console.log(`Removed ${name}. Its leases end now.`);
     return;
   }
-  const { values, positionals } = parseArgs({
-    args,
-    allowPositionals: true,
-    options: { devices: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, days: { type: 'string' }, image: { type: 'string' }, android: { type: 'boolean' }, model: { type: 'string' }, os: { type: 'string' }, team: { type: 'string' } },
-  });
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: BOOK_OPTIONS });
   const name = positionals[0];
   if (!name || !values.devices || !values.from || !values.to) {
     throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool book <name> --devices N --from HH:MM --to HH:MM --days mon-thu [--image X]');
   }
+  if (CONNECT_TARGETS.includes(name)) {
+    throw new DevicepoolError(0, 'USAGE', `"${name}" is a name \`devicepool connect\` uses for its own targets, so a token for a booking called that could never be made. Pick another name.`);
+  }
+  const devices = intOption('--devices', values.devices, 1);
+  const client = await Devicepool.fromEnv();
   const b = await client.json<BookingInfo>('POST', '/v1/bookings', {
     name,
-    devices: Number(values.devices),
+    devices,
     from: values.from,
     to: values.to,
     days: values.days ?? 'daily',
@@ -275,7 +275,7 @@ async function book(args: string[]): Promise<void> {
 }
 
 export async function clientCommand(command: string, args: string[]): Promise<boolean> {
-  const common = { lease: { type: 'string' as const } };
+  const common = LEASE_FLAG;
   switch (command) {
     case 'login':
       await login(args[0]);
@@ -374,6 +374,9 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
           console.log(`Removed the secret ${name}.`);
           return true;
         }
+        if (process.stdin.isTTY) {
+          process.stderr.write('Type or paste the value, then press Ctrl-D.\n');
+        }
         const chunks: Buffer[] = [];
         for await (const chunk of process.stdin) {
           chunks.push(Buffer.from(chunk));
@@ -396,7 +399,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         return true;
       }
       if (sub === 'refresh') {
-        const { values } = parseArgs({ args: rest, options: { app: { type: 'string', multiple: true } } });
+        const { values } = parseArgs({ args: rest, options: IMAGE_REFRESH_OPTIONS });
         if (!values.app?.length) {
           throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool image refresh <name> --app build/App.app');
         }
@@ -413,10 +416,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         console.log(`Removed ${name}. Each Mac deletes its copy.`);
         return true;
       }
-      const { values } = parseArgs({
-        args: rest,
-        options: { app: { type: 'string', multiple: true }, follow: { type: 'boolean' }, locale: { type: 'string' }, appearance: { type: 'string' }, grant: { type: 'string', multiple: true }, 'sign-in': { type: 'string' }, env: { type: 'string', multiple: true } },
-      });
+      const { values } = parseArgs({ args: rest, options: IMAGE_SET_OPTIONS });
       if (values.follow && !values.app?.length) {
         throw new DevicepoolError(0, 'USAGE', '--follow refreshes the image when a build of one of its apps is uploaded. Add --app App.app.');
       }
@@ -437,7 +437,10 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       return true;
     }
     case 'lease': {
-      const { values } = parseArgs({ args, options: { android: { type: 'boolean' }, phone: { type: 'boolean' }, model: { type: 'string' }, os: { type: 'string' }, image: { type: 'string' }, hold: { type: 'boolean' }, ttl: { type: 'string' }, idle: { type: 'string' }, max: { type: 'string' }, record: { type: 'boolean' }, purpose: { type: 'string' } } });
+      const { values } = parseArgs({ args, options: LEASE_OPTIONS });
+      const ttlSeconds = seconds('--ttl', values.ttl);
+      const idleSeconds = seconds('--idle', values.idle);
+      const maxSeconds = seconds('--max', values.max);
       const client = await Devicepool.fromEnv();
       process.stderr.write('Getting a device...\n');
       const lease = await client.lease(
@@ -445,10 +448,11 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
         {
           autoRenew: Boolean(values.hold),
           record: Boolean(values.record),
-          via: values.purpose ?? 'CLI',
-          ...(values.ttl ? { ttlSeconds: Number(values.ttl) } : {}),
-          ...(values.idle ? { idleSeconds: Number(values.idle) } : {}),
-          ...(values.max ? { maxSeconds: Number(values.max) } : {}),
+          via: values.purpose ? clip(values.purpose, 80) : 'CLI',
+          log: (line) => process.stderr.write(`${line}\n`),
+          ...(ttlSeconds ? { ttlSeconds } : {}),
+          ...(idleSeconds ? { idleSeconds } : {}),
+          ...(maxSeconds ? { maxSeconds } : {}),
         },
       );
       console.log(lease.id);
@@ -465,7 +469,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       return true;
     }
     case 'screenshot': {
-      const { values } = parseArgs({ args, options: { ...common, out: { type: 'string', short: 'o' } } });
+      const { values } = parseArgs({ args, options: SCREENSHOT_OPTIONS });
       const lease = await currentLease(await Devicepool.fromEnv(), values.lease);
       const file = values.out ?? 'screenshot.png';
       await writeFile(file, await lease.screenshot(file.endsWith('.jpg') || file.endsWith('.jpeg') ? 'jpeg' : 'png'));
@@ -473,7 +477,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       return true;
     }
     case 'ui': {
-      const { values } = parseArgs({ args, options: { ...common, json: { type: 'boolean' } } });
+      const { values } = parseArgs({ args, options: UI_OPTIONS });
       const ui = await (await currentLease(await Devicepool.fromEnv(), values.lease)).ui();
       if (values.json) {
         console.log(JSON.stringify(ui, null, 2));
@@ -481,12 +485,12 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       }
       for (const n of ui.nodes.filter((x) => x.role !== 'application' && (x.label || x.identifier))) {
         const c = [n.normalized.x + n.normalized.width / 2, n.normalized.y + n.normalized.height / 2].map((v) => v.toFixed(2)).join(',');
-        console.log(`${n.role.padEnd(12)} ${(n.label ?? '').slice(0, 50).padEnd(50)} ${n.identifier ? `#${n.identifier}` : ''} @${c}`);
+        console.log(`${n.role.padEnd(12)} ${clip(n.label ?? '', 50).padEnd(50)} ${n.identifier ? `#${n.identifier}` : ''} @${c}`);
       }
       return true;
     }
     case 'tap': {
-      const { values } = parseArgs({ args, options: { ...common, label: { type: 'string' }, id: { type: 'string' }, role: { type: 'string' }, point: { type: 'string' } } });
+      const { values } = parseArgs({ args, options: TAP_OPTIONS });
       const lease = await currentLease(await Devicepool.fromEnv(), values.lease);
       if (values.point) {
         const [x, y] = values.point.split(',').map(Number);
@@ -509,14 +513,14 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       return true;
     }
     case 'install': {
-      const { values, positionals } = parseArgs({ args, options: { ...common, launch: { type: 'boolean' } }, allowPositionals: true });
+      const { values, positionals } = parseArgs({ args, options: INSTALL_OPTIONS, allowPositionals: true });
       const target = positionals[0];
       if (!target) {
         throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool install <App.app | archive | build-name> [--launch]');
       }
       const lease = await currentLease(await Devicepool.fromEnv(), values.lease);
       process.stderr.write('Installing...\n');
-      const app = await lease.install(target);
+      const app = await lease.install(target, values['build-name']);
       console.log(app.bundleId);
       if (values.launch) {
         await lease.launch(app.bundleId);
@@ -618,7 +622,7 @@ export async function clientCommand(command: string, args: string[]): Promise<bo
       return true;
     }
     case 'attach': {
-      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { hold: { type: 'boolean' } } });
+      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: ATTACH_OPTIONS });
       const id = positionals[0] ?? process.env.DEVICEPOOL_LEASE;
       if (!id) {
         throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool attach <lease-id> [--hold]. `devicepool` prints the id when it leases a device.');

@@ -6,8 +6,8 @@ It runs the devices on your own Macs and lends them out one at a time. When a le
 Devicepool wipes the device and puts it back in the pool. It is free under Apache-2.0 and needs no
 account. You can use it for simulator and emulator work instead of a hosted device cloud; the
 [alternatives pages](docs/alternatives/index.md) compare it with Maestro Cloud, AWS Device Farm,
-BrowserStack App Live, Appetize and Expo Simulators. Physical phones are on the
-[roadmap](ROADMAP.md).
+BrowserStack App Live, Appetize and Expo Simulators. It does not run iPhones. Android phones over
+USB are experimental and have never run on real hardware ([Android guide](docs/guides/android.md)).
 
 ## What you can use it for
 
@@ -26,7 +26,18 @@ BrowserStack App Live, Appetize and Expo Simulators. Physical phones are on the
 
 ## Start
 
-On the Mac that will hold the devices, such as a Mac mini in the office:
+On the Mac that will hold the devices, such as a Mac mini in the office.
+
+You need a Mac with Apple silicon or Intel and:
+
+- Node 22.18 or newer and pnpm
+- Xcode with an iOS simulator runtime (Xcode > Settings > Components)
+- idb: the companion (`brew tap facebook/fb && brew install idb-companion`) and the client
+  (`pipx install fb-idb`), which need [Homebrew](https://brew.sh) and Python
+
+`devicepool doctor` checks all of this and prints the fix for anything missing.
+
+Then:
 
 ```bash
 git clone https://github.com/mariusud/devicepool && cd devicepool
@@ -36,13 +47,18 @@ devicepool up
 
 Open the link it prints to see the devices. Invite your team from the console's People page.
 
+`devicepool up` serves plain HTTP on your network and prints a warning about it. Put TLS in front
+before you use it beyond a trusted LAN: pass your HTTPS address with `--url`, for example a
+[Tailscale](https://tailscale.com/kb/1153/enabling-https) name ([unattended Mac](docs/guides/unattended.md)
+shows `--url`). The browser also needs HTTPS or localhost for H.264; on plain HTTP it shows JPEG.
+
 <p align="center"><img src="docs/assets/how-it-works.gif" alt="Claude taps through a sign-in screen on one iPhone, a pull request runs 12 Maestro flows on three more, and a developer saves a file and sees the change on a fourth. Devicepool wipes each device when they finish." width="100%" /></p>
 
 ## Connect
 
 | To use devices from | Run |
 |---|---|
-| Claude Code | `devicepool connect claude`, or the plugin: `/plugin install devicepool --marketplace mariusud/devicepool` with `DEVICEPOOL_URL` and `DEVICEPOOL_TOKEN` set |
+| Claude Code | `devicepool connect claude`, or the plugin: `/plugin marketplace add mariusud/devicepool`, then `/plugin install devicepool@devicepool`, with `DEVICEPOOL_URL` and `DEVICEPOOL_TOKEN` set |
 | Codex | `devicepool connect codex` |
 | Cursor or another MCP client | `devicepool connect cursor` |
 | Maestro in CI | `devicepool connect ci`, then paste the two secrets and the step it prints |
@@ -70,8 +86,9 @@ Each guide has the details: [agents](docs/guides/agents.md),
 - **A clean device every time.** Devicepool deletes each device after use and clones a fresh one,
   so a test can't inherit a login or a half-finished state from the one before.
 - **Builds stay with you.** Your unreleased app and your test accounts stay on your own network.
-- **Fast.** On one Mac we measured 52 frames a second in the browser and 87 ms from saving a file
-  to seeing the change on the device ([numbers](docs/numbers.md)).
+- **Fast.** On one Mac we measured 52 frames a second in the browser over HTTPS or localhost (38 on
+  a plain-HTTP LAN address) and 87 ms from saving a file to seeing the change on the device
+  ([numbers](docs/numbers.md)). The input delay target of 80 ms is not met yet: 197 ms at p95.
 
 Pick a hosted service if nobody on your team wants to look after a Mac, or if your agents run in
 the cloud and can't reach your network.
@@ -82,14 +99,14 @@ the cloud and can't reach your network.
 | Use a device in the browser | Yes | Yes, off by default | Not documented | Yes | Yes |
 | Sharded CI runs with JUnit | Yes | Not documented | Not documented | Its own flow runner with JUnit (experimental) | Not documented |
 | Fast Refresh on a leased device | Yes | Metro tunnel only | Local only | Not documented | Yes |
-| Physical phones | Android over USB, experimental: never run on real hardware, use a test phone | Yes | Yes | No | No |
+| Physical phones | Android over USB, experimental, never run on real hardware; no iPhones | Yes | Yes | No | No |
 | Runs on | Your Macs | Your machines | Your machine | Your Macs | Expo's servers |
 
 [Full comparison and sources](docs/comparison.md).
 
 ## Status
 
-Early, and not on npm yet. It runs on one Mac; more Macs join with `devicepool join`, tested on
+Early, and not on npm yet. Traffic is plain HTTP until you put TLS in front. It runs on one Mac; more Macs join with `devicepool join`, tested on
 one machine so far. A leased iOS app runs as a process on the Mac, so use separate Macs for teams
 that do not trust each other's code. Read Apple's macOS license for what running simulators for your
 own team allows.

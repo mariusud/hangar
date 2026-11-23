@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname, totalmem, cpus, tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
@@ -26,6 +26,8 @@ import * as sim from './drivers/ios/index.ts';
 import { cursor, LeaseTools, pageLimit } from './drivers/devtools.ts';
 import type { JsTools } from './drivers/cdp.ts';
 import { ToolError } from './drivers/tool-error.ts';
+import { overdue } from './connect.ts';
+import { acquireLock, releaseOnExit } from './lock.ts';
 import { Tunnels } from './tunnels.ts';
 import { xcuitest } from './xcuitest.ts';
 
@@ -107,6 +109,7 @@ export class Agent {
   readonly warm: number;
 
   private opts: AgentOptions;
+  private releaseLock: (() => void) | null = null;
 
   constructor(opts: AgentOptions) {
     this.opts = opts;
@@ -119,7 +122,21 @@ export class Agent {
     (this.opts.log ?? console.log)(line);
   }
 
+  private deadlines = new Map<string, number>();
+
+  endOverdue(now: number, graceMs: number): void {
+    for (const leaseId of overdue(this.deadlines, now, graceMs)) {
+      this.log(`Lease ${leaseId} is past its deadline and the broker is unreachable. Ending and wiping it.`);
+      this.background(`Ending lease ${leaseId}`, this.endLease(leaseId));
+    }
+  }
+
+  private background(what: string, work: Promise<unknown>): void {
+    work.catch((err: unknown) => this.log(`${what} failed: ${err instanceof Error ? err.message : String(err)}`));
+  }
+
   async start(): Promise<void> {
+    this.releaseLock = releaseOnExit(acquireLock(join(dirname(sim.SOCKET_DIR), `${basename(sim.SOCKET_DIR)}.lock`)));
     sim.screenBinary().catch((err: Error) => this.log(`${err.message} Streams will use the idb video stream, or JPEG if that fails too.`));
     await sim.stopLeftoverCompanions();
     for (const d of await sim.listOwned()) {
@@ -131,7 +148,7 @@ export class Agent {
     }
     this.golden = await this.ensureGolden();
     await this.hello();
-    void this.fill();
+    this.background('Filling the pool', this.fill());
   }
 
   async hello(): Promise<void> {
@@ -176,6 +193,8 @@ export class Agent {
       await sim.remove(d.deviceId).catch(() => {});
     }
     this.devices.clear();
+    this.releaseLock?.();
+    this.releaseLock = null;
   }
 
   private imageOffers(): { model: string; os: string; image: string }[] {
@@ -276,7 +295,7 @@ export class Agent {
     if (JSON.stringify(this.imageOffers()) !== offered) {
       await this.hello();
     }
-    void this.fill();
+    this.background('Filling the pool', this.fill());
   }
 
   private async ensureGolden(): Promise<Golden> {
@@ -314,7 +333,7 @@ export class Agent {
   }
 
   private async fill(): Promise<void> {
-    void this.retireGoldens();
+    this.background('Retiring old images', this.retireGoldens());
     if (this.isFilling || this.isStopped || !this.golden) {
       return;
     }
@@ -377,18 +396,19 @@ export class Agent {
         return;
       }
       d.leaseId = m.leaseId;
+      this.deadlines.set(m.leaseId, m.deadline);
       d.state = 'busy';
       this.publish();
       this.opts.send({ type: 'response', id: m.id, ok: true });
-      void this.fill();
+      this.background('Filling the pool', this.fill());
     } else if (m.type === 'pool') {
       this.wanted = m.want.map((w) => w.image);
-      void this.makeRoom();
+      this.background('Making room for a waiting lease', this.makeRoom());
     } else if (m.type === 'images') {
       const images = m.images;
       this.imageWork = this.imageWork.then(() => this.setImages(images)).catch((err) => this.log(`Images: ${err instanceof Error ? err.message : err}`));
     } else if (m.type === 'stream.start') {
-      void (m.codec === 'h264' ? this.streamH264(m.leaseId) : this.streamJpeg(m.leaseId));
+      this.background(`Starting the ${m.codec} stream for lease ${m.leaseId}`, m.codec === 'h264' ? this.streamH264(m.leaseId) : this.streamJpeg(m.leaseId));
     } else if (m.type === 'stream.stop') {
       this.stopStream(m.leaseId, m.codec);
     } else if (m.type === 'tunnel.start') {
@@ -404,11 +424,11 @@ export class Agent {
     } else if (m.type === 'tunnel.close') {
       this.tunnels.close(m.leaseId, m.conn);
     } else if (m.type === 'stream.keyframe') {
-      void this.streams.get(m.leaseId)?.h264?.then((h) => h.keyframe());
+      this.background(`Asking for a keyframe for lease ${m.leaseId}`, Promise.resolve(this.streams.get(m.leaseId)?.h264?.then((h) => h.keyframe())));
     } else if (m.type === 'lease.end') {
-      void this.endLease(m.leaseId);
+      this.background(`Ending lease ${m.leaseId}`, this.endLease(m.leaseId));
     } else if (m.type === 'op') {
-      void this.op(m.id, m.leaseId, m.body);
+      this.background(`Running an operation for lease ${m.leaseId}`, this.op(m.id, m.leaseId, m.body));
     } else if (m.type === 'incompatible') {
       this.log(m.message);
     }
@@ -560,9 +580,10 @@ export class Agent {
   }
 
   private async endLease(leaseId: string): Promise<void> {
+    this.deadlines.delete(leaseId);
     this.tunnels.stop(leaseId);
     this.tools.close(leaseId);
-    await this.endStreams(leaseId);
+    await this.endStreams(leaseId).catch((err: unknown) => this.log(`Could not stop the streams of lease ${leaseId}: ${err instanceof Error ? err.message : String(err)}`));
     const d = this.held(leaseId);
     if (d) {
       await this.wipe(d);
@@ -599,7 +620,7 @@ export class Agent {
     const spare = spareDevice([...this.devices.values()], this.wanted, this.maxDevices, (image) => image === undefined || Boolean(this.images.get(image)?.golden));
     const d = spare ? this.devices.get(spare) : undefined;
     if (!d) {
-      void this.fill();
+      this.background('Filling the pool', this.fill());
       return;
     }
     this.log(`Replacing an idle device to serve a waiting lease`);
@@ -614,7 +635,7 @@ export class Agent {
     await sim.shutdown(d.deviceId).catch(() => {});
     await sim.remove(d.deviceId).catch((err) => this.log(`Could not delete ${d.deviceId}: ${err}`));
     this.publish();
-    void this.fill();
+    this.background('Filling the pool', this.fill());
   }
 
   private respondError(id: number, code: string, message: string): void {
@@ -1000,5 +1021,6 @@ function compareVersions(a: string, b: string): number {
   }
   return 0;
 }
-export { join, type HostAgent, type JoinOptions } from './connect.ts';
+export { brokerAddress, join, type HostAgent, type JoinOptions } from './connect.ts';
+export { LockHeldError } from './lock.ts';
 export { AndroidAgent, type AndroidAgentOptions } from './android.ts';

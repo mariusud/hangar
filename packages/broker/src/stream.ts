@@ -2,12 +2,13 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { Action, StreamCodec, ViewerInput } from '@devicepool/protocol';
+import type { Action, KeyModifier, Point, StreamCodec, ViewerInput } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
 import type { Leases } from './leases/service.ts';
 import type { Metrics } from './metrics.ts';
+import { ApiError } from './leases/service.ts';
 
 const TYPE = { jpeg: 1, h264: 2 } as const;
 const BACKLOG = 1024 * 1024;
@@ -19,7 +20,7 @@ export type Upgrades = {
   close: () => void;
 };
 
-export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Metrics): Upgrades {
+export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Metrics, publicUrl: () => string = () => ''): Upgrades {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   const viewers = new Map<string, Set<Viewer>>();
   const devices = new Map<string, string>();
@@ -104,6 +105,16 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
     const leaseId = decodeURIComponent(match[1]);
     const token = url.searchParams.get('token');
     const codec: StreamCodec = url.searchParams.get('codec') === 'h264' ? 'h264' : 'jpeg';
+    if (!token) {
+      try {
+        auth.assertSameOrigin(req, publicUrl(), true);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Cross-site request refused.';
+        socket.write(`HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${message}`);
+        socket.destroy();
+        return true;
+      }
+    }
     const p = auth.authenticate(db, { authorization: token ? `Bearer ${token}` : req.headers.authorization, cookie: req.headers.cookie }, Date.now());
     let deviceId: string | null = null;
     try {
@@ -136,10 +147,8 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
         if (isBinary) {
           return;
         }
-        let input: ViewerInput;
-        try {
-          input = JSON.parse(data.toString()) as ViewerInput;
-        } catch {
+        const input = parseViewerInput(data.toString());
+        if (!input) {
           return;
         }
         if (input.type === 'keyframe') {
@@ -177,6 +186,49 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
       }
     },
   };
+}
+
+const isPoint = (v: unknown): v is Point => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n));
+const isString = (v: unknown): v is string => typeof v === 'string';
+const isModifier = (v: unknown): v is KeyModifier => v === 'command' || v === 'shift' || v === 'option' || v === 'control';
+const isButton = (v: unknown): v is 'home' | 'lock' | 'siri' => v === 'home' || v === 'lock' || v === 'siri';
+
+export function parseViewerInput(text: string): ViewerInput | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return null;
+  }
+  const i: Record<string, unknown> = Object.fromEntries(Object.entries(raw));
+  switch (i.type) {
+    case 'keyframe':
+      return { type: 'keyframe' };
+    case 'tap':
+      return isPoint(i.point) ? { type: 'tap', point: i.point } : null;
+    case 'swipe':
+      if (!isPoint(i.from) || !isPoint(i.to) || (i.durationMs !== undefined && typeof i.durationMs !== 'number')) {
+        return null;
+      }
+      return { type: 'swipe', from: i.from, to: i.to, ...(typeof i.durationMs === 'number' ? { durationMs: i.durationMs } : {}) };
+    case 'type':
+      return isString(i.text) ? { type: 'type', text: i.text } : null;
+    case 'key':
+      if (!isString(i.key)) {
+        return null;
+      }
+      if (i.modifiers === undefined) {
+        return { type: 'key', key: i.key };
+      }
+      return Array.isArray(i.modifiers) && i.modifiers.every(isModifier) ? { type: 'key', key: i.key, modifiers: i.modifiers } : null;
+    case 'button':
+      return isButton(i.button) ? { type: 'button', button: i.button } : null;
+    default:
+      return null;
+  }
 }
 
 function toAction(i: ViewerInput): Action | null {

@@ -8,7 +8,7 @@ import type { Db, TokenPriorityRow } from '../db.ts';
 import type { Hosts } from '../hosts.ts';
 import { imageFailure } from '../images.ts';
 import { brokerTimeZone, closedWindows, DEFAULT_CI_FLOOR, holdsDue, MAX_HOLD_MS, mayTakeHold, nextWindow, plan, windowClosed, type PlanDevice } from '../schedule.ts';
-import { leaseLimits } from './limits.ts';
+import { capsFromEnv, leaseLimits, type Caps } from './limits.ts';
 import * as m from './machine.ts';
 import { limitsOf, priorityOf, seconds } from './tokens.ts';
 
@@ -87,20 +87,29 @@ export class Leases {
   private db: Db;
   private hosts: Hosts;
   private now: () => number;
+  private startedAt: number;
+  private reported = new Set<string>();
+  readonly caps: Caps;
   private status = new Map<string, Status>();
   private clients = new Map<string, number>();
   private openWindows: BookingWindow[] = [];
   readonly timeZone: string;
 
-  constructor(db: Db, hosts: Hosts, now: () => number = Date.now, timeZone: string = brokerTimeZone(process.env)) {
+  constructor(db: Db, hosts: Hosts, now: () => number = Date.now, timeZone: string = brokerTimeZone(process.env), caps: Caps = capsFromEnv(process.env)) {
     this.db = db;
     this.hosts = hosts;
     this.now = now;
+    this.startedAt = now();
+    this.caps = caps;
     this.timeZone = timeZone;
     this.events.setMaxListeners(0);
   }
 
   create(p: Principal, asked: DeviceClass, opts: { ttlSeconds?: number | null; maxSeconds?: number; idleSeconds?: number; via?: string; shard?: boolean; bookingId?: string } = {}): m.Lease {
+    const held = this.db.leasesIn(['queued', 'preparing', 'active']).filter((l) => l.principalId === p.accountId).length;
+    if (held >= this.caps.maxLeasesPerAccount) {
+      throw new ApiError(429, 'TOO_MANY_LEASES', `You have ${held} leases queued or running, the most one account may hold (${this.caps.maxLeasesPerAccount}). Release some, or ask an operator to raise DEVICEPOOL_MAX_LEASES_PER_ACCOUNT.`);
+    }
     const own: TokenPriorityRow = opts.bookingId ? { priority: 'booked', bookingId: opts.bookingId } : priorityOf(this.db, p);
     const { priority, bookingId } = own;
     const booking = bookingId ? this.db.bookings().find((b) => b.id === bookingId) : undefined;
@@ -137,7 +146,7 @@ export class Leases {
       }
     }
     if (offers.length === 0) {
-      throw new ApiError(503, 'NO_DEVICES', 'No Mac with devices is connected.', 'Run `npx devicepool up` on a Mac, or check `devicepool status` on the Macs you have.');
+      throw new ApiError(503, 'NO_DEVICES', 'No Mac with devices is connected.', 'Run `devicepool up` on a Mac, or check that the Macs you have are still running it.');
     }
     if (!offers.some((o) => m.matches(cls, { deviceId: '', ...o, build: null }))) {
       const offered = [...new Set(offers.map((o) => `${o.model} (${isAndroid(o.platform) ? 'Android' : 'iOS'} ${o.os}${o.image ? `, image ${o.image}` : ''})`))].join(', ');
@@ -162,7 +171,7 @@ export class Leases {
       this.now(),
     );
     this.db.insertLease(lease);
-    this.status.set(lease.id, { via: opts.via?.trim().slice(0, 80) || null, activity: null, activityAt: null });
+    this.status.set(lease.id, { via: [...(opts.via?.trim() ?? '')].slice(0, 80).join('') || null, activity: null, activityAt: null });
     this.db.audit('lease.requested', p.accountId, lease.id);
     this.emit(lease);
     void this.tick();
@@ -474,13 +483,12 @@ export class Leases {
       for (const d of m.due(live, now)) {
         const lease = live.find((l) => l.id === d.id);
         if (lease) {
-          this.end(lease, d.reason, null);
+          this.guard(`lease ${lease.id}`, () => this.end(lease, d.reason, null));
         }
       }
       for (const lease of this.db.leasesIn(['preparing', 'active'])) {
-        const host = lease.deviceId ? this.hosts.hostOf(lease.deviceId) : null;
-        if (!host || (!host.connected && host.lostAt !== null && now - host.lostAt > HOST_GRACE_MS)) {
-          this.end(lease, 'device_lost', null);
+        if (lease.deviceId && this.hostGone(lease.deviceId, now)) {
+          this.guard(`lease ${lease.id}`, () => this.end(lease, 'device_lost', null));
         }
       }
 
@@ -516,26 +524,32 @@ export class Leases {
         quotaByTeam: quotas(this.db),
       });
       for (const e of result.endings) {
-        const lease = current.find((l) => l.id === e.leaseId);
-        const next = lease ? m.warn(lease, e.ending) : undefined;
-        if (lease && next && next !== lease) {
-          this.db.updateLease(next);
-          this.db.audit(`lease.ending.${e.ending.reason}`, null, lease.id);
-          this.emit(next);
-          this.events.emit('ending', next);
-        }
+        this.guard(`lease ${e.leaseId}`, () => {
+          const lease = current.find((l) => l.id === e.leaseId);
+          const next = lease ? m.warn(lease, e.ending) : undefined;
+          if (lease && next && next !== lease) {
+            this.db.updateLease(next);
+            this.db.audit(`lease.ending.${e.ending.reason}`, null, lease.id);
+            this.emit(next);
+            this.events.emit('ending', next);
+          }
+        });
       }
       for (const id of result.preempting) {
-        const lease = queued.find((l) => l.id === id);
-        if (lease) {
-          this.db.updateLease({ ...lease, preemptedAt: now });
-        }
+        this.guard(`lease ${id}`, () => {
+          const lease = queued.find((l) => l.id === id);
+          if (lease) {
+            this.db.updateLease({ ...lease, preemptedAt: now });
+          }
+        });
       }
       for (const a of result.assignments) {
-        const lease = queued.find((l) => l.id === a.leaseId);
-        if (lease) {
-          this.prepare({ ...m.assign(lease, a.deviceId, now), windowEndsAt: a.windowEndsAt, preemptedAt: null });
-        }
+        this.guard(`lease ${a.leaseId}`, () => {
+          const lease = queued.find((l) => l.id === a.leaseId);
+          if (lease) {
+            this.prepare({ ...m.assign(lease, a.deviceId, now), windowEndsAt: a.windowEndsAt, preemptedAt: null });
+          }
+        });
       }
       const assigned = new Set(result.assignments.map((a) => a.leaseId));
       const want = [...new Set(queued.filter((l) => !assigned.has(l.id) && (l.class.platform ?? 'ios-simulator') === 'ios-simulator').map((l) => l.class.image ?? ''))]
@@ -546,27 +560,61 @@ export class Leases {
         this.hosts.broadcast(() => ({ type: 'pool', want }));
       }
       for (const w of closedWindows(this.openWindows, result.open)) {
-        this.db.audit(`booking.window_closed ${w.name}`, null, null);
-        windowClosed(w);
+        this.guard(`booking window ${w.name}`, () => {
+          this.db.audit(`booking.window_closed ${w.name}`, null, null);
+          windowClosed(w);
+        });
       }
       this.openWindows = result.open;
+    } catch (err) {
+      this.report('tick', err);
     } finally {
       this.ticking = false;
     }
   }
 
+  private hostGone(deviceId: string, now: number): boolean {
+    const host = this.hosts.hostOf(deviceId);
+    if (!host) {
+      return now - this.startedAt > HOST_GRACE_MS;
+    }
+    return !host.connected && host.lostAt !== null && now - host.lostAt > HOST_GRACE_MS;
+  }
+
+  private guard(what: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      this.report(what, err);
+    }
+  }
+
+  private report(what: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    const key = `${what}: ${message}`;
+    if (this.reported.has(key)) {
+      return;
+    }
+    if (this.reported.size >= 500) {
+      this.reported.clear();
+    }
+    this.reported.add(key);
+    console.error(`Lease scheduler: ${what} failed, carrying on. ${message}`);
+  }
+
   private sweepHolds(now: number): void {
     for (const hold of holdsDue(this.db.holds(), now)) {
-      this.wipeHold(hold, 'expired', null);
+      this.guard(`hold on ${hold.deviceId}`, () => this.wipeHold(hold, 'expired', null));
     }
     for (const hold of this.db.holds()) {
-      const host = this.hosts.hostOf(hold.deviceId);
-      if (!host || (!host.connected && host.lostAt !== null && now - host.lostAt > HOST_GRACE_MS)) {
-        const lease = hold.leaseId ? this.db.getLease(hold.leaseId) : null;
-        if (lease && lease.state !== 'ended') {
-          this.end(lease, 'device_lost', null);
-        }
-        this.db.removeHold(hold.deviceId);
+      if (this.hostGone(hold.deviceId, now)) {
+        this.guard(`hold on ${hold.deviceId}`, () => {
+          const lease = hold.leaseId ? this.db.getLease(hold.leaseId) : null;
+          if (lease && lease.state !== 'ended') {
+            this.end(lease, 'device_lost', null);
+          }
+          this.db.removeHold(hold.deviceId);
+        });
       }
     }
   }
@@ -598,12 +646,14 @@ export class Leases {
         }
       })
       .catch(() => {
-        const current = this.db.getLease(lease.id);
-        if (current?.state === 'preparing') {
-          const next = m.prepareFailed(current, this.now());
-          this.db.updateLease(next);
-          this.emit(next);
-        }
+        this.guard(`lease ${lease.id}`, () => {
+          const current = this.db.getLease(lease.id);
+          if (current?.state === 'preparing') {
+            const next = m.prepareFailed(current, this.now());
+            this.db.updateLease(next);
+            this.emit(next);
+          }
+        });
       });
   }
 }

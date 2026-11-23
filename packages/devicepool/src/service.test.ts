@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { daemonPath, servicePlist, serviceUpArgs, validUserName } from './service.ts';
+import { daemonPath, failureMessage, servicePlist, serviceUpArgs, startOutcome, timeoutMessage, validUserName } from './service.ts';
 
 test('the LaunchAgent plist is valid and keeps arguments with special characters intact', () => {
   const dir = mkdtempSync(join(tmpdir(), 'devicepool-plist-'));
@@ -59,4 +59,18 @@ test('only plain user names, never root', () => {
   assert.equal(validUserName('a b'), false);
   assert.equal(validUserName('-x'), false);
   assert.equal(validUserName('<x>'), false);
+});
+
+test('the service log tells a start from each way it fails', () => {
+  assert.equal(startOutcome('Checking this Mac...\n'), null);
+  assert.deepEqual(startOutcome('Devicepool is running at http://a.local:7420\n\n  Sign in as admin:   http://a.local:7420/welcome#x   (one use, 30 min)\n'), { isRunning: true, url: 'http://a.local:7420', link: 'http://a.local:7420/welcome#x' });
+  const checks = startOutcome('  NO  Xcode          not found\n\nFix the items marked NO, then run `devicepool up` again.\n');
+  assert.ok(checks && !checks.isRunning && /failed its check/.test(checks.cause) && /Xcode/.test(checks.cause));
+  const port = startOutcome('\nPort 7420 is in use. Is Devicepool already running?\n');
+  assert.ok(port && !port.isRunning && /port 7420 is in use/.test(port.cause));
+  const held = startOutcome('Starting devices (up to 2, 1 kept ready)...\n\nAnother Devicepool on this Mac (process 41) already uses these simulators, and so on.\n');
+  assert.ok(held && !held.isRunning && /process 41/.test(held.cause));
+  assert.match(failureMessage('port 7420 is in use.', '/h/devicepool.log', false), /devicepool up --uninstall` removes it/);
+  assert.match(failureMessage('x', '/h/devicepool.log', true), /devicepool up --uninstall --system` removes it/);
+  assert.match(timeoutMessage('a\nb\n', '/h/devicepool.log', false), /within 5 minutes.\nThe end of the log:\na\nb\n\n.*devicepool up --uninstall/s);
 });

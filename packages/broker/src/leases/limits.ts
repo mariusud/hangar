@@ -69,3 +69,18 @@ function stripUnset(limits: Partial<Limits>): Partial<Limits> {
   }
   return out;
 }
+
+export type Caps = { maxLeasesPerAccount: number; maxShards: number };
+
+export const DEFAULT_CAPS_PER_ACCOUNT: Caps = { maxLeasesPerAccount: 50, maxShards: 50 };
+
+export function capsFromEnv(env: Record<string, string | undefined>): Caps {
+  const whole = (value: string | undefined, fallback: number): number => {
+    const n = Number(value);
+    return value !== undefined && Number.isInteger(n) && n > 0 ? n : fallback;
+  };
+  return {
+    maxLeasesPerAccount: whole(env.DEVICEPOOL_MAX_LEASES_PER_ACCOUNT, DEFAULT_CAPS_PER_ACCOUNT.maxLeasesPerAccount),
+    maxShards: whole(env.DEVICEPOOL_MAX_SHARDS, DEFAULT_CAPS_PER_ACCOUNT.maxShards),
+  };
+}

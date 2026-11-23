@@ -4,13 +4,25 @@ Devicepool is an open source, self-hosted device farm for iOS simulators and And
 
 It runs the devices on your own Macs and lends them out one at a time. When a lease ends,
 Devicepool wipes the device and puts it back in the pool. It is free under Apache-2.0, needs no
-account and sends no telemetry. Physical phones are on the roadmap.
+account and sends no telemetry. It does not run iPhones. Android phones over USB are experimental
+and have never run on real hardware.
 
 ![Six devices in the pool, three of them on lease to a developer, CI and an agent](assets/header.png)
 
 ## Start
 
-On the Mac that will hold the devices, such as a Mac mini in the office:
+On the Mac that will hold the devices, such as a Mac mini in the office.
+
+You need a Mac with Apple silicon or Intel and:
+
+- Node 22.18 or newer and pnpm
+- Xcode with an iOS simulator runtime (Xcode > Settings > Components)
+- idb: the companion (`brew tap facebook/fb && brew install idb-companion`) and the client
+  (`pipx install fb-idb`), which need [Homebrew](https://brew.sh) and Python
+
+`devicepool doctor` checks all of this and prints the fix for anything missing.
+
+Then:
 
 ```bash
 git clone https://github.com/mariusud/devicepool && cd devicepool
@@ -18,7 +30,8 @@ pnpm install && npm install -g ./packages/devicepool
 devicepool up
 ```
 
-Open the link it prints to see the devices. Devicepool is early and not on npm yet.
+Open the link it prints to see the devices. Devicepool is early and not on npm yet. It serves plain
+HTTP on your network until you put TLS in front ([unattended](guides/unattended.md) shows `--url`).
 
 ## What it does
 

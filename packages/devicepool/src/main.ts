@@ -4,40 +4,16 @@ import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { DevicepoolError } from './client/index.ts';
-import { CLIENT_HELP, clientCommand } from './client.ts';
-import { RUN_HELP, runAndroid, runEspressoCommand, runIos, runMaestroCommand, runXcuitestCommand } from './run.ts';
+import { clientCommand } from './client.ts';
+import { intOption, unexpectedMessage, unknownCommand, usageError, usageProblem } from './args.ts';
+import { BROKER_OPTIONS, JOIN_OPTIONS, UP_OPTIONS } from './options.ts';
+import { HELP } from './usage.ts';
+import { runAndroid, runEspressoCommand, runIos, runMaestroCommand, runXcuitestCommand } from './run.ts';
 import { daemonPath, installService, serviceUpArgs, uninstallService } from './service.ts';
+import { brokerAddress } from '@devicepool/agent';
+import { installCrashHandlers } from './crash.ts';
 import { exportData, importData } from './backup.ts';
 import { brokerOnly, doctor, joinBroker, joinToken, printChecks, up } from './up.ts';
-
-const HELP = `devicepool: the open source, self-hosted device farm
-
-Server
-  devicepool up [--port 7420] [--warm 1] [--max N] [--url https://...] [--android <avd>] [--phones]
-                                                 run Devicepool on this Mac; --android adds
-                                                 emulators from that Android virtual device;
-                                                 --phones adds the Android phones on USB
-  devicepool up --install [same options]         run it as a service that starts at login
-  sudo devicepool up --install --system --user <name> [same options]
-                                                 start it at boot as that user, with
-                                                 nobody logged in (a LaunchDaemon)
-  devicepool up --uninstall [--system]           remove the service
-  devicepool doctor                              check this Mac
-  devicepool --version                           print the version
-
-More Macs
-  devicepool broker [--port 7420] [--url https://...] [--host 0.0.0.0]
-                                                 run only the broker, as in a container
-  devicepool join-token                          print a token for another Mac, on the broker
-  devicepool join <broker-url> --token <token> [--warm 1] [--max N] [--android <avd>] [--phones]
-                                                 offer this Mac's simulators through that broker
-  devicepool export <file.tar>                   copy accounts, tokens, history, builds, recordings
-  devicepool import <file.tar>                   start a new broker from an export
-
-React Native
-${RUN_HELP}
-
-${CLIENT_HELP}`;
 
 async function main(): Promise<void> {
   process.env.PATH = [...new Set([...(process.env.PATH ?? '').split(':').filter(Boolean), ...daemonPath(homedir(), dirname(process.execPath)).split(':')])].join(':');
@@ -50,10 +26,10 @@ async function main(): Promise<void> {
       return;
     }
     case 'up': {
-      const { values } = parseArgs({
-        args: rest,
-        options: { port: { type: 'string' }, warm: { type: 'string' }, max: { type: 'string' }, url: { type: 'string' }, android: { type: 'string' }, phones: { type: 'boolean' }, install: { type: 'boolean' }, uninstall: { type: 'boolean' }, system: { type: 'boolean' }, user: { type: 'string' } },
-      });
+      const { values } = parseArgs({ args: rest, options: UP_OPTIONS });
+      const port = intOption('--port', values.port, 1, 65535);
+      const warm = intOption('--warm', values.warm, 0);
+      const max = intOption('--max', values.max, 1);
       if (values.uninstall) {
         await uninstallService({ system: values.system ?? false });
         return;
@@ -62,19 +38,22 @@ async function main(): Promise<void> {
         await installService(serviceUpArgs(rest), { system: values.system ?? false, ...(values.user ? { user: values.user } : {}) });
         return;
       }
+      installCrashHandlers();
       await up({
         ...(values.url ? { url: values.url } : {}),
-        ...(values.port ? { port: Number(values.port) } : {}),
-        ...(values.warm ? { warm: Number(values.warm) } : {}),
-        ...(values.max ? { max: Number(values.max) } : {}),
+        ...(port !== undefined ? { port } : {}),
+        ...(warm !== undefined ? { warm } : {}),
+        ...(max !== undefined ? { max } : {}),
         ...(values.android ? { android: values.android } : {}),
         ...(values.phones ? { phones: true } : {}),
       });
       return;
     }
     case 'broker': {
-      const { values } = parseArgs({ args: rest, options: { port: { type: 'string' }, url: { type: 'string' }, host: { type: 'string' } } });
-      await brokerOnly({ ...(values.port ? { port: Number(values.port) } : {}), ...(values.url ? { url: values.url } : {}), ...(values.host ? { host: values.host } : {}) });
+      const { values } = parseArgs({ args: rest, options: BROKER_OPTIONS });
+      const port = intOption('--port', values.port, 1, 65535);
+      installCrashHandlers();
+      await brokerOnly({ ...(port !== undefined ? { port } : {}), ...(values.url ? { url: values.url } : {}), ...(values.host ? { host: values.host } : {}) });
       return;
     }
     case 'export':
@@ -89,13 +68,21 @@ async function main(): Promise<void> {
       console.log(joinToken());
       return;
     case 'join': {
-      const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { token: { type: 'string' }, warm: { type: 'string' }, max: { type: 'string' }, android: { type: 'string' }, phones: { type: 'boolean' } } });
+      const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: JOIN_OPTIONS });
+      const warm = intOption('--warm', values.warm, 0);
+      const max = intOption('--max', values.max, 1);
       const url = positionals[0];
       const token = values.token ?? process.env.DEVICEPOOL_HOST_TOKEN;
       if (!url || !token) {
         throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool join <broker-url> --token <token>. Get a token with `devicepool join-token` on the broker.');
       }
-      await joinBroker({ url, token, ...(values.warm ? { warm: Number(values.warm) } : {}), ...(values.max ? { max: Number(values.max) } : {}), ...(values.android ? { android: values.android } : {}), ...(values.phones ? { phones: true } : {}) });
+      try {
+        brokerAddress(url);
+      } catch (err) {
+        throw usageError(err instanceof Error ? err.message : String(err));
+      }
+      installCrashHandlers();
+      await joinBroker({ url, token, ...(warm !== undefined ? { warm } : {}), ...(max !== undefined ? { max } : {}), ...(values.android ? { android: values.android } : {}), ...(values.phones ? { phones: true } : {}) });
       return;
     }
     case 'run': {
@@ -138,8 +125,8 @@ async function main(): Promise<void> {
       return;
     default:
       if (!(await clientCommand(command, rest))) {
-        console.log(`Unknown command "${command}".\n\n${HELP}`);
-        process.exitCode = 1;
+        console.error(unknownCommand(command));
+        process.exitCode = 2;
       }
   }
 }
@@ -147,10 +134,17 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  if (err instanceof DevicepoolError) {
+  const problem = usageProblem(err);
+  if (problem) {
+    console.error(problem);
+    process.exitCode = 2;
+  } else if (err instanceof DevicepoolError) {
     console.error(err.message);
-    process.exitCode = 1;
-  } else {
+    process.exitCode = err.code === 'USAGE' ? 2 : 1;
+  } else if (process.env.DEVICEPOOL_DEBUG) {
     throw err;
+  } else {
+    console.error(unexpectedMessage(err));
+    process.exitCode = 1;
   }
 }

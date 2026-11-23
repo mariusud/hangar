@@ -25,7 +25,7 @@ The pricing page lists four plans:
 ## What Devicepool does instead
 
 - The console shows a live device in the browser, in H.264, with touch and keyboard. On one Mac
-  we measured 52 frames a second ([numbers](../numbers.md)).
+  we measured 52 frames a second over HTTPS or localhost, 38 on a plain-HTTP LAN ([numbers](../numbers.md)).
 - It takes the same kind of build: a simulator `.app` for iOS, an APK for Android.
 - The `<devicepool-screen>` element puts a live device in a page of your own, such as a support
   tool or an internal dashboard. Your server passes the stream on and adds the token
@@ -42,7 +42,8 @@ The pricing page lists four plans:
 - It is not built to serve an app preview to the public. A viewer's browser has to reach your
   server, your server has to reach the Mac, and every viewer takes one of a few devices.
 - It does not host anything. You need a Mac with Xcode and idb, and someone to keep it updated.
-- It does not run physical phones. They are on the roadmap.
+- It does not run iPhones. Android phones over USB are experimental and have never run on real
+  hardware.
 - The live screen for Android emulators needs HTTPS or localhost. There is no JPEG fallback for
   Android yet.
 - It is early and not on npm yet.

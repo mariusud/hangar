@@ -30,3 +30,10 @@ test('an idle device of a class that is also waiting is kept', () => {
   ];
   assert.equal(spareDevice(devices, ['signed-in', undefined], 2, always), null);
 });
+
+test('overdue lists leases past their deadline plus the grace period', async () => {
+  const { overdue } = await import('./connect.ts');
+  const deadlines = new Map([['late', 1000], ['inside-grace', 50_000], ['open', 500_000]]);
+  assert.deepEqual(overdue(deadlines, 61_001, 60_000), ['late']);
+  assert.deepEqual(overdue(deadlines, 1000, 60_000), []);
+});

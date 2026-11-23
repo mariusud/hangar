@@ -63,8 +63,8 @@ and the Metro tunnel reach a held device like any other. The API is
   first, and then goes back to the pool as usual. `DELETE /v1/runs/:id/flows/:flow/hold` lets it
   go sooner.
 
-The GitHub Action has no input for `--hold` yet, and the pull request comment doesn't link to a
-held device. Held devices are tested against fake hosts only.
+The GitHub Action has a `hold` input that passes `--hold` on, for runs against a Devicepool server
+([GitHub Actions](github-actions.md)). Held devices are tested against fake hosts only.
 
 ## When a shard is preempted
 

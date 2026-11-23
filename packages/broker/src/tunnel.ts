@@ -8,6 +8,33 @@ import type { Hosts } from './hosts.ts';
 import type { Leases } from './leases/service.ts';
 import type { Upgrades } from './stream.ts';
 
+const BACKLOG = 16 * 1024 * 1024;
+
+export function isCrossOrigin(headers: { cookie?: string | undefined; origin?: string | undefined; host?: string | undefined }): boolean {
+  if (!headers.cookie || !headers.origin) {
+    return false;
+  }
+  try {
+    return new URL(headers.origin).host !== headers.host;
+  } catch {
+    return true;
+  }
+}
+
+export function badPorts(list: number[]): string | null {
+  if (list.length > 8) {
+    return 'A tunnel forwards at most 8 extra ports.';
+  }
+  const low = list.find((n) => Number.isInteger(n) && n < 1024);
+  if (low !== undefined) {
+    return `Port ${low} is below 1024. Use a port from 1024 to 65535 with --port.`;
+  }
+  if (list.some((n) => !Number.isInteger(n) || n < 1 || n > 65535)) {
+    return 'Ports must be numbers from 1024 to 65535.';
+  }
+  return null;
+}
+
 const KIND = { open: 1, data: 2, close: 3 } as const;
 
 function frame(kind: number, conn: number, data?: Uint8Array): Buffer {
@@ -27,6 +54,10 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
   hosts.onTunnel = (m) => {
     const ws = clients.get(m.leaseId);
     if (!ws) {
+      return;
+    }
+    if (ws.bufferedAmount > BACKLOG) {
+      ws.close(4003, 'the client is not reading the tunnel');
       return;
     }
     if (m.type === 'tunnel.open') {
@@ -56,8 +87,14 @@ export function attachTunnels(db: Db, hosts: Hosts, leases: Leases): Upgrades {
     const leaseId = decodeURIComponent(match[1]);
     const token = url.searchParams.get('token');
     const ports = [...new Set((url.searchParams.get('ports') ?? '').split(',').filter(Boolean).map(Number))];
-    if (ports.length > 8 || ports.some((n) => !Number.isInteger(n) || n < 1 || n > 65535)) {
-      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    const portError = badPorts(ports);
+    if (portError) {
+      socket.write(`HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(portError)}\r\nConnection: close\r\n\r\n${portError}`);
+      socket.destroy();
+      return true;
+    }
+    if (isCrossOrigin(req.headers)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return true;
     }

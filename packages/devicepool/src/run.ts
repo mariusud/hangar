@@ -7,50 +7,39 @@ import { basename, join } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { Devicepool, DevicepoolError, openInBrowser, runEspresso, runMaestro, runXcuitest, type FlowResult, type Lease, type MaestroRun } from './client/index.ts';
 import { parseDuration, rerunFlow } from './client/maestro.ts';
+import { clip, intOption } from './args.ts';
+import { helpSection } from './help.ts';
+import { RUN_ANDROID_OPTIONS, RUN_ESPRESSO_OPTIONS, RUN_IOS_OPTIONS, RUN_MAESTRO_OPTIONS, RUN_XCUITEST_OPTIONS } from './options.ts';
 
 const run = promisify(execFile);
 const children: ChildProcess[] = [];
 let isStopped = false;
 
-export const RUN_HELP = `  devicepool run ios [--app App.app | --build NAME] [--port 8081] [--port 4000]... [--scheme S] [--model M] [--lease ID]
-                                           build, install and run your app on a leased
-                                           simulator, connected to Metro on this machine;
-                                           --build installs a build Devicepool already has,
-                                           without Xcode; more --port forwards those ports
-                                           too, as localhost:<port> on the device
-  devicepool run android [--app app-debug.apk | --build NAME] [--port 8081]... [--lease ID]
-                                           the same on a leased Android emulator
-  devicepool run maestro <flows-dir> --app <App.app | build> [--shards N] [--retries 1]
-                     [--junit report.xml] [-e KEY=VALUE]... [--hold 30m] [--booking B]
-                                           run Maestro flows sharded over fresh devices;
-                                           --hold keeps a failed flow's device as it was,
-                                           for your team (devicepool held <run-id> <flow>);
-                                           --booking leases the shards inside your team's
-                                           open booking, ahead of its agents
-  devicepool run maestro --rerun <run-id> --flow <flow> [-e KEY=VALUE]...
-                                           run one flow of a finished run again, recorded
-  devicepool run xcuitest <Build/Products> [--tests Target/Class,...] [--shards N] [--junit report.xml] [--booking B]
-                                           run XCUITest from build-for-testing the same way
-  devicepool run espresso --app app.apk --test-apk app-test.apk [--tests com.example.LoginTest,...] [--booking B]
-                                           run Espresso on Android emulators the same way`;
+export const RUN_HELP = helpSection('React Native', [
+  {
+    usage: ['devicepool run ios [--app App.app | --build NAME] [--scheme S] [--model M]', '[--port 8081] [--port 4000]... [--lease ID]'],
+    about: ['build, install and run your app on a leased', 'simulator, connected to Metro on this machine;', '--build installs a build Devicepool already has,', 'without Xcode; more --port forwards those ports', 'too, as localhost:<port> on the device'],
+  },
+  { usage: 'devicepool run android [--app app-debug.apk | --build NAME] [--port 8081]... [--lease ID]', about: ['the same on a leased Android emulator'] },
+  {
+    usage: ['devicepool run maestro <flows-dir> --app <App.app | build> [--shards N] [--retries 1]', '[--model M] [--junit report.xml] [-e KEY=VALUE]... [--hold 30m] [--booking B]', '[--build-name NAME]'],
+    about: ['run Maestro flows sharded over fresh devices;', '--hold keeps a failed flow\'s device as it was,', 'for your team (devicepool held <run-id> <flow>);', '--booking leases the shards inside your team\'s', 'open booking, ahead of its agents;', '--build-name is the name the app is uploaded under,', 'which a CI token limited to a prefix must start with'],
+  },
+  { usage: 'devicepool run maestro --rerun <run-id> --flow <flow> [-e KEY=VALUE]...', about: ['run one flow of a finished run again, recorded'] },
+  {
+    usage: ['devicepool run xcuitest <Build/Products> [--tests Target/Class,...] [--shards N]', '[--retries 1] [--model M] [--junit report.xml] [--booking B] [--build-name NAME]'],
+    about: ['run XCUITest from build-for-testing the same way'],
+  },
+  {
+    usage: ['devicepool run espresso --app app.apk --test-apk app-test.apk [--shards N] [--retries 1]', '[--tests com.example.LoginTest,...] [--junit report.xml] [--booking B] [--build-name NAME]'],
+    about: ['run Espresso on Android emulators the same way'],
+  },
+]);
 
 export async function runMaestroCommand(args: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args,
-    allowPositionals: true,
-    options: {
-      app: { type: 'string' },
-      shards: { type: 'string' },
-      retries: { type: 'string' },
-      junit: { type: 'string' },
-      model: { type: 'string' },
-      env: { type: 'string', short: 'e', multiple: true },
-      rerun: { type: 'string' },
-      flow: { type: 'string' },
-      hold: { type: 'string' },
-      booking: { type: 'string' },
-    },
-  });
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: RUN_MAESTRO_OPTIONS });
+  const shards = intOption('--shards', values.shards, 1) ?? 1;
+  const retries = intOption('--retries', values.retries, 0, 3) ?? 1;
   const holdSeconds = values.hold === undefined ? undefined : parseDuration(values.hold);
   if (holdSeconds === null) {
     throw new DevicepoolError(0, 'USAGE', '--hold takes a duration such as 30m or 2h: how long to keep a failed flow\'s device as it was.');
@@ -71,23 +60,22 @@ export async function runMaestroCommand(args: string[]): Promise<void> {
   const result = await runMaestro(await Devicepool.fromEnv(), {
     app: values.app,
     flowsDir,
-    shards: Number(values.shards ?? 1),
-    retries: Number(values.retries ?? 1),
+    shards,
+    retries,
     env,
     ...(values.model ? { device: { model: values.model } } : {}),
     ...(holdSeconds ? { holdSeconds } : {}),
     ...(values.booking ? { booking: values.booking } : {}),
+    ...(values['build-name'] ? { buildName: values['build-name'] } : {}),
     log: logLine,
   });
   await report(result, values.junit, 'Maestro');
 }
 
 export async function runXcuitestCommand(args: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args,
-    allowPositionals: true,
-    options: { tests: { type: 'string' }, shards: { type: 'string' }, retries: { type: 'string' }, junit: { type: 'string' }, model: { type: 'string' }, booking: { type: 'string' } },
-  });
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: RUN_XCUITEST_OPTIONS });
+  const shards = intOption('--shards', values.shards, 1) ?? 1;
+  const retries = intOption('--retries', values.retries, 0, 3) ?? 1;
   const products = positionals[0];
   if (!products) {
     throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool run xcuitest <Build/Products folder> [--tests Target/Class,...] [--shards N]');
@@ -95,20 +83,20 @@ export async function runXcuitestCommand(args: string[]): Promise<void> {
   const result = await runXcuitest(await Devicepool.fromEnv(), {
     products,
     ...(values.tests ? { tests: splitList(values.tests) } : {}),
-    shards: Number(values.shards ?? 1),
-    retries: Number(values.retries ?? 1),
+    shards,
+    retries,
     ...(values.model ? { device: { model: values.model } } : {}),
     ...(values.booking ? { booking: values.booking } : {}),
+    ...(values['build-name'] ? { buildName: values['build-name'] } : {}),
     log: logLine,
   });
   await report(result, values.junit, 'XCUITest');
 }
 
 export async function runEspressoCommand(args: string[]): Promise<void> {
-  const { values } = parseArgs({
-    args,
-    options: { app: { type: 'string' }, 'test-apk': { type: 'string' }, tests: { type: 'string' }, shards: { type: 'string' }, retries: { type: 'string' }, junit: { type: 'string' }, booking: { type: 'string' } },
-  });
+  const { values } = parseArgs({ args, options: RUN_ESPRESSO_OPTIONS });
+  const shards = intOption('--shards', values.shards, 1) ?? 1;
+  const retries = intOption('--retries', values.retries, 0, 3) ?? 1;
   const testApp = values['test-apk'];
   if (!values.app || !testApp) {
     throw new DevicepoolError(0, 'USAGE', 'Usage: devicepool run espresso --app app.apk --test-apk app-test.apk [--tests com.example.LoginTest,...] [--shards N]');
@@ -117,9 +105,10 @@ export async function runEspressoCommand(args: string[]): Promise<void> {
     app: values.app,
     testApp,
     ...(values.tests ? { tests: splitList(values.tests) } : {}),
-    shards: Number(values.shards ?? 1),
-    retries: Number(values.retries ?? 1),
+    shards,
+    retries,
     ...(values.booking ? { booking: values.booking } : {}),
+    ...(values['build-name'] ? { buildName: values['build-name'] } : {}),
     log: logLine,
   });
   await report(result, values.junit, 'Espresso');
@@ -159,7 +148,7 @@ function recordingLinks(f: FlowResult): { label: string; url: string }[] {
 }
 
 const CELL_ESCAPES: Record<string, string> = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '|': '\\|', '`': "'" };
-const cell = (s: string): string => s.replace(/[\r\n]+/g, ' ').replace(/[<>&|`]/g, (c) => CELL_ESCAPES[c] ?? c).slice(0, 300);
+const cell = (s: string): string => clip(s.replace(/[\r\n]+/g, ' ').replace(/[<>&|`]/g, (c) => CELL_ESCAPES[c] ?? c), 300);
 
 export function commentKey(env: NodeJS.ProcessEnv): string {
   return createHash('sha256').update(`${env.GITHUB_WORKFLOW ?? ''}\n${env.GITHUB_JOB ?? ''}\n${env.DEVICEPOOL_COMMENT_KEY ?? ''}`).digest('hex').slice(0, 16);
@@ -376,7 +365,7 @@ async function buildApk(p: Project): Promise<string> {
 }
 
 export async function runAndroid(args: string[]): Promise<void> {
-  const { values } = parseArgs({ args, options: { app: { type: 'string' }, build: { type: 'string' }, port: { type: 'string', multiple: true }, lease: { type: 'string' } } });
+  const { values } = parseArgs({ args, options: RUN_ANDROID_OPTIONS });
   const p = await project(process.cwd());
   const [port, ...extra] = ports(values.port);
   const leaseId = values.lease ?? process.env.DEVICEPOOL_LEASE;
@@ -385,7 +374,7 @@ export async function runAndroid(args: string[]): Promise<void> {
   stopOnCtrlC(() => (leaseId ? null : lease));
 
   const apk = await buildWithMetro(values.build ?? values.app ?? buildApk(p), metro(p, port));
-  lease = leaseId ? client.attach(leaseId) : await client.lease({ platform: 'android-emulator' }, { via: 'devicepool run android' });
+  lease = leaseId ? client.attach(leaseId) : await client.lease({ platform: 'android-emulator' }, { via: 'devicepool run android', ...(process.stdout.isTTY ? { log: logLine } : {}) });
   const tunnel = await lease.metroTunnel(port, extra);
   process.stderr.write(`Installing ${values.build ?? basename(apk)}...\n`);
   const { bundleId } = await lease.install(apk);
@@ -416,11 +405,7 @@ async function expoSlug(root: string): Promise<string | null> {
 }
 
 function ports(values: string[] | undefined): [number, ...number[]] {
-  const list = (values ?? ['8081']).map(Number);
-  if (list.some((n) => !Number.isInteger(n) || n < 1 || n > 65535)) {
-    throw new DevicepoolError(0, 'BAD_PORT', '--port takes a port number.');
-  }
-  const [metroPort = 8081, ...extra] = list;
+  const [metroPort = 8081, ...extra] = (values ?? ['8081']).map((v) => intOption('--port', v, 1, 65535) ?? 8081);
   return [metroPort, ...extra];
 }
 
@@ -439,10 +424,7 @@ async function plist(app: string, key: string, format: 'raw' | 'json'): Promise<
 }
 
 export async function runIos(args: string[]): Promise<void> {
-  const { values } = parseArgs({
-    args,
-    options: { app: { type: 'string' }, build: { type: 'string' }, port: { type: 'string', multiple: true }, scheme: { type: 'string' }, model: { type: 'string' }, lease: { type: 'string' } },
-  });
+  const { values } = parseArgs({ args, options: RUN_IOS_OPTIONS });
   const p = await project(process.cwd());
   const [port, ...extra] = ports(values.port);
   const leaseId = values.lease ?? process.env.DEVICEPOOL_LEASE;
@@ -451,7 +433,7 @@ export async function runIos(args: string[]): Promise<void> {
   stopOnCtrlC(() => (leaseId ? null : lease));
 
   const app = await buildWithMetro(values.build ?? values.app ?? build(p, values.scheme), metro(p, port));
-  lease = leaseId ? client.attach(leaseId) : await client.lease(values.model ? { model: values.model } : {}, { via: 'devicepool run ios' });
+  lease = leaseId ? client.attach(leaseId) : await client.lease(values.model ? { model: values.model } : {}, { via: 'devicepool run ios', ...(process.stdout.isTTY ? { log: logLine } : {}) });
   const localId = values.build ? null : await plist(app, 'CFBundleIdentifier', 'raw');
   if (!values.build && !localId) {
     throw new DevicepoolError(0, 'NOT_AN_APP', `${app} has no bundle id. Pass a built simulator .app.`);

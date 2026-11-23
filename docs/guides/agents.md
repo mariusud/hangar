@@ -29,7 +29,8 @@ environment:
 ```bash
 export DEVICEPOOL_URL=http://studio-mini.local:7420 DEVICEPOOL_TOKEN=dp_member_...
 claude
-/plugin install devicepool --marketplace mariusud/devicepool
+/plugin marketplace add mariusud/devicepool
+/plugin install devicepool@devicepool
 ```
 
 ## Cursor

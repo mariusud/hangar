@@ -16,7 +16,7 @@ means the pages read do not mention it, not that the tool cannot do it.
 | React Native dev loop | Metro through Devicepool, Fast Refresh, DevTools | Port tunnels for Metro | Local only | Not documented | Dev build and Metro tunnel |
 | Many hosts, teams | Several Macs, teams with quotas, OpenID Connect SSO | Gateway over many workers, roles, sign-in through a proxy | No | One relay over many Mac agents, roles, tokens | Expo accounts |
 | Android emulators | Yes | Yes, macOS and Linux | Yes | Yes, on macOS | Yes |
-| Physical phones | Not yet | Yes | Yes | No | No |
+| Physical phones | Android over USB, experimental, never run on real hardware; no iPhones | Yes | Yes | No | No |
 | Also covers | | Linux hosts for Android, a slim simulator mode | Apple TV, Android TV, Fire TV, Electron, profiling, visual diffs | Build tracking, clipboard sync, taking a device offline | Runs from Linux and Windows, no hardware needed |
 
 Sources: Simlock's docs in github.com/callstackincubator/simlock (website/src/content/docs),

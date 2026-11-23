@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: broker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ required "Set image.repository and image.tag. No image is published: build the Dockerfile and push it to your own registry." .Values.image.repository }}:{{ required "Set image.tag." .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: DEVICEPOOL_URL

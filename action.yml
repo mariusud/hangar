@@ -13,6 +13,9 @@ inputs:
   app:
     description: A built simulator .app, an archive of one, or the name of a build already on Devicepool. In runner mode it must be a path. Not used with rerun.
     default: ''
+  build-name:
+    description: Server only. The name the app is uploaded under, such as myapp-pr-42. A token made with `devicepool connect ci <prefix>` can upload only names that start with its prefix, so set this to a name that does. The app's folder name, such as MyApp.app, if left out.
+    default: ''
   flows:
     description: The folder with the Maestro flow files.
     default: .maestro
@@ -95,6 +98,9 @@ runs:
           fail "Devicepool needs Node 22.18 or newer and this job has $(node --version). Remove any step after this action's setup that puts an older Node first on PATH."
         fi
         if [ -n "$INPUT_URL" ]; then
+          if [ -z "$INPUT_TOKEN" ]; then
+            fail "The token input is empty. Add the DEVICEPOOL_TOKEN secret, or leave url empty to run on this runner."
+          fi
           echo "shards=${INPUT_SHARDS:-1}" >> "$GITHUB_OUTPUT"
           exit 0
         fi
@@ -284,6 +290,7 @@ runs:
         # Inputs go through the environment, not the script text, so a value cannot run as shell.
         INPUT_FLOWS: ${{ inputs.flows }}
         INPUT_APP: ${{ inputs.app }}
+        INPUT_BUILD_NAME: ${{ inputs.build-name }}
         INPUT_SHARDS: ${{ steps.plan.outputs.shards }}
         INPUT_RETRIES: ${{ inputs.retries }}
         INPUT_JUNIT: ${{ inputs.junit }}
@@ -311,6 +318,7 @@ runs:
           if [ -n "$INPUT_MODEL" ]; then args+=(--model "$INPUT_MODEL"); fi
           if [ -n "$INPUT_HOLD" ]; then args+=(--hold "$INPUT_HOLD"); fi
           if [ -n "$INPUT_BOOKING" ]; then args+=(--booking "$INPUT_BOOKING"); fi
+          if [ -n "$INPUT_BUILD_NAME" ]; then args+=(--build-name "$INPUT_BUILD_NAME"); fi
         fi
         while IFS= read -r line; do
           if [ -n "$line" ]; then args+=(-e "$line"); fi

@@ -3,7 +3,7 @@
 Is there an open source, self-hosted alternative to AWS Device Farm? For tests that can run on
 iOS simulators and Android emulators, yes: Devicepool is an open source (Apache-2.0) device farm
 that runs them on your own Macs. For tests that need real phones, no: AWS Device Farm runs
-physical devices, and Devicepool does not yet.
+physical devices, and Devicepool has no tested support for them.
 
 ## What AWS Device Farm is
 
@@ -37,7 +37,8 @@ device minutes.
 
 ## What Devicepool does not do
 
-- It does not run physical phones or tablets. They are on the roadmap. A simulator does not
+- It does not run iPhones or tablets. Android phones over USB are experimental and have never
+  run on real hardware. A simulator does not
   reproduce a real device's hardware, performance or manufacturer changes.
 - It has no Appium endpoint.
 - It does not host anything. You need a Mac with Xcode and idb, and someone to keep it updated.

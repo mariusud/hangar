@@ -137,6 +137,22 @@ did.
    runs a pull request's code should get a token limited to a name prefix instead:
    `devicepool connect ci pr-` uploads only builds named `pr-...`. Keep the full token for jobs on
    the main branch, for example in a GitHub environment that only `main` can deploy to.
+   A prefix token can upload only names that start with its prefix, and the action uploads the
+   app under its folder name (`MyApp.app`) unless told otherwise. Pass `build-name` a name that
+   starts with the prefix, such as `pr-` and the pull request number:
+
+   <!-- {% raw %} -->
+   ```yaml
+         - uses: mariusud/devicepool@main
+           with:
+             url: ${{ secrets.DEVICEPOOL_URL }}
+             token: ${{ secrets.DEVICEPOOL_TOKEN }}
+             app: build/Build/Products/Release-iphonesimulator/MyApp.app
+             build-name: pr-${{ github.event.pull_request.number }}
+   ```
+   <!-- {% endraw %} -->
+
+   Outside the action, `devicepool run maestro ... --build-name pr-42` does the same.
 2. Build a Release simulator app, so the JavaScript is in the app and no Metro is needed. Any
    macOS runner, EAS or Bazel can build it; the example below builds on the runner.
 
@@ -176,7 +192,7 @@ The action installs Node 22 and Devicepool's own dependencies, then runs `device
 Its inputs are `url`, `token`, `app` (a path, or the name of a build already on Devicepool),
 `flows` (default `.maestro`), `shards` (default 1 with a server), `retries` (default 1), `model`,
 `env` (one `KEY=VALUE` per line), `junit` (default `devicepool-maestro.xml`), `hold`, `booking`,
-and the inputs for comments and reruns below. `start-timeout`, `maestro-version` and `artifact`
+`build-name` (the name the app is uploaded under), and the inputs for comments and reruns below. `start-timeout`, `maestro-version` and `artifact`
 apply to runner mode only. With a server the action uploads nothing itself, so keep your own
 `actions/upload-artifact` step for the JUnit report.
 

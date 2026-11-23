@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
+import { checkSimulatorBuild, missingFile } from './local.ts';
 import type { Action, Booking, BookingWindow, DeviceClass, ElementSelector, Frame, LeaseEndReason, LeaseEnding, LeaseLimits, LeaseState, Platform, Point, Priority, PrivacyService, UiNode } from '@devicepool/protocol';
 
 const run = promisify(execFile);
@@ -63,13 +64,41 @@ export async function savedConfig(): Promise<{ url?: string; token?: string }> {
   }
 }
 
+export function refusedMessage(source: 'saved' | 'env' | undefined, url: string): string | null {
+  if (source === 'saved') {
+    return `Your saved token was refused by ${url}. Run \`devicepool login ${url}\`.`;
+  }
+  return source === 'env' ? `DEVICEPOOL_TOKEN was refused by ${url}.` : null;
+}
+
+export function waitLine(info: Pick<LeaseInfo, 'state' | 'queuePosition'>, elapsedMs: number): string {
+  const waited = elapsedMs < 90_000 ? `${Math.round(elapsedMs / 1000)} s` : `${Math.round(elapsedMs / 60_000)} min`;
+  if (info.state === 'preparing') {
+    return `Preparing the device (${waited} so far).`;
+  }
+  return info.queuePosition ? `All devices are busy. You are number ${info.queuePosition} in the queue (${waited} so far).` : `All devices are busy. Waiting for one (${waited} so far).`;
+}
+
+export function leaseEndMessage(reason: LeaseEndReason | null): string {
+  if (reason === 'queue_timeout') {
+    return 'All devices were busy for 10 minutes. Try again, or ask an operator to add devices.';
+  }
+  return `The lease ended before it started (${reason}).`;
+}
+
+export function isStaleLogin(saved: { url?: string; token?: string }, publicUrl: string, status: number | null): boolean {
+  return Boolean(saved.token) && saved.url?.replace(/\/$/, '') === publicUrl && status === 401;
+}
+
 export class Devicepool {
   readonly url: string;
   readonly token: string;
+  readonly source: 'saved' | 'env' | undefined;
 
-  constructor(opts: { url: string; token: string }) {
+  constructor(opts: { url: string; token: string; source?: 'saved' | 'env' }) {
     this.url = opts.url.replace(/\/$/, '');
     this.token = opts.token;
+    this.source = opts.source;
   }
 
   static async fromEnv(): Promise<Devicepool> {
@@ -77,9 +106,9 @@ export class Devicepool {
     const url = process.env.DEVICEPOOL_URL ?? saved.url;
     const token = process.env.DEVICEPOOL_TOKEN ?? saved.token;
     if (!url || !token) {
-      throw new DevicepoolError(0, 'NOT_CONFIGURED', 'Devicepool does not know which server to use.', 'Run `npx devicepool login <url>`, or set DEVICEPOOL_URL and DEVICEPOOL_TOKEN.');
+      throw new DevicepoolError(0, 'NOT_CONFIGURED', 'Devicepool does not know which server to use.', 'Run `devicepool login <url>`, or set DEVICEPOOL_URL and DEVICEPOOL_TOKEN.');
     }
-    return new Devicepool({ url, token });
+    return new Devicepool({ url, token, source: process.env.DEVICEPOOL_TOKEN ? 'env' : 'saved' });
   }
 
   async request(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Response> {
@@ -98,6 +127,12 @@ export class Devicepool {
       res = await fetch(`${this.url}${path}`, init);
     } catch (err) {
       throw new DevicepoolError(0, 'UNREACHABLE', `Cannot reach Devicepool at ${this.url}.`, 'Is `devicepool up` running, and is this machine on the same network?');
+    }
+    if (res.status === 401) {
+      const refused = refusedMessage(this.source, this.url);
+      if (refused) {
+        throw new DevicepoolError(401, 'TOKEN_REFUSED', refused);
+      }
     }
     if (!res.ok) {
       const data: { error?: { code: string; message: string; hint?: string } } | null = await res.json().catch(() => null);
@@ -128,8 +163,9 @@ export class Devicepool {
     return this.json('GET', `/v1/recordings/${encodeURIComponent(id)}`);
   }
 
-  async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; idleSeconds?: number; maxSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean; via?: string } = {}): Promise<Lease> {
-    let info = await this.json<LeaseInfo>('POST', `/v1/leases?wait=${opts.waitSeconds ?? 120}`, {
+  async lease(cls: DeviceClass = {}, opts: { ttlSeconds?: number; idleSeconds?: number; maxSeconds?: number; waitSeconds?: number; autoRenew?: boolean; record?: boolean; via?: string; log?: (line: string) => void } = {}): Promise<Lease> {
+    const started = Date.now();
+    let info = await this.json<LeaseInfo>('POST', `/v1/leases?wait=${opts.waitSeconds ?? (opts.log ? 30 : 120)}`, {
       class: cls,
       ...(opts.ttlSeconds ? { ttlSeconds: opts.ttlSeconds } : {}),
       ...(opts.idleSeconds ? { idleSeconds: opts.idleSeconds } : {}),
@@ -138,10 +174,11 @@ export class Devicepool {
       ...(opts.via ? { via: opts.via } : {}),
     });
     while (info.state === 'queued' || info.state === 'preparing') {
-      info = await this.json<LeaseInfo>('GET', `/v1/leases/${info.id}?wait=60`);
+      opts.log?.(waitLine(info, Date.now() - started));
+      info = await this.json<LeaseInfo>('GET', `/v1/leases/${info.id}?wait=${opts.log ? 30 : 60}`);
     }
     if (info.state !== 'active') {
-      throw new DevicepoolError(409, 'LEASE_NOT_ACTIVE', `The lease ended before it started (${info.reason}).`);
+      throw new DevicepoolError(409, 'LEASE_NOT_ACTIVE', leaseEndMessage(info.reason));
     }
     return new Lease(this, info, opts.autoRenew ?? true, ttlOf(info, opts.ttlSeconds));
   }
@@ -237,7 +274,14 @@ export class Lease {
   async install(appOrBuild: string, name?: string): Promise<{ bundleId: string; name: string }> {
     const local = await stat(appOrBuild).catch(() => null);
     if (!local) {
+      const missing = missingFile(appOrBuild);
+      if (missing) {
+        throw missing;
+      }
       return this.client.json('POST', this.path('/apps'), { build: appOrBuild });
+    }
+    if (local.isDirectory()) {
+      await checkSimulatorBuild(appOrBuild);
     }
     const label = encodeURIComponent(name ?? basename(appOrBuild));
     if (local.isFile()) {

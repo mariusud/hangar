@@ -198,7 +198,7 @@ route('POST', '/v1/leases/:id/apps', async (req, res, ctx) => {
     if (!p.scopes.includes('install:upload')) {
       throw new ApiError(403, 'UPLOAD_NOT_ALLOWED', 'Uploading an app needs the install:upload permission, because an app runs code on the Mac.', 'Ask an operator, or install a registered build with { "build": "<name>" }.');
     }
-    build = await saveUpload(req, ctx, query(req).get('name') ?? 'upload');
+    build = await saveUpload(req, ctx, query(req).get('name') ?? 'upload', () => void ctx.leases.deviceOf(p, req.params.id ?? ''));
   }
   const code = auth.mintToken(ctx.db, 'artifact', { expiresAt: Date.now() + 10 * 60_000 });
   const { result } = await op(req, ctx, {

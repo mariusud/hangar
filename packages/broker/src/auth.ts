@@ -1,12 +1,106 @@
 
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import type { Account, Db, TokenLimitRow, TokenRow } from './db.ts';
+import { ApiError } from './leases/service.ts';
 
-function scryptAsync(password: string, salt: Buffer, keyLength: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scrypt(password, salt, keyLength, (err, key) => (err ? reject(err) : resolve(key)));
-  });
+const SCRYPT_PARALLEL = 4;
+const SCRYPT_QUEUE = 32;
+let scryptRunning = 0;
+const scryptWaiting: (() => void)[] = [];
+
+async function scryptAsync(password: string, salt: Buffer, keyLength: number): Promise<Buffer> {
+  if (scryptRunning < SCRYPT_PARALLEL) {
+    scryptRunning += 1;
+  } else {
+    if (scryptWaiting.length >= SCRYPT_QUEUE) {
+      throw new ApiError(429, 'BUSY', 'Too many sign-ins are being checked at once.', 'Try again in a few seconds.');
+    }
+    await new Promise<void>((resolve) => scryptWaiting.push(resolve));
+  }
+  try {
+    return await new Promise<Buffer>((resolve, reject) => {
+      scrypt(password, salt, keyLength, (err, key) => (err ? reject(err) : resolve(key)));
+    });
+  } finally {
+    const next = scryptWaiting.shift();
+    if (next) {
+      next();
+    } else {
+      scryptRunning -= 1;
+    }
+  }
 }
+
+export type LimiterOptions = { maxFailures: number; windowMs: number; blockMs: number; maxEntries: number };
+type Attempts = { failures: number[]; blockedUntil: number };
+
+export class AttemptLimiter {
+  private readonly entries = new Map<string, Attempts>();
+  private readonly now: () => number;
+  private readonly opts: LimiterOptions;
+
+  constructor(now: () => number = Date.now, opts: Partial<LimiterOptions> = {}) {
+    this.now = now;
+    this.opts = { maxFailures: 5, windowMs: 10 * 60_000, blockMs: 60_000, maxEntries: 10_000, ...opts };
+  }
+
+  assertOpen(keys: string[]): void {
+    const now = this.now();
+    for (const key of keys) {
+      const blockedUntil = this.entries.get(key)?.blockedUntil ?? 0;
+      if (blockedUntil > now) {
+        const seconds = Math.ceil((blockedUntil - now) / 1000);
+        throw new ApiError(429, 'TOO_MANY_ATTEMPTS', `Too many attempts. Wait ${seconds} seconds and try again.`, 'Attempts are counted per account name and per address.');
+      }
+    }
+  }
+
+  fail(keys: string[]): void {
+    const now = this.now();
+    for (const key of keys) {
+      const entry = this.entries.get(key) ?? { failures: [], blockedUntil: 0 };
+      entry.failures = entry.failures.filter((t) => t > now - this.opts.windowMs);
+      entry.failures.push(now);
+      if (entry.failures.length >= this.opts.maxFailures) {
+        entry.failures = [];
+        entry.blockedUntil = now + this.opts.blockMs;
+      }
+      this.entries.delete(key);
+      this.entries.set(key, entry);
+    }
+    while (this.entries.size > this.opts.maxEntries) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.entries.delete(oldest);
+    }
+  }
+
+  clear(keys: string[]): void {
+    for (const key of keys) {
+      this.entries.delete(key);
+    }
+  }
+}
+
+const limiters = new WeakMap<Db, { login: AttemptLimiter; oidc: AttemptLimiter }>();
+
+export function limitersFor(db: Db): { login: AttemptLimiter; oidc: AttemptLimiter } {
+  let found = limiters.get(db);
+  if (!found) {
+    found = { login: new AttemptLimiter(), oidc: new AttemptLimiter(Date.now, { maxFailures: 30 }) };
+    limiters.set(db, found);
+  }
+  return found;
+}
+
+export function clientAddress(req: IncomingMessage): string {
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+export const DUMMY_HASH = `scrypt:${Buffer.alloc(16).toString('base64')}:${Buffer.alloc(32).toString('base64')}`;
 
 export type Principal = {
   accountId: string;
@@ -68,8 +162,8 @@ export async function checkPassword(password: string, stored: string): Promise<b
   return timingSafeEqual(actual, expected);
 }
 
-export function createAccount(db: Db, name: string, role: Account['role']): Account {
-  const account: Account = { id: randomUUID(), name, role, passwordHash: null };
+export function createAccount(db: Db, name: string, role: Account['role'], passwordHash: string | null = null): Account {
+  const account: Account = { id: randomUUID(), name, role, passwordHash };
   db.insertAccount(account);
   return account;
 }
@@ -89,6 +183,45 @@ export function sessionCookie(value: string, secure: boolean): string {
     attrs.push('Secure');
   }
   return attrs.join('; ');
+}
+
+export const STATE_COOKIE = 'devicepool_oidc_state';
+
+export function stateCookie(value: string, secure: boolean, maxAge = 600): string {
+  const attrs = [`${STATE_COOKIE}=${value}`, 'Path=/v1/oidc', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
+  if (secure) {
+    attrs.push('Secure');
+  }
+  return attrs.join('; ');
+}
+
+export function isSecureRequest(req: IncomingMessage, publicUrl: string): boolean {
+  const forwarded = req.headers['x-forwarded-proto'];
+  const proto = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim().toLowerCase();
+  return publicUrl.startsWith('https') || proto === 'https';
+}
+
+export function assertSameOrigin(req: IncomingMessage, publicUrl: string, isUpgrade = false): void {
+  const method = req.method ?? 'GET';
+  if (!isUpgrade && (method === 'GET' || method === 'HEAD' || method === 'OPTIONS')) {
+    return;
+  }
+  if (/^Bearer .+/.test(req.headers.authorization ?? '') || !readCookie(req.headers.cookie, SESSION_COOKIE)) {
+    return;
+  }
+  const origin = req.headers.origin;
+  if (origin === undefined) {
+    return;
+  }
+  let isSame = false;
+  try {
+    isSame = new URL(origin).host === req.headers.host || new URL(origin).origin === new URL(publicUrl).origin;
+  } catch {
+    isSame = false;
+  }
+  if (!isSame) {
+    throw new ApiError(403, 'CROSS_ORIGIN', `This request came from ${origin}, which is not this Devicepool.`, 'Use the console at the Devicepool address, or send a bearer token instead of the session cookie.');
+  }
 }
 
 export function readCookie(header: string | undefined, name: string): string | null {

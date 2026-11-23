@@ -1,14 +1,15 @@
 import { parseArgs } from 'node:util';
 import type { Night } from '@devicepool/protocol';
 import { Devicepool, DevicepoolError } from './client/index.ts';
+import { helpSection } from './help.ts';
+import { NIGHT_OPTIONS } from './options.ts';
 
-export const NIGHT_HELP = `Nights
-  devicepool night open <booking>              start a night for a booking: its leases, findings and runs
-  devicepool night close <booking | night-id>  end it
-  devicepool night list [--booking NAME]       recent nights
-  devicepool night report <booking | night-id> [--format md|json] [--slack-webhook URL]
-                                               print the night's report; --slack-webhook posts it
-                                               from this machine (Devicepool itself never does)`;
+export const NIGHT_HELP = helpSection('Nights', [
+  { usage: 'devicepool night open <booking>', about: ['start a night for a booking: leases, findings, runs'] },
+  { usage: 'devicepool night close <booking | night-id>', about: ['end it'] },
+  { usage: 'devicepool night list [--booking NAME]', about: ['recent nights'] },
+  { usage: 'devicepool night report <booking | night-id> [--format md|json] [--slack-webhook URL]', about: ['print the night\'s report; --slack-webhook posts it', 'from this machine (Devicepool itself never does)'] },
+]);
 
 const SLACK_LIMIT = 39_000;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,7 +64,7 @@ export async function postToSlack(webhook: URL, text: string, send: typeof fetch
 
 export async function nightCommand(args: string[], client?: Devicepool): Promise<void> {
   const [sub, ...rest] = args;
-  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { format: { type: 'string' }, 'slack-webhook': { type: 'string' }, booking: { type: 'string' } } });
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: NIGHT_OPTIONS });
   const ref = positionals[0];
   if (sub === 'list') {
     const c = client ?? (await Devicepool.fromEnv());

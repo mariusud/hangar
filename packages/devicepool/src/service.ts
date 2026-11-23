@@ -90,23 +90,55 @@ function baseEnv(): Record<string, string> {
   return env;
 }
 
-async function waitForStart(log: string, since: number): Promise<boolean> {
+export type StartOutcome = { isRunning: true; url: string | undefined; link: string } | { isRunning: false; cause: string } | null;
+
+export function startOutcome(text: string): StartOutcome {
+  const link = /Sign in as admin:\s+(\S+)/.exec(text);
+  if (link?.[1]) {
+    return { isRunning: true, url: /Devicepool is running at (\S+)/.exec(text)?.[1], link: link[1] };
+  }
+  if (/Fix the items marked NO/.test(text)) {
+    return { isRunning: false, cause: `this Mac failed its check:\n${text.trim()}` };
+  }
+  const port = /Port (\d+) is in use/.exec(text)?.[1];
+  if (port) {
+    return { isRunning: false, cause: `port ${port} is in use. Stop what uses it, or install the service with another --port.` };
+  }
+  const held = text.split('\n').find((line) => /already uses these simulators/.test(line));
+  if (held) {
+    return { isRunning: false, cause: held.trim() };
+  }
+  return null;
+}
+
+export function failureMessage(cause: string, log: string, isSystem: boolean): string {
+  return `Devicepool could not start: ${cause}\n\nThe service tries again until it is removed. \`devicepool up --uninstall${isSystem ? ' --system' : ''}\` removes it.\nLog: ${log}`;
+}
+
+export function timeoutMessage(text: string, log: string, isSystem: boolean): string {
+  const tail = text.trim().split('\n').slice(-10).join('\n');
+  return `Devicepool did not report that it was running within 5 minutes.${tail ? `\nThe end of the log:\n${tail}` : ''}\n\nThe service tries again until it is removed. \`devicepool up --uninstall${isSystem ? ' --system' : ''}\` removes it.\nLog: ${log}`;
+}
+
+async function waitForStart(log: string, since: number, isSystem: boolean): Promise<boolean> {
+  let text = '';
   for (let i = 0; i < 600; i++) {
-    const text = (await readFile(log, 'utf8').catch(() => '')).slice(since);
-    const link = /Sign in as admin:\s+(\S+)/.exec(text);
-    if (link) {
-      const url = /Devicepool is running at (\S+)/.exec(text)?.[1];
-      console.log(`Devicepool is running at ${url}\n  Sign in as admin: ${link[1]}   (one use, 30 min)\n`);
+    text = (await readFile(log, 'utf8').catch(() => '')).slice(since);
+    const outcome = startOutcome(text);
+    if (outcome?.isRunning) {
+      console.log(`Devicepool is running at ${outcome.url}\n  Sign in as admin: ${outcome.link}   (one use, 30 min)\n`);
       return true;
     }
-    if (/Fix the items marked NO/.test(text)) {
-      console.log(`Devicepool could not start:\n${text}`);
+    if (outcome) {
+      console.log(failureMessage(outcome.cause, log, isSystem));
       process.exitCode = 1;
       return false;
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  return true;
+  console.log(timeoutMessage(text, log, isSystem));
+  process.exitCode = 1;
+  return false;
 }
 
 export async function installService(upArgs: string[], opts: ServiceOptions = {}): Promise<void> {
@@ -128,7 +160,7 @@ export async function installService(upArgs: string[], opts: ServiceOptions = {}
   await run('launchctl', ['bootstrap', domain(), PLIST]);
   console.log(`Installed ${PLIST}. Devicepool now starts at login and restarts if it stops.\nLog: ${log}\n`);
 
-  if (!(await waitForStart(log, since))) {
+  if (!(await waitForStart(log, since, false))) {
     return;
   }
   const autoLogin = await run('defaults', ['read', '/Library/Preferences/com.apple.loginwindow', 'autoLoginUser']).then((r) => r.stdout.trim(), () => '');
@@ -193,7 +225,7 @@ async function installDaemon(upArgs: string[], user: string | undefined): Promis
   const since = (await stat(log).catch(() => null))?.size ?? 0;
   await run('launchctl', ['bootstrap', 'system', DAEMON]);
   console.log(`Installed ${DAEMON}. Devicepool now starts when the Mac boots, runs as ${user} with nobody logged in, and restarts if it stops.\nLog: ${log}\n`);
-  if (!(await waitForStart(log, since))) {
+  if (!(await waitForStart(log, since, true))) {
     return;
   }
   const vault = await run('fdesetup', ['status']).then((r) => r.stdout, () => '');

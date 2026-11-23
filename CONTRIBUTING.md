@@ -1,29 +1,53 @@
 # Contributing
 
-Devicepool is at the design stage. The most useful contribution right now is review of
-[docs/design.md](docs/design.md): open an issue or a discussion with what is wrong or missing.
+## Set up
 
-## Decisions
+You need a Mac, Node 22.18 or newer and pnpm. Run the tests on any Mac. The end-to-end tests also
+need Xcode with an iOS simulator runtime and idb; `devicepool doctor` lists what is missing.
 
-Decisions that shape the code are recorded in [docs/decisions/](docs/decisions/), one file each.
+```bash
+git clone https://github.com/mariusud/devicepool && cd devicepool
+pnpm install
+pnpm devicepool up      # runs the CLI from source, no build step
+```
 
-- The file name and title state the decision, for example
-  `0003-webrtc-with-h264-signaled-over-whep.md`.
-- Each file starts with Status (proposed, accepted, superseded), Date, and Supersedes when it
-  replaces an earlier one.
-- Then three sections: Context, Decision, Consequences.
-- A decision is changed by a new file that supersedes it, not by editing an accepted one.
+## Scripts
 
-## Code
+| Command | What it does |
+|---|---|
+| `pnpm check` | Typecheck and unit tests. There is no linter. Run it before every pull request. |
+| `pnpm typecheck` | `tsc` over the whole workspace. |
+| `pnpm test` | Unit tests in `packages/*/src/**/*.test.ts`, with `node --test`. |
+| `pnpm e2e` | End-to-end tests in `e2e/` against real simulators. Sets `DEVICEPOOL_REAL=1`. Needs Xcode and a simulator runtime, and it boots devices. |
+| `pnpm bench:stream`, `bench:metro`, `bench:lease`, `bench:compare` | The benchmarks. |
+| `pnpm bench:smoke` | The smoke test for the Xcode and runtime pair on this Mac. |
+| `pnpm build:npm` | Writes the npm package to `dist/npm`. |
 
-Once code exists, this section will list the setup and the checks every pull request must pass.
-The plan:
+## Rules to know
 
-- pnpm workspace on Node 22. `pnpm install`, then `pnpm check` for lint, types and unit tests.
-- `pnpm e2e` runs the end-to-end suite against the fake driver on any machine. The real-device
-  suite runs on a self-hosted Mac in CI.
-- Changes to drivers run the smoke test for each Xcode and runtime pair in `hosts/versions.json`.
-- Every user-visible change adds a changeset (`pnpm changeset`).
+[AGENTS.md](AGENTS.md) has the full list. The ones that most often matter:
+
+- The broker never imports a driver package. It talks to agents through `packages/protocol`.
+- No message type, API route or MCP tool accepts a device UDID, a host path or a shell command.
+- Drivers call tools with `execFile` and an argument array, never a shell.
+- The lease and device state machines and the scheduler are pure functions. Keep clocks, I/O and
+  the database out of them.
+- A device returns to the pool only after a verified wipe.
+- Nothing calls out to the internet. No telemetry.
+- Hot paths (capture, encode, input) are native. Everything else is TypeScript with no build step.
+
+## Numbers
+
+A performance change shows before and after numbers from one of the `bench:*` scripts. The numbers
+in the README and [docs/numbers.md](docs/numbers.md) come from those scripts and have to stay
+true. Do not state a target as a result.
+
+## Docs
+
+Docs describe what exists. Planned work goes in [ROADMAP.md](ROADMAP.md). Write plain sentences
+without marketing language. A change to the design gets a new file in
+[docs/decisions/](docs/decisions/) that supersedes the old one. Each decision file starts with
+Status, Date and Supersedes when it applies, then Context, Decision and Consequences.
 
 ## Vendored code
 

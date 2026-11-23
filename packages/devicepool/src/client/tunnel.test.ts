@@ -54,7 +54,7 @@ test('one lease tunnel carries Metro and extra ports to the client', async () =>
       },
       close: () => {},
     });
-    tunnels = new Tunnels((m) => handlers.message(m));
+    tunnels = new Tunnels((m) => handlers.message(m), { shouldFallBack: true });
     handlers.message({ type: 'hello', protocol: PROTOCOL_VERSION, hostName: 'fake-mac', versions: {}, memoryBytes: 0, offers: [{ model: 'iPhone 17', os: '26.5', platform: 'ios-simulator' }], devices, leases: [] });
     const client = new Devicepool({ url: broker.url, token: broker.adminToken('test') });
     const lease = await client.lease({}, { autoRenew: false });

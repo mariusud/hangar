@@ -3,10 +3,10 @@ import { access, mkdir, writeFile } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { Agent, AndroidAgent, join as joinFleet } from '@devicepool/agent';
+import { Agent, AndroidAgent, join as joinFleet, LockHeldError } from '@devicepool/agent';
 import { Db, mintHostToken, oidcFromEnv, s3FromEnv, startBroker, type OidcConfig, type S3Config } from '@devicepool/broker';
 import type { AgentMessage, BrokerMessage } from '@devicepool/protocol';
-import { CONFIG_FILE } from './client/index.ts';
+import { CONFIG_FILE, isStaleLogin, savedConfig } from './client/index.ts';
 import { doctor, printChecks, smokeCheck } from './doctor.ts';
 
 const run = promisify(execFile);
@@ -44,7 +44,7 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
   const checks = await doctor({ smoke: false });
   printChecks(checks);
   if (checks.some((c) => !c.ok)) {
-    console.log('\nFix the items marked NO, then run `npx devicepool up` again.');
+    console.log('\nFix the items marked NO, then run `devicepool up` again.');
     process.exitCode = 1;
     return;
   }
@@ -53,7 +53,7 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
   const publicUrl = opts.url?.replace(/\/$/, '') ?? `http://${await lanName()}:${port}`;
   const broker = await startBroker({ dataDir: dataDir(), port, publicUrl, ...fromEnv() }).catch((err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      console.log(`\nPort ${port} is in use. Is Devicepool already running? Try \`devicepool status\`, or pass --port.`);
+      console.log(`\nPort ${port} is in use. Is Devicepool already running? \`devicepool devices\` lists its devices if it is. Or pass --port.`);
       process.exit(1);
     }
     throw err;
@@ -74,7 +74,16 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
     toAgent = (m) => ios.receive(m);
     agent = ios;
     console.log(`\nStarting devices (up to ${ios.maxDevices}, ${ios.warm} kept ready)...`);
-    await ios.start();
+    try {
+      await ios.start();
+    } catch (err) {
+      if (err instanceof LockHeldError) {
+        console.log(`\n${err.message}`);
+        await broker.close();
+        process.exit(1);
+      }
+      throw err;
+    }
   } else {
     console.log(`\nNo simulators on this Mac: ${smoke.detail}.\n  fix: ${smoke.fix ?? ''}`);
   }
@@ -91,11 +100,15 @@ export async function up(opts: { port?: number; warm?: number; max?: number; url
 
   const bonjour = spawn('dns-sd', ['-R', 'Devicepool', '_devicepool._tcp', 'local', String(port)], { stdio: 'ignore' });
 
-  const hasSignedInCommands = await access(CONFIG_FILE).then(() => false, async () => {
+  const hasConfig = await access(CONFIG_FILE).then(() => true, () => false);
+  const saved = hasConfig ? await savedConfig() : {};
+  const status = hasConfig && saved.token ? await fetch(`http://127.0.0.1:${port}/v1/devices`, { headers: { authorization: `Bearer ${saved.token}` } }).then((r) => r.status, () => null) : null;
+  const isReplaced = hasConfig && isStaleLogin(saved, publicUrl, status);
+  const hasSignedInCommands = !hasConfig || isReplaced;
+  if (hasSignedInCommands) {
     await mkdir(dirname(CONFIG_FILE), { recursive: true });
     await writeFile(CONFIG_FILE, JSON.stringify({ url: publicUrl, token: broker.adminToken(`devicepool up on ${hostname()}`) }, null, 2), { mode: 0o600 });
-    return true;
-  });
+  }
 
   console.log(`
 Devicepool is running at ${publicUrl}
@@ -103,7 +116,7 @@ Devicepool is running at ${publicUrl}
   Sign in as admin:   ${broker.welcomeLink()}   (one use, 30 min)
   Connect an agent:   devicepool connect claude   (or cursor)
   Connect CI:         devicepool connect ci
-${hasSignedInCommands ? '\n  The devicepool commands on this Mac are signed in as admin.\n' : ''}
+${hasSignedInCommands ? `\n  The devicepool commands on this Mac are signed in as admin.${isReplaced ? `\n  ${CONFIG_FILE} had a token for this address that this server does not know, so it was replaced.` : ''}\n` : ''}
 ${publicUrl.startsWith('https:') ? '' : '  Traffic is plain HTTP on your network. Set up TLS before using Devicepool beyond a trusted LAN.\n'}
   Press Ctrl-C to stop. Leased devices are deleted when Devicepool stops.
 `);

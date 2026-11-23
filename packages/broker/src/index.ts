@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import type { AgentMessage } from '@devicepool/protocol';
 import * as auth from './auth.ts';
-import { Db } from './db.ts';
+import { Db, startCleanup } from './db.ts';
 import { Hosts, type HostLink } from './hosts.ts';
 import { imagesMessage, sealStoredSecrets } from './images.ts';
 import { handle, type Ctx } from './http.ts';
@@ -59,6 +59,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
   const leases = new Leases(db, hosts);
   hosts.onChange = () => void leases.tick();
   const stopNights = onWindowClosed((w) => void closeWindowNight(db, w));
+  const stopCleanup = startCleanup(db);
   hosts.onHello = (held, link) => {
     for (const leaseId of held) {
       const lease = db.getLease(leaseId);
@@ -95,7 +96,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
     publicUrl,
   };
   const server = createServer((req, res) => void handle(req, res, ctx));
-  const upgrades = [attachStreams(db, hosts, leases, metrics), attachTunnels(db, hosts, leases), attachAgents(db, hosts)];
+  const upgrades = [attachStreams(db, hosts, leases, metrics, publicUrl), attachTunnels(db, hosts, leases), attachAgents(db, hosts)];
   server.on('upgrade', (req, socket, head) => {
     if (!upgrades.some((u) => u.upgrade(req, socket, head))) {
       socket.destroy();
@@ -135,6 +136,7 @@ export async function startBroker(opts: BrokerOptions): Promise<Broker> {
       clearInterval(timer);
       clearInterval(sweeper);
       stopNights();
+      stopCleanup();
       hosts.onChange = () => {};
       leases.stopped = true;
       for (const u of upgrades) {

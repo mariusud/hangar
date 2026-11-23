@@ -8,6 +8,7 @@ export type OidcConfig = {
   clientId: string;
   clientSecret?: string;
   groups?: Record<string, string>;
+  domains?: string[];
   disablePasswords?: boolean;
 };
 
@@ -23,20 +24,35 @@ export function oidcFromEnv(env: NodeJS.ProcessEnv = process.env): OidcConfig | 
       throw new Error('DEVICEPOOL_OIDC_GROUPS is not valid JSON. Write it like {"mobile-qa":"QA"}.');
     }
   }
+  const domains = (env.DEVICEPOOL_OIDC_DOMAINS ?? '')
+    .split(',')
+    .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean);
+  if (!groups && domains.length === 0) {
+    console.warn(
+      `Every account at ${env.DEVICEPOOL_OIDC_ISSUER} can sign in to Devicepool. To restrict it, set DEVICEPOOL_OIDC_DOMAINS (for example example.com) or DEVICEPOOL_OIDC_GROUPS.`,
+    );
+  }
   return {
     issuer: env.DEVICEPOOL_OIDC_ISSUER.replace(/\/$/, ''),
     clientId: env.DEVICEPOOL_OIDC_CLIENT_ID,
     ...(env.DEVICEPOOL_OIDC_CLIENT_SECRET ? { clientSecret: env.DEVICEPOOL_OIDC_CLIENT_SECRET } : {}),
     ...(groups ? { groups } : {}),
+    ...(domains.length ? { domains } : {}),
     ...(env.DEVICEPOOL_OIDC_ONLY === '1' ? { disablePasswords: true } : {}),
   };
 }
 
 type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string };
 type Pending = { verifier: string; nonce: string; next: string; expiresAt: number };
-export type Claims = { iss: string; aud: string | string[]; exp: number; nonce?: string; sub: string; email?: string; name?: string; preferred_username?: string; groups?: string[] };
+export type Claims = { iss: string; aud: string | string[]; exp: number; nonce?: string; sub: string; email?: string; email_verified?: boolean | string; name?: string; preferred_username?: string; groups?: string[] };
 
 const b64url = (b: Buffer): string => b.toString('base64url');
+const MAX_PENDING = 1000;
+
+export function safeNext(next: string): string {
+  return /^\/(?![/\\])[^\\\u0000-\u001f\u007f]*$/.test(next) ? next : '/';
+}
 
 export class Oidc {
   readonly config: OidcConfig;
@@ -65,7 +81,7 @@ export class Oidc {
     return this.discovery;
   }
 
-  async start(redirectUri: string, next: string): Promise<string> {
+  async start(redirectUri: string, next: string): Promise<{ url: string; state: string }> {
     const d = await this.discover();
     const state = b64url(randomBytes(24));
     const verifier = b64url(randomBytes(32));
@@ -76,7 +92,14 @@ export class Oidc {
         this.pending.delete(k);
       }
     }
-    this.pending.set(state, { verifier, nonce, next: next.startsWith('/') && !next.startsWith('//') ? next : '/', expiresAt: now + 10 * 60_000 });
+    while (this.pending.size >= MAX_PENDING) {
+      const oldest = this.pending.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.pending.delete(oldest);
+    }
+    this.pending.set(state, { verifier, nonce, next: safeNext(next), expiresAt: now + 10 * 60_000 });
     const url = new URL(d.authorization_endpoint);
     url.search = new URLSearchParams({
       response_type: 'code',
@@ -88,7 +111,7 @@ export class Oidc {
       code_challenge: b64url(createHash('sha256').update(verifier).digest()),
       code_challenge_method: 'S256',
     }).toString();
-    return url.toString();
+    return { url: url.toString(), state };
   }
 
   async finish(redirectUri: string, code: string, state: string): Promise<{ claims: Claims; next: string }> {
@@ -146,12 +169,27 @@ export class Oidc {
 
 export function accountFor(db: Db, config: OidcConfig, claims: Claims): string {
   const name = claims.email ?? claims.preferred_username ?? claims.name ?? claims.sub;
+  if (config.domains) {
+    const domain = claims.email?.split('@').pop()?.toLowerCase();
+    const isVerified = claims.email_verified === true || claims.email_verified === 'true';
+    if (!domain || !isVerified || !config.domains.includes(domain)) {
+      throw new ApiError(
+        403,
+        'OIDC_DOMAIN',
+        `${claims.email ?? 'This account'} is not allowed to sign in. Devicepool accepts verified email addresses at ${config.domains.join(', ')}.`,
+        'Sign in with a work account, or ask an operator to change DEVICEPOOL_OIDC_DOMAINS.',
+      );
+    }
+  }
   let accountId = db.identity(config.issuer, claims.sub);
   if (!accountId) {
     const taken = db.accountByName(name);
-    accountId = randomUUID();
-    db.insertAccount({ id: accountId, name: taken ? `${name} (${claims.sub.slice(0, 6)})` : name, role: 'member', passwordHash: null });
-    db.linkIdentity(config.issuer, claims.sub, accountId);
+    const id = randomUUID();
+    db.tx(() => {
+      db.insertAccount({ id, name: taken ? `${name} (${claims.sub.slice(0, 6)})` : name, role: 'member', passwordHash: null });
+      db.linkIdentity(config.issuer, claims.sub, id);
+    });
+    accountId = id;
   }
   if (config.groups) {
     const mapped = (claims.groups ?? []).map((g) => config.groups?.[g]).filter((t): t is string => Boolean(t));

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { companionFix, isOlder, parseFormula } from './doctor.ts';
+import { companionFix, isOlder, parseFormula, withBrew, xcodeProblem } from './doctor.ts';
 
 const SHA = 'a'.repeat(64);
 const FORMULA = `class IdbCompanion < Formula
@@ -47,4 +47,24 @@ test('without a tapped formula, the fix says where to get the checksum', () => {
   assert.match(fix, /brew cat facebook\/fb\/idb-companion/);
   assert.match(fix, /shasum -a 256 -c/);
   assert.doesNotMatch(fix, /curl/);
+});
+
+test('an Xcode failure is told apart by what xcodebuild said', () => {
+  const license = xcodeProblem("Agreeing to the Xcode/iOS license requires admin privileges, please run \"sudo xcodebuild -license\" and then retry this command.");
+  assert.equal(license.detail, 'the license is not accepted');
+  assert.match(license.fix, /sudo xcodebuild -license accept/);
+  const tools = xcodeProblem("xcode-select: error: tool 'xcodebuild' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance");
+  assert.match(tools.detail, /Command Line Tools, not Xcode/);
+  assert.match(tools.fix, /sudo xcode-select -s \/Applications\/Xcode\.app/);
+  const missing = xcodeProblem('spawn xcodebuild ENOENT');
+  assert.equal(missing.detail, 'not found');
+  assert.match(missing.fix, /Install Xcode from the App Store/);
+  assert.equal(xcodeProblem('').detail, 'not found');
+  assert.equal(xcodeProblem('something odd happened').detail, 'does not run: something odd happened');
+});
+
+test('a fix that needs Homebrew says to install it first when brew is missing', () => {
+  assert.equal(withBrew('brew install pipx && pipx install fb-idb', true), 'brew install pipx && pipx install fb-idb');
+  assert.equal(withBrew('brew install pipx && pipx install fb-idb', false), 'Install Homebrew first (https://brew.sh), then: brew install pipx && pipx install fb-idb');
+  assert.equal(withBrew('pipx install fb-idb', false), 'pipx install fb-idb');
 });

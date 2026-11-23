@@ -47,7 +47,8 @@ an iOS Simulator and the same for an Android Emulator, with 60 minutes a month i
   updated.
 - An agent that runs in someone else's cloud can use it only if it can reach your network.
 - It has no Appium endpoint.
-- It does not run physical phones. They are on the roadmap.
+- It does not run iPhones. Android phones over USB are experimental and have never run on real
+  hardware.
 - It is early and not on npm yet. More than one Mac is tested on one machine so far.
 
 ## When to pick Expo Simulators

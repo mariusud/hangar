@@ -46,7 +46,8 @@ the browser, and to AI agents over MCP.
 - It does not host anything. You need a Mac with Xcode, idb and Maestro installed, and someone
   to keep it updated.
 - Your CI runner has to reach that Mac, on the same network or through a VPN.
-- It does not run physical phones. They are on the roadmap.
+- It does not run iPhones. Android phones over USB are experimental and have never run on real
+  hardware.
 - Retries are not recorded on Android emulators yet.
 - It is early and not on npm yet. More than one Mac is tested on one machine so far.
 - It has no paid support.

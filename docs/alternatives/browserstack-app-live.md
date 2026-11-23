@@ -3,7 +3,7 @@
 Is there a free, open source alternative to BrowserStack App Live? For testing an app by hand on
 iOS simulators and Android emulators, yes: Devicepool is an open source (Apache-2.0),
 self-hosted device farm that puts a live device in your browser, running on your own Mac. For
-testing on real phones, no: App Live gives you physical devices, and Devicepool does not yet.
+testing on real phones, no: App Live gives you physical devices, and Devicepool has no tested support for them.
 
 ## What BrowserStack App Live is
 
@@ -19,7 +19,7 @@ prices could not be confirmed from the pricing page on the date below. See
 ## What Devicepool does instead
 
 - The console shows a live device in the browser, in H.264, with touch and keyboard. On one Mac
-  we measured 52 frames a second ([numbers](../numbers.md)).
+  we measured 52 frames a second over HTTPS or localhost, 38 on a plain-HTTP LAN ([numbers](../numbers.md)).
 - You install a build, open a deep link, set a GPS location and switch light and dark mode. On
   iOS you can also set an app's language, grant permissions and send a simulated push.
 - Record gives you a link with the video, a timeline of every tap and key, the app log and the
@@ -32,7 +32,8 @@ prices could not be confirmed from the pricing page on the date below. See
 
 ## What Devicepool does not do
 
-- It does not run physical phones. They are on the roadmap. You can't test a specific phone
+- It does not run iPhones. Android phones over USB are experimental and have never run on real
+  hardware. You can't test a specific phone
   model, a camera, a SIM or real biometrics on a simulator.
 - It installs simulator builds (`.app`) and APKs. An IPA built for a phone does not run on an
   iOS simulator, and a simulator has no App Store.

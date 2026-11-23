@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { DeviceClass } from '@devicepool/protocol';
 import { Devicepool, DevicepoolError } from './index.ts';
+import { checkSimulatorBuild, missingFile } from './local.ts';
 
 const run = promisify(execFile);
 
@@ -41,6 +42,7 @@ export type MaestroOptions = {
   device?: DeviceClass;
   holdSeconds?: number;
   booking?: string;
+  buildName?: string;
   log?: (line: string) => void;
 };
 
@@ -55,12 +57,19 @@ export function parseDuration(value: string): number | null {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-export async function buildRef(devicepool: Devicepool, app: string): Promise<string> {
+export async function buildRef(devicepool: Devicepool, app: string, buildName?: string): Promise<string> {
   const s = await stat(app).catch(() => null);
   if (!s) {
+    const missing = missingFile(app);
+    if (missing) {
+      throw missing;
+    }
     return app;
   }
-  const name = encodeURIComponent(basename(app));
+  if (s.isDirectory()) {
+    await checkSimulatorBuild(app);
+  }
+  const name = encodeURIComponent(buildName ?? basename(app));
   const tar = s.isFile() ? null : spawn('tar', ['-cf', '-', '-C', dirname(app), basename(app)], { stdio: ['ignore', 'pipe', 'inherit'] });
   const body = tar ? tar.stdout : createReadStream(app);
   try {
@@ -81,7 +90,7 @@ export async function runMaestro(devicepool: Devicepool, opts: MaestroOptions): 
     throw new DevicepoolError(0, 'NO_FLOWS', `No flow files (.yaml) in ${opts.flowsDir}.`);
   }
   const archive = (await run('tar', ['-cf', '-', '-C', opts.flowsDir, '.'], { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 })).stdout.toString('base64');
-  const build = await buildRef(devicepool, opts.app);
+  const build = await buildRef(devicepool, opts.app, opts.buildName);
   return follow(devicepool, log, '/v1/runs', {
     build,
     suite: { kind: 'maestro', archive, flows },
@@ -101,6 +110,7 @@ export type XcuitestOptions = {
   retries?: number;
   device?: DeviceClass;
   booking?: string;
+  buildName?: string;
   log?: (line: string) => void;
 };
 
@@ -125,7 +135,7 @@ export async function runXcuitest(devicepool: Devicepool, opts: XcuitestOptions)
     tests = await testTargets(join(opts.products, xctestrun));
   }
   log(`uploading ${basename(opts.products)}`);
-  const build = await buildRef(devicepool, opts.products);
+  const build = await buildRef(devicepool, opts.products, opts.buildName);
   return follow(devicepool, log, '/v1/runs', { build, suite: { kind: 'xcuitest', tests }, class: opts.device ?? {}, shards: opts.shards ?? 1, retries: opts.retries ?? 1, ...(opts.booking ? { booking: opts.booking } : {}) });
 }
 
@@ -136,13 +146,14 @@ export type EspressoOptions = {
   shards?: number;
   retries?: number;
   booking?: string;
+  buildName?: string;
   log?: (line: string) => void;
 };
 
 export async function runEspresso(devicepool: Devicepool, opts: EspressoOptions): Promise<MaestroRun> {
   const log = opts.log ?? (() => {});
-  const build = await buildRef(devicepool, opts.app);
-  const testBuild = await buildRef(devicepool, opts.testApp);
+  const build = await buildRef(devicepool, opts.app, opts.buildName);
+  const testBuild = await buildRef(devicepool, opts.testApp, opts.buildName ? `${opts.buildName}-test` : undefined);
   const tests = opts.tests?.length ? opts.tests : ['all'];
   return follow(devicepool, log, '/v1/runs', { build, suite: { kind: 'espresso', testBuild, tests }, shards: opts.shards ?? 1, retries: opts.retries ?? 1, ...(opts.booking ? { booking: opts.booking } : {}) });
 }

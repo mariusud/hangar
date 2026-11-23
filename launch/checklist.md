@@ -18,7 +18,7 @@ Manual steps in order. The blocking ones come first: if the name fails the trade
 5. Commit the rename. The working tree still has it uncommitted.
 6. Rename the GitHub repo from `hangar` to `devicepool` (Settings, General). GitHub redirects the old URL. Update the local remote: `git remote set-url origin git@github.com:mariusud/devicepool.git`. Rename the local folder if you want; nothing depends on it.
 7. Set the description to: `Devicepool is an open source, self-hosted device farm for iOS simulators and Android emulators, for your team, your CI and your AI agents.`
-8. Set the topics: `device-farm`, `ios-simulator`, `android-emulator`, `mcp`, `maestro`, `react-native`, `self-hosted`.
+8. Set the topics (GitHub allows 20; these are the ones the nearest projects use, read on 2026-11-23): `device-farm`, `ios-simulator`, `android-emulator`, `simulator`, `emulator`, `ios`, `android`, `react-native`, `expo`, `maestro`, `xcuitest`, `mobile-testing`, `mobile-automation`, `e2e-testing`, `mcp`, `mcp-server`, `claude-code`, `ai-agents`, `self-hosted`, `browserstack-alternative`.
 9. Set the website field to the domain or the Pages URL once one exists.
 10. Check that the README's first paragraph and the repo description say the same thing. On 2026-11-22 the README said "device broker" and the fixed sentence says "device farm". Other people are editing the README, so check the final text.
 11. Add `"description"` to `.claude-plugin/marketplace.json`. `claude plugin validate --strict .` fails without it (see mcp-registry/README.md).

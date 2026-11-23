@@ -1,18 +1,20 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, rename, rm } from 'node:fs/promises';
-import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import type { Db } from '../db.ts';
+import type { Store } from '../store.ts';
 import { ApiError } from '../leases/service.ts';
-import type { Ctx } from './util.ts';
 
 const MAX_UPLOAD = 4 * 1024 * 1024 * 1024;
 
-export async function saveUpload(req: IncomingMessage, ctx: Ctx, name: string): Promise<{ sha256: string; name: string; size: number }> {
+export async function saveUpload(req: Readable, ctx: { dataDir: string; db: Db; store: Pick<Store, 'saved'> }, name: string, beforeSave?: () => void): Promise<{ sha256: string; name: string; size: number }> {
+  beforeSave?.();
   const dir = join(ctx.dataDir, 'builds');
   await mkdir(dir, { recursive: true });
-  const tmp = join(dir, `.upload-${process.pid}-${Date.now()}`);
+  const tmp = join(dir, `.upload-${randomUUID()}`);
   const hash = createHash('sha256');
   let size = 0;
   try {

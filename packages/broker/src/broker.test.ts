@@ -665,7 +665,13 @@ test('single sign-on: code flow with PKCE, a checked ID token, groups to team an
     assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
     codes.set('c1', { nonce: authorize.searchParams.get('nonce') ?? '', challenge: authorize.searchParams.get('code_challenge') ?? '' });
 
-    const back = await fetch(`${broker.url}/v1/oidc/callback?code=c1&state=${authorize.searchParams.get('state')}`, { redirect: 'manual' });
+    const stateCookie = (start.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    assert.match(start.headers.get('set-cookie') ?? '', /HttpOnly; SameSite=Lax/);
+    const otherBrowser = await fetch(`${broker.url}/v1/oidc/callback?code=c1&state=${authorize.searchParams.get('state')}`, { redirect: 'manual' });
+    assert.equal(otherBrowser.status, 400);
+    assert.equal((await otherBrowser.json()).error.code, 'OIDC_STATE');
+
+    const back = await fetch(`${broker.url}/v1/oidc/callback?code=c1&state=${authorize.searchParams.get('state')}`, { redirect: 'manual', headers: { cookie: stateCookie } });
     assert.equal(back.status, 302);
     assert.equal(back.headers.get('location'), '/runs');
     const cookie = (back.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
@@ -675,7 +681,7 @@ test('single sign-on: code flow with PKCE, a checked ID token, groups to team an
     const account = broker.db.accountByName('kim@example.com');
     assert.equal(broker.db.teams().find((t) => t.id === broker.db.teamOf(account?.id ?? ''))?.name, 'QA');
 
-    const again = await fetch(`${broker.url}/v1/oidc/callback?code=c1&state=${authorize.searchParams.get('state')}`, { redirect: 'manual' });
+    const again = await fetch(`${broker.url}/v1/oidc/callback?code=c1&state=${authorize.searchParams.get('state')}`, { redirect: 'manual', headers: { cookie: stateCookie } });
     assert.equal(again.status, 400);
   } finally {
     await broker.close();

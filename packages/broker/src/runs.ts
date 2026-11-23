@@ -284,6 +284,9 @@ export class Runs {
     }
     const booking = req.booking === undefined || req.booking === '' ? null : this.bookingFor(p, String(req.booking));
     const shards = Math.max(1, Math.min(Math.floor(Number(req.shards ?? 1)) || 1, flows.length));
+    if (shards > this.leases.caps.maxShards) {
+      throw new ApiError(400, 'TOO_MANY_SHARDS', `A run may have at most ${this.leases.caps.maxShards} shards and this one asked for ${shards}. Ask for fewer shards, or ask an operator to raise DEVICEPOOL_MAX_SHARDS.`);
+    }
     const assigned = assignShards(flows, shards, this.pastSeconds(kind));
     const run: Run = {
       id: randomUUID(),

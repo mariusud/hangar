@@ -1,7 +1,8 @@
-# The image built from the Dockerfile at the repository root.
+# No image is published. Build the Dockerfile at the repository root, push it to your own
+# registry, and set both values, for example registry.example.com/devicepool and 0.1.0.
 image:
-  repository: devicepool
-  tag: latest
+  repository: ""
+  tag: ""
   pullPolicy: IfNotPresent
 
 # The address people and Macs reach Devicepool at.
