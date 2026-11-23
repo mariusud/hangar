@@ -86,25 +86,16 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
     else send({ type: 'swipe', from: down.p, to: p, durationMs: Math.max(100, Math.round(performance.now() - down.t)) });
     down = null;
   });
-  let typed = '';
-  let typeTimer = null;
-  const flush = () => {
-    if (typed) send({ type: 'type', text: typed });
-    typed = '';
-  };
   screen.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey) {
       return;
     }
     if (KEYS[e.key]) {
       e.preventDefault();
-      flush();
       send({ type: 'key', key: KEYS[e.key] });
     } else if (e.key.length === 1) {
       e.preventDefault();
-      typed += e.key;
-      clearTimeout(typeTimer);
-      typeTimer = setTimeout(flush, 150);
+      send({ type: 'type', text: e.key });
     }
   });
 

@@ -63,7 +63,7 @@ function session(socket: string): ClientHttp2Session {
   return s;
 }
 
-export type HidStream = { write: (e: HidEvent) => void; end: () => Promise<void> };
+export type HidStream = { write: (e: HidEvent) => void; end: () => Promise<void>; isOpen: () => boolean };
 
 /** open starts one HID call that the companion runs event by event as they arrive, so a finger
  * can be moved while it is down and the events keep their order. */
@@ -97,6 +97,7 @@ export function open(socket: string): HidStream {
       req.end();
       return done;
     },
+    isOpen: () => req.writable && !req.closed,
   };
 }
 

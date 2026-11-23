@@ -81,6 +81,7 @@ export function stopCompanion(udid: string): void {
   }
   companion?.proc.kill();
   companions.delete(udid);
+  inputs.delete(udid);
 }
 
 export function companionSocket(udid: string): string | null {
@@ -312,26 +313,27 @@ export async function tap(udid: string, x: number, y: number, durationS?: number
   await sendHid(udid, press({ touch: [x, y] }, durationS));
 }
 
-export type Finger = { move: (x: number, y: number) => void; up: (x: number, y: number) => Promise<void> };
+const inputs = new Map<string, hid.HidStream>();
 
-/** touchDown puts a finger on the screen at device points and keeps one HID call open until it
- * lifts, so moves reach the simulator as they happen. */
-export function touchDown(udid: string, x: number, y: number): Finger {
-  const companion = companions.get(udid);
-  if (!companion) {
-    throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
+/** liveInput writes viewer input to the device's one long-lived HID call, so touches and keys reach
+ * the simulator in the order they were sent, without a call per event. */
+export function liveInput(udid: string, events: hid.HidEvent[]): void {
+  let s = inputs.get(udid);
+  if (!s?.isOpen()) {
+    const companion = companions.get(udid);
+    if (!companion) {
+      throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
+    }
+    s = hid.open(companion.socket);
+    inputs.set(udid, s);
   }
-  const s = hid.open(companion.socket);
-  s.write({ press: { touch: [x, y] }, up: false });
-  return {
-    move: (mx, my) => s.write({ press: { touch: [mx, my] }, up: false }),
-    up: async (ux, uy) => {
-      s.write({ press: { touch: [ux, uy] }, up: true });
-      await s.end().catch((err: Error) => {
-        throw new DriverError('INPUT_FAILED', `Input to ${udid} failed: ${err.message}`);
-      });
-    },
-  };
+  for (const e of events) {
+    s.write(e);
+  }
+}
+
+export function touchEvent(x: number, y: number, isUp: boolean): hid.HidEvent {
+  return { press: { touch: [x, y] }, up: isUp };
 }
 
 export async function swipe(udid: string, from: [number, number], to: [number, number], durationS: number): Promise<void> {
@@ -361,21 +363,31 @@ function hidCode(c: string): { code: number; isShifted: boolean } | null {
   return null;
 }
 
-export async function typeText(udid: string, text: string): Promise<void> {
-  const codes = [...text].map(hidCode);
-  if (codes.some((c) => c === null)) {
-    await idb(udid, 'ui', 'text', '--', text);
-    return;
-  }
+/** textEvents returns the key presses that type `text`, or null when a character has no HID code
+ * that is the same on common layouts. */
+export function textEvents(text: string): hid.HidEvent[] | null {
   const events: hid.HidEvent[] = [];
-  for (const c of codes) {
-    if (c?.isShifted) {
+  for (const ch of text) {
+    const c = hidCode(ch);
+    if (!c) {
+      return null;
+    }
+    if (c.isShifted) {
       events.push({ press: { key: MODIFIERS.shift }, up: false }, ...press({ key: c.code }), { press: { key: MODIFIERS.shift }, up: true });
-    } else if (c) {
+    } else {
       events.push(...press({ key: c.code }));
     }
   }
-  await sendHid(udid, events);
+  return events;
+}
+
+export async function typeText(udid: string, text: string): Promise<void> {
+  const events = textEvents(text);
+  if (events) {
+    await sendHid(udid, events);
+    return;
+  }
+  await idb(udid, 'ui', 'text', '--', text);
 }
 
 const KEYS: Record<string, number> = {
@@ -395,7 +407,7 @@ const KEYS: Record<string, number> = {
 
 const MODIFIERS: Record<KeyModifier, number> = { control: 224, shift: 225, option: 226, command: 227 };
 
-export async function key(udid: string, name: string, modifiers: KeyModifier[] = []): Promise<void> {
+export function keyEvents(name: string, modifiers: KeyModifier[] = []): hid.HidEvent[] {
   const code = KEYS[name.toLowerCase()];
   if (code === undefined) {
     throw new DriverError('UNKNOWN_KEY', `Unknown key "${name}". Known keys: ${Object.keys(KEYS).join(', ')}.`);
@@ -407,11 +419,15 @@ export async function key(udid: string, name: string, modifiers: KeyModifier[] =
     }
     return c;
   });
-  await sendHid(udid, [
+  return [
     ...held.map((k): hid.HidEvent => ({ press: { key: k }, up: false })),
     ...press({ key: code }),
     ...held.reverse().map((k): hid.HidEvent => ({ press: { key: k }, up: true })),
-  ]);
+  ];
+}
+
+export async function key(udid: string, name: string, modifiers: KeyModifier[] = []): Promise<void> {
+  await sendHid(udid, keyEvents(name, modifiers));
 }
 
 export async function button(udid: string, name: 'home' | 'lock' | 'siri'): Promise<void> {

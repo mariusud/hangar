@@ -161,14 +161,17 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
       }
       let lastTouch: Point | null = null;
       let activeAt = 0;
-      const touch = (phase: TouchPhase, point: Point): void => {
-        lastTouch = phase === 'up' ? null : point;
-        hosts.notify(device, { type: 'stream.touch', leaseId: hostId, phase, point });
+      const markActive = (): void => {
         const now = Date.now();
         if (now - activeAt >= ACTIVITY_MS) {
           activeAt = now;
           leases.markActive(principal, leaseId);
         }
+      };
+      const touch = (phase: TouchPhase, point: Point): void => {
+        lastTouch = phase === 'up' ? null : point;
+        hosts.notify(device, { type: 'stream.touch', leaseId: hostId, phase, point });
+        markActive();
       };
       if (count(hostId, codec) === 1) {
         hosts.notify(device, { type: 'stream.start', leaseId: hostId, codec });
@@ -193,6 +196,17 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
           if (isIos) {
             touch(input.phase, toPoint(input.point));
           }
+          return;
+        }
+        // Keys share the touches' lane, so they stay in order with the tap that focused the field.
+        if (isIos && input.type === 'type') {
+          hosts.notify(device, { type: 'stream.type', leaseId: hostId, text: input.text });
+          markActive();
+          return;
+        }
+        if (isIos && input.type === 'key') {
+          hosts.notify(device, { type: 'stream.key', leaseId: hostId, key: input.key, ...(input.modifiers ? { modifiers: input.modifiers } : {}) });
+          markActive();
           return;
         }
         const action = toAction(input);

@@ -151,6 +151,8 @@ export type BrokerMessage =
   | { type: 'stream.stop'; leaseId: string; codec: StreamCodec }
   | { type: 'stream.keyframe'; leaseId: string }
   | { type: 'stream.touch'; leaseId: string; phase: TouchPhase; point: Point }
+  | { type: 'stream.type'; leaseId: string; text: string }
+  | { type: 'stream.key'; leaseId: string; key: string; modifiers?: KeyModifier[] }
   | { type: 'tunnel.start'; id: number; leaseId: string; ports?: number[] }
   | { type: 'tunnel.stop'; leaseId: string }
   | TunnelData;

@@ -20,6 +20,7 @@ import {
   type Frame,
   type MaestroResult,
   type Op,
+  type KeyModifier,
   type TouchPhase,
   type UiNode,
 } from '@devicepool/protocol';
@@ -100,8 +101,8 @@ export class Agent {
   private buildingImage: string | null = null;
   private isFilling = false;
   private streams = new Map<string, Stream>();
-  private fingers = new Map<string, sim.Finger>();
-  private touches = new Map<string, Promise<void>>();
+  private fingers = new Set<string>();
+  private inputs = new Map<string, Promise<void>>();
   private wanted: (string | undefined)[] = [];
   private kept = new Set<string>();
   private isStopped = false;
@@ -428,6 +429,10 @@ export class Agent {
       this.tunnels.close(m.leaseId, m.conn);
     } else if (m.type === 'stream.touch') {
       this.touch(m.leaseId, m.phase, m.point);
+    } else if (m.type === 'stream.type') {
+      this.typeLive(m.leaseId, m.text);
+    } else if (m.type === 'stream.key') {
+      this.keyLive(m.leaseId, m.key, m.modifiers);
     } else if (m.type === 'stream.keyframe') {
       this.background(`Asking for a keyframe for lease ${m.leaseId}`, Promise.resolve(this.streams.get(m.leaseId)?.h264?.then((h) => h.keyframe())));
     } else if (m.type === 'lease.end') {
@@ -584,40 +589,55 @@ export class Agent {
     }
   }
 
-  /** Touches for a lease run one after another, since a move must not overtake its down. */
+  /** Live input for a lease runs one after another, so a key never overtakes the tap before it. */
+  private input(leaseId: string, run: (d: Device) => Promise<void> | void): void {
+    const next = (this.inputs.get(leaseId) ?? Promise.resolve())
+      .then(async () => {
+        const d = this.held(leaseId);
+        if (d) {
+          await run(d);
+        }
+      })
+      .catch((err: unknown) => {
+        this.fingers.delete(leaseId);
+        this.log(`Input on lease ${leaseId}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    this.inputs.set(leaseId, next);
+  }
+
   private touch(leaseId: string, phase: TouchPhase, point: [number, number]): void {
-    const run = async (): Promise<void> => {
-      const d = this.held(leaseId);
-      if (!d) {
-        return;
-      }
+    this.input(leaseId, async (d) => {
       const [x, y] = await this.toPoints(d, point);
-      const finger = this.fingers.get(leaseId);
-      if (phase === 'down') {
-        await finger?.up(x, y).catch(() => {});
-        this.fingers.set(leaseId, sim.touchDown(d.deviceId, x, y));
+      if (phase !== 'down' && !this.fingers.has(leaseId)) {
         return;
       }
-      if (!finger) {
-        return;
+      if (phase === 'up') {
+        this.fingers.delete(leaseId);
+      } else {
+        this.fingers.add(leaseId);
       }
-      if (phase === 'move') {
-        finger.move(x, y);
-        return;
-      }
-      this.fingers.delete(leaseId);
-      await finger.up(x, y);
-    };
-    const next = (this.touches.get(leaseId) ?? Promise.resolve()).then(run).catch((err: unknown) => {
-      this.fingers.delete(leaseId);
-      this.log(`Touch on lease ${leaseId}: ${err instanceof Error ? err.message : String(err)}`);
+      sim.liveInput(d.deviceId, [sim.touchEvent(x, y, phase === 'up')]);
     });
-    this.touches.set(leaseId, next);
+  }
+
+  private typeLive(leaseId: string, text: string): void {
+    this.input(leaseId, async (d) => {
+      const events = sim.textEvents(text);
+      if (events) {
+        sim.liveInput(d.deviceId, events);
+      } else {
+        await sim.typeText(d.deviceId, text);
+      }
+    });
+  }
+
+  private keyLive(leaseId: string, key: string, modifiers?: KeyModifier[]): void {
+    this.input(leaseId, (d) => sim.liveInput(d.deviceId, sim.keyEvents(key, modifiers)));
   }
 
   private async endLease(leaseId: string): Promise<void> {
     this.fingers.delete(leaseId);
-    this.touches.delete(leaseId);
+    this.inputs.delete(leaseId);
     this.deadlines.delete(leaseId);
     this.tunnels.stop(leaseId);
     this.tools.close(leaseId);
