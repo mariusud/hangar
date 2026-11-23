@@ -20,6 +20,7 @@ import {
   type Frame,
   type MaestroResult,
   type Op,
+  type TouchPhase,
   type UiNode,
 } from '@devicepool/protocol';
 import * as sim from './drivers/ios/index.ts';
@@ -99,6 +100,8 @@ export class Agent {
   private buildingImage: string | null = null;
   private isFilling = false;
   private streams = new Map<string, Stream>();
+  private fingers = new Map<string, sim.Finger>();
+  private touches = new Map<string, Promise<void>>();
   private wanted: (string | undefined)[] = [];
   private kept = new Set<string>();
   private isStopped = false;
@@ -423,6 +426,8 @@ export class Agent {
       this.tunnels.data(m.leaseId, m.conn, m.data);
     } else if (m.type === 'tunnel.close') {
       this.tunnels.close(m.leaseId, m.conn);
+    } else if (m.type === 'stream.touch') {
+      this.touch(m.leaseId, m.phase, m.point);
     } else if (m.type === 'stream.keyframe') {
       this.background(`Asking for a keyframe for lease ${m.leaseId}`, Promise.resolve(this.streams.get(m.leaseId)?.h264?.then((h) => h.keyframe())));
     } else if (m.type === 'lease.end') {
@@ -579,7 +584,40 @@ export class Agent {
     }
   }
 
+  /** Touches for a lease run one after another, since a move must not overtake its down. */
+  private touch(leaseId: string, phase: TouchPhase, point: [number, number]): void {
+    const run = async (): Promise<void> => {
+      const d = this.held(leaseId);
+      if (!d) {
+        return;
+      }
+      const [x, y] = await this.toPoints(d, point);
+      const finger = this.fingers.get(leaseId);
+      if (phase === 'down') {
+        await finger?.up(x, y).catch(() => {});
+        this.fingers.set(leaseId, sim.touchDown(d.deviceId, x, y));
+        return;
+      }
+      if (!finger) {
+        return;
+      }
+      if (phase === 'move') {
+        finger.move(x, y);
+        return;
+      }
+      this.fingers.delete(leaseId);
+      await finger.up(x, y);
+    };
+    const next = (this.touches.get(leaseId) ?? Promise.resolve()).then(run).catch((err: unknown) => {
+      this.fingers.delete(leaseId);
+      this.log(`Touch on lease ${leaseId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    this.touches.set(leaseId, next);
+  }
+
   private async endLease(leaseId: string): Promise<void> {
+    this.fingers.delete(leaseId);
+    this.touches.delete(leaseId);
     this.deadlines.delete(leaseId);
     this.tunnels.stop(leaseId);
     this.tools.close(leaseId);

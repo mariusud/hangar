@@ -63,9 +63,13 @@ function session(socket: string): ClientHttp2Session {
   return s;
 }
 
-export function send(socket: string, events: HidEvent[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const req = session(socket).request({ ':method': 'POST', ':path': '/idb.CompanionService/hid', 'content-type': 'application/grpc', te: 'trailers' });
+export type HidStream = { write: (e: HidEvent) => void; end: () => Promise<void> };
+
+/** open starts one HID call that the companion runs event by event as they arrive, so a finger
+ * can be moved while it is down and the events keep their order. */
+export function open(socket: string): HidStream {
+  const req = session(socket).request({ ':method': 'POST', ':path': '/idb.CompanionService/hid', 'content-type': 'application/grpc', te: 'trailers' });
+  const done = new Promise<void>((resolve, reject) => {
     let status: string | undefined;
     let message = '';
     req.on('response', (headers) => {
@@ -78,14 +82,30 @@ export function send(socket: string, events: HidEvent[]): Promise<void> {
     req.on('data', () => {});
     req.on('error', reject);
     req.on('close', () => (status === '0' ? resolve() : reject(new Error(message || `grpc-status ${status ?? 'missing'}`))));
-    for (const e of events) {
-      const body = encode(e);
-      const frame = Buffer.alloc(5);
-      frame.writeUInt32BE(body.length, 1);
-      req.write(Buffer.concat([frame, body]));
-    }
-    req.end();
   });
+  done.catch(() => {});
+  return {
+    write: (e) => {
+      if (req.writable) {
+        const body = encode(e);
+        const frame = Buffer.alloc(5);
+        frame.writeUInt32BE(body.length, 1);
+        req.write(Buffer.concat([frame, body]));
+      }
+    },
+    end: () => {
+      req.end();
+      return done;
+    },
+  };
+}
+
+export function send(socket: string, events: HidEvent[]): Promise<void> {
+  const s = open(socket);
+  for (const e of events) {
+    s.write(e);
+  }
+  return s.end();
 }
 
 export function unary(socket: string, method: string, body: Buffer = Buffer.alloc(0)): Promise<Buffer> {

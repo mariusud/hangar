@@ -28,11 +28,13 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
   const video = h264View(canvas, () => send({ type: 'keyframe' }));
   let lastUrl = null;
   let frames = 0;
+  let hasTouch = false;
   onStatus('Connecting…');
   ws.onmessage = (e) => {
     if (typeof e.data === 'string') {
       const m = JSON.parse(e.data);
       if (m.type === 'error') onError(m.message);
+      if (m.type === 'hello') hasTouch = m.input.includes('touch');
       return;
     }
     const bytes = new Uint8Array(e.data);
@@ -60,16 +62,26 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
     const r = screen.getBoundingClientRect();
     return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
   };
+  // With live touches the device sees each move as the browser delivers it.
   screen.addEventListener('pointerdown', (e) => {
     screen.focus();
     screen.setPointerCapture(e.pointerId);
     down = { p: norm(e), t: performance.now() };
+    if (hasTouch) send({ type: 'touch', phase: 'down', point: down.p });
+  });
+  screen.addEventListener('pointermove', (e) => {
+    if (down && hasTouch) send({ type: 'touch', phase: 'move', point: norm(e) });
   });
   screen.addEventListener('pointerup', (e) => {
     if (!down) {
       return;
     }
     const p = norm(e);
+    if (hasTouch) {
+      send({ type: 'touch', phase: 'up', point: p });
+      down = null;
+      return;
+    }
     if (Math.hypot(p[0] - down.p[0], p[1] - down.p[1]) < 0.02) send({ type: 'tap', point: p });
     else send({ type: 'swipe', from: down.p, to: p, durationMs: Math.max(100, Math.round(performance.now() - down.t)) });
     down = null;
@@ -100,7 +112,7 @@ export function mountScreen(screen, url, { onStatus = () => {}, onError = () => 
 }
 
 export function h264View(canvas, askKeyframe) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { desynchronized: true, alpha: false });
   const received = new Map();
   const stats = (window.devicepoolStats = []);
   let decoder = null;

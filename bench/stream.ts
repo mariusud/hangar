@@ -4,6 +4,7 @@ import type { Lease } from 'devicepool';
 import { start } from '../e2e/harness.ts';
 
 const TRIALS = Number(process.env.TRIALS ?? 15);
+const INPUT: 'swipe' | 'touch' = process.env.INPUT === 'touch' ? 'touch' : 'swipe';
 const BASELINE = new URL('./stream.baseline.json', import.meta.url);
 
 type Frame = { at: number; capture: number | null; bytes: number };
@@ -77,7 +78,12 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
     const before = v.frames.at(-1)?.bytes;
     const t0 = Date.now();
     const seen = v.frames.length;
-    v.send({ type: 'swipe', from: target, to: [target[0], target[1] - 0.25], durationMs: 300 });
+    const to: [number, number] = [target[0], target[1] - 0.25];
+    if (INPUT === 'touch') {
+      void drag(v.send, target, to, 300);
+    } else {
+      v.send({ type: 'swipe', from: target, to, durationMs: 300 });
+    }
     let first: Frame | undefined;
     for (let k = 0; k < 400 && !first; k++) {
       await sleep(2);
@@ -96,6 +102,10 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
     bytesPerSecond.push(motion.reduce((a, f) => a + f.bytes, 0) * 2);
   }
   v.close();
+  if (process.env.RAW) {
+    console.error(`${codec} ${INPUT} input to frame: ${input.map(Math.round).join(' ')}`);
+    console.error(`${codec} ${INPUT} input to capture: ${toCapture.map(Math.round).join(' ')}`);
+  }
   const transit = v.frames.filter((f) => f.capture !== null).map((f) => f.at - f.capture!);
   return {
     trials: input.length,
@@ -105,6 +115,22 @@ async function measure(url: string, lease: Lease, token: string, codec: 'h264' |
     motionFps: q(fps, 0.5),
     motionKBps: Math.round(q(bytesPerSecond, 0.5) / 1024),
   };
+}
+
+/** drag moves one finger like a person does: down, a move every 16 ms, then up. */
+async function drag(send: (m: unknown) => void, from: [number, number], to: [number, number], ms: number): Promise<void> {
+  send({ type: 'touch', phase: 'down', point: from });
+  const start = Date.now();
+  for (;;) {
+    await sleep(16);
+    const t = Math.min(1, (Date.now() - start) / ms);
+    const point: [number, number] = [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
+    if (t >= 1) {
+      send({ type: 'touch', phase: 'up', point });
+      return;
+    }
+    send({ type: 'touch', phase: 'move', point });
+  }
 }
 
 async function settingsHome(lease: Lease): Promise<[number, number]> {
@@ -130,12 +156,14 @@ const h = await start(1, () => {});
 try {
   const { devicepool, token } = h.client('bench');
   const lease = await devicepool.lease({}, { autoRenew: false });
+  // A pool device is normally booted well before it is leased; SETTLE_MS waits out a fresh boot.
+  await sleep(Number(process.env.SETTLE_MS ?? 0));
   const results = {
     machine: machine(),
     date: new Date().toISOString().slice(0, 10),
     h264: await measure(h.broker.url, lease, token, 'h264'),
     capture: await capture(h.broker.url, token),
-    jpeg: await measure(h.broker.url, lease, token, 'jpeg'),
+    jpeg: process.env.H264_ONLY ? null : await measure(h.broker.url, lease, token, 'jpeg'),
   };
   if (results.capture !== 'iosurface') {
     console.error(`The H.264 numbers come from the ${results.capture ?? 'unknown'} capture path, not the IOSurface helper; do not compare them with the baseline.`);

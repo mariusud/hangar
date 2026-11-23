@@ -41,6 +41,8 @@ export const NAME_PREFIX = process.env.DEVICEPOOL_SIM_PREFIX || 'devicepool-';
 // A unix socket path is limited to 103 bytes on macOS, so the directory name stays short.
 export const SOCKET_DIR = join(tmpdir(), NAME_PREFIX === 'devicepool-' ? 'dp-idb' : `idb-${createHash('sha256').update(NAME_PREFIX).digest('hex').slice(0, 6)}`);
 
+const SHIFT = 225;
+
 export async function startCompanion(udid: string): Promise<void> {
   if (companions.has(udid)) {
     return;
@@ -56,6 +58,9 @@ export async function startCompanion(udid: string): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try {
       await run('idb', ['--companion', socket, 'describe', '--json'], { maxBuffer: MAX_BUFFER });
+      // The companion connects to the simulator's HID on the first input, which takes hundreds of
+      // ms; a Shift press, which types nothing, makes it connect now instead of on the first touch.
+      await hid.send(socket, [{ press: { key: SHIFT }, up: false }, { press: { key: SHIFT }, up: true }]).catch(() => {});
       return;
     } catch {
       await new Promise((r) => setTimeout(r, 200));
@@ -307,12 +312,70 @@ export async function tap(udid: string, x: number, y: number, durationS?: number
   await sendHid(udid, press({ touch: [x, y] }, durationS));
 }
 
+export type Finger = { move: (x: number, y: number) => void; up: (x: number, y: number) => Promise<void> };
+
+/** touchDown puts a finger on the screen at device points and keeps one HID call open until it
+ * lifts, so moves reach the simulator as they happen. */
+export function touchDown(udid: string, x: number, y: number): Finger {
+  const companion = companions.get(udid);
+  if (!companion) {
+    throw new DriverError('IDB_NOT_STARTED', `No idb companion is running for ${udid}. Boot the device through Devicepool first.`);
+  }
+  const s = hid.open(companion.socket);
+  s.write({ press: { touch: [x, y] }, up: false });
+  return {
+    move: (mx, my) => s.write({ press: { touch: [mx, my] }, up: false }),
+    up: async (ux, uy) => {
+      s.write({ press: { touch: [ux, uy] }, up: true });
+      await s.end().catch((err: Error) => {
+        throw new DriverError('INPUT_FAILED', `Input to ${udid} failed: ${err.message}`);
+      });
+    },
+  };
+}
+
 export async function swipe(udid: string, from: [number, number], to: [number, number], durationS: number): Promise<void> {
   await sendHid(udid, [{ swipe: { from, to, durationS } }]);
 }
 
+/** HID codes that are the same on common keyboard layouts; other text goes through idb's text input. */
+function hidCode(c: string): { code: number; isShifted: boolean } | null {
+  if (/^[a-z]$/.test(c)) {
+    return { code: 4 + c.charCodeAt(0) - 97, isShifted: false };
+  }
+  if (/^[A-Z]$/.test(c)) {
+    return { code: 4 + c.charCodeAt(0) - 65, isShifted: true };
+  }
+  if (/^[1-9]$/.test(c)) {
+    return { code: 30 + Number(c) - 1, isShifted: false };
+  }
+  if (c === '0') {
+    return { code: 39, isShifted: false };
+  }
+  if (c === ' ') {
+    return { code: 44, isShifted: false };
+  }
+  if (c === '\n') {
+    return { code: 40, isShifted: false };
+  }
+  return null;
+}
+
 export async function typeText(udid: string, text: string): Promise<void> {
-  await idb(udid, 'ui', 'text', '--', text);
+  const codes = [...text].map(hidCode);
+  if (codes.some((c) => c === null)) {
+    await idb(udid, 'ui', 'text', '--', text);
+    return;
+  }
+  const events: hid.HidEvent[] = [];
+  for (const c of codes) {
+    if (c?.isShifted) {
+      events.push({ press: { key: MODIFIERS.shift }, up: false }, ...press({ key: c.code }), { press: { key: MODIFIERS.shift }, up: true });
+    } else if (c) {
+      events.push(...press({ key: c.code }));
+    }
+  }
+  await sendHid(udid, events);
 }
 
 const KEYS: Record<string, number> = {

@@ -391,6 +391,14 @@ export class Leases {
     return this.end(this.get(p, id), 'released', p.accountId);
   }
 
+  /** markActive counts live input from the holder's stream as use, like a device action does. */
+  markActive(p: Principal, id: string): void {
+    const lease = this.db.getLease(id);
+    if (lease?.state === 'active' && lease.principalId === p.accountId) {
+      this.db.updateLease(m.touch(lease, this.now()));
+    }
+  }
+
   async op(p: Principal, id: string, sent: Op): Promise<{ result?: unknown; binary?: Buffer }> {
     const body: Op = sent.op === 'actions' ? { ...sent, actions: normalizeActions(sent.actions) } : sent;
     const found = this.get(p, id);

@@ -52,6 +52,9 @@ export type JoinOptions<A extends HostAgent> = {
   make: (send: (m: AgentMessage) => void, brokerUrl: string) => A;
 };
 
+/** Bytes waiting on the broker link above which video frames are dropped. */
+const FRAME_BACKLOG = 512 * 1024;
+
 export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{ agent: A; stop: () => Promise<void> }> {
   const log = opts.log ?? console.log;
   const base = brokerAddress(opts.url);
@@ -62,8 +65,36 @@ export async function join<A extends HostAgent>(opts: JoinOptions<A>): Promise<{
   const now = opts.now ?? Date.now;
   const retries = retryNotifier(log, now);
 
+  const needsKey = new Set<string>();
+  const keyAskedAt = new Map<string, number>();
+  // Never queue video: on a slow link, drop frames until the socket drains, then resume from a keyframe.
+  const isStale = (m: AgentMessage, socket: WebSocket): boolean => {
+    if (m.type !== 'stream.frame') {
+      return false;
+    }
+    const isKey = m.codec === 'jpeg' || ((m.data[0] ?? 0) & 1) === 1;
+    if (socket.bufferedAmount > FRAME_BACKLOG) {
+      if (m.codec === 'h264') {
+        needsKey.add(m.leaseId);
+      }
+      return true;
+    }
+    if (!needsKey.has(m.leaseId)) {
+      return false;
+    }
+    if (isKey) {
+      needsKey.delete(m.leaseId);
+      return false;
+    }
+    if (now() - (keyAskedAt.get(m.leaseId) ?? 0) > 250) {
+      keyAskedAt.set(m.leaseId, now());
+      agent.receive({ type: 'stream.keyframe', leaseId: m.leaseId });
+    }
+    return true;
+  };
+
   const agent = opts.make((m) => {
-    if (ws?.readyState === WebSocket.OPEN) {
+    if (ws?.readyState === WebSocket.OPEN && !isStale(m, ws)) {
       ws.send(encodeMessage(m));
     }
   }, base);

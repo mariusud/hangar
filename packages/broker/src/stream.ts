@@ -2,7 +2,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { Action, KeyModifier, Point, StreamCodec, ViewerInput } from '@devicepool/protocol';
+import { isAndroid, toPoint, type Action, type KeyModifier, type Point, type StreamCodec, type TouchPhase, type ViewerInput } from '@devicepool/protocol';
 import * as auth from './auth.ts';
 import type { Db } from './db.ts';
 import type { Hosts } from './hosts.ts';
@@ -12,6 +12,10 @@ import { ApiError } from './leases/service.ts';
 
 const TYPE = { jpeg: 1, h264: 2 } as const;
 const BACKLOG = 1024 * 1024;
+/** Live touches mark the lease as in use at most this often, so a drag is not a database write per move. */
+const ACTIVITY_MS = 1000;
+/** A viewer that misses a pong for this long is closed, so a dead connection does not hold an encoder. */
+const HEARTBEAT_MS = 15_000;
 
 type Viewer = { ws: WebSocket; codec: StreamCodec; needsKey: boolean };
 
@@ -25,6 +29,18 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
   const viewers = new Map<string, Set<Viewer>>();
   const devices = new Map<string, string>();
   const lastKeyRequest = new Map<string, number>();
+  const answered = new WeakSet<WebSocket>();
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (!answered.has(ws)) {
+        ws.terminate();
+        continue;
+      }
+      answered.delete(ws);
+      ws.ping();
+    }
+  }, HEARTBEAT_MS);
+  heartbeat.unref();
 
   const count = (leaseId: string, codec: StreamCodec): number => [...(viewers.get(leaseId) ?? [])].filter((v) => v.codec === codec).length;
 
@@ -132,11 +148,28 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
     const device = deviceId;
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.binaryType = 'nodebuffer';
+      answered.add(ws);
+      ws.on('pong', () => answered.add(ws));
       const set = viewers.get(hostId) ?? new Set<Viewer>();
       viewers.set(hostId, set);
       devices.set(hostId, device);
       const viewer: Viewer = { ws, codec, needsKey: true };
       set.add(viewer);
+      const isIos = !isAndroid(hosts.devices().find((d) => d.deviceId === device)?.platform);
+      if (isIos) {
+        ws.send(JSON.stringify({ type: 'hello', input: ['touch'] }));
+      }
+      let lastTouch: Point | null = null;
+      let activeAt = 0;
+      const touch = (phase: TouchPhase, point: Point): void => {
+        lastTouch = phase === 'up' ? null : point;
+        hosts.notify(device, { type: 'stream.touch', leaseId: hostId, phase, point });
+        const now = Date.now();
+        if (now - activeAt >= ACTIVITY_MS) {
+          activeAt = now;
+          leases.markActive(principal, leaseId);
+        }
+      };
       if (count(hostId, codec) === 1) {
         hosts.notify(device, { type: 'stream.start', leaseId: hostId, codec });
       } else if (codec === 'h264') {
@@ -156,6 +189,12 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
           askKeyframe(hostId);
           return;
         }
+        if (input.type === 'touch') {
+          if (isIos) {
+            touch(input.phase, toPoint(input.point));
+          }
+          return;
+        }
         const action = toAction(input);
         if (!action) {
           return;
@@ -166,6 +205,9 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
       });
 
       ws.on('close', () => {
+        if (lastTouch) {
+          touch('up', lastTouch);
+        }
         set.delete(viewer);
         if (count(hostId, viewer.codec) === 0 && viewers.has(hostId)) {
           hosts.notify(device, { type: 'stream.stop', leaseId: hostId, codec: viewer.codec });
@@ -181,6 +223,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
   return {
     upgrade,
     close: () => {
+      clearInterval(heartbeat);
       for (const ws of wss.clients) {
         ws.terminate();
       }
@@ -190,6 +233,7 @@ export function attachStreams(db: Db, hosts: Hosts, leases: Leases, metrics: Met
 
 const isPoint = (v: unknown): v is Point => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n));
 const isString = (v: unknown): v is string => typeof v === 'string';
+const isPhase = (v: unknown): v is TouchPhase => v === 'down' || v === 'move' || v === 'up';
 const isModifier = (v: unknown): v is KeyModifier => v === 'command' || v === 'shift' || v === 'option' || v === 'control';
 const isButton = (v: unknown): v is 'home' | 'lock' | 'siri' => v === 'home' || v === 'lock' || v === 'siri';
 
@@ -209,6 +253,8 @@ export function parseViewerInput(text: string): ViewerInput | null {
       return { type: 'keyframe' };
     case 'tap':
       return isPoint(i.point) ? { type: 'tap', point: i.point } : null;
+    case 'touch':
+      return isPoint(i.point) && isPhase(i.phase) ? { type: 'touch', phase: i.phase, point: i.point } : null;
     case 'swipe':
       if (!isPoint(i.from) || !isPoint(i.to) || (i.durationMs !== undefined && typeof i.durationMs !== 'number')) {
         return null;

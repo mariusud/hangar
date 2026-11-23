@@ -150,6 +150,7 @@ export type BrokerMessage =
   | { type: 'stream.start'; leaseId: string; codec: StreamCodec }
   | { type: 'stream.stop'; leaseId: string; codec: StreamCodec }
   | { type: 'stream.keyframe'; leaseId: string }
+  | { type: 'stream.touch'; leaseId: string; phase: TouchPhase; point: Point }
   | { type: 'tunnel.start'; id: number; leaseId: string; ports?: number[] }
   | { type: 'tunnel.stop'; leaseId: string }
   | TunnelData;
@@ -194,8 +195,12 @@ export type AgentMessage =
 
 export type ErrorBody = { error: { code: string; message: string; hint?: string } };
 
+/** One finger on the screen, sent as it moves: down, any number of moves, then up. */
+export type TouchPhase = 'down' | 'move' | 'up';
+
 export type ViewerInput =
   | { type: 'tap'; point: Point }
+  | { type: 'touch'; phase: TouchPhase; point: Point }
   | { type: 'swipe'; from: Point; to: Point; durationMs?: number }
   | { type: 'type'; text: string }
   | { type: 'key'; key: string; modifiers?: KeyModifier[] }

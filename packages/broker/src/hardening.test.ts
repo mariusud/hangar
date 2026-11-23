@@ -230,7 +230,8 @@ test('viewer input of the wrong shape is dropped', () => {
   assert.deepEqual(parseViewerInput('{"type":"tap","point":[0.5,0.5]}'), { type: 'tap', point: [0.5, 0.5] });
   assert.deepEqual(parseViewerInput('{"type":"key","key":"a","modifiers":["shift"]}'), { type: 'key', key: 'a', modifiers: ['shift'] });
   assert.deepEqual(parseViewerInput('{"type":"keyframe"}'), { type: 'keyframe' });
-  for (const bad of ['nope', 'null', '5', '[]', '{}', '{"type":"tap"}', '{"type":"tap","point":["a",1]}', '{"type":"tap","point":[1]}', '{"type":"swipe","from":[0,0],"to":[1,1],"durationMs":"x"}', '{"type":"type","text":5}', '{"type":"key","key":"a","modifiers":["meta"]}', '{"type":"button","button":"power"}', '{"type":"nuke"}']) {
+  assert.deepEqual(parseViewerInput('{"type":"touch","phase":"move","point":[0.2,0.8]}'), { type: 'touch', phase: 'move', point: [0.2, 0.8] });
+  for (const bad of ['nope', 'null', '5', '[]', '{}', '{"type":"tap"}', '{"type":"tap","point":["a",1]}', '{"type":"tap","point":[1]}', '{"type":"swipe","from":[0,0],"to":[1,1],"durationMs":"x"}', '{"type":"type","text":5}', '{"type":"key","key":"a","modifiers":["meta"]}', '{"type":"button","button":"power"}', '{"type":"touch","phase":"hover","point":[0,0]}', '{"type":"touch","phase":"down"}', '{"type":"nuke"}']) {
     assert.equal(parseViewerInput(bad), null, bad);
   }
 });

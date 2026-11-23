@@ -183,8 +183,9 @@ do {
   fail("UNKNOWN", "\(error)")
 }
 
-let out = DispatchQueue(label: "out")
-let work = DispatchQueue(label: "work")
+// A frame waiting for a core is latency the viewer sees.
+let out = DispatchQueue(label: "out", qos: .userInteractive)
+let work = DispatchQueue(label: "work", qos: .userInteractive)
 let frameInterval = 1.0 / Double(fps)
 
 require(display, NSSelectorFromString("framebufferSurface"))
@@ -380,6 +381,7 @@ func setUp(width: Int, height: Int) {
   }
   let props: [CFString: Any] = [
     kVTCompressionPropertyKey_RealTime: true,
+    kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality: true,
     kVTCompressionPropertyKey_AllowFrameReordering: false,
     kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_ConstrainedHigh_AutoLevel,
     kVTCompressionPropertyKey_AverageBitRate: bitrate,
